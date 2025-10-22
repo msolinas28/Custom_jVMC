@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import jax.random as random
 import numpy as np
 from jax import vmap
+import time
 
 import jVMC.mpi_wrapper as mpi
 from jVMC.nets.sym_wrapper import SymNet
@@ -26,13 +27,10 @@ def propose_POVM_outcome(key, s, info):
     update = (s[idx] + random.randint(key, (1,), 0, 3) % 4)
     return s.at[idx].set(update)
 
-
+# Changed
 def propose_spin_flip_Z2(key, s, info):
     idxKey, flipKey = jax.random.split(key)
-    idx = random.randint(idxKey, (1,), 0, s.size)[0]
-    idx = jnp.unravel_index(idx, s.shape)
-    update = (s[idx] + 1) % 2
-    s = s.at[idx].set(update)
+    s = propose_spin_flip(idxKey, s, info)
     # On average, do a global spin flip every 30 updates to
     # reflect Z_2 symmetry
     doFlip = random.randint(flipKey, (1,), 0, 5)[0]
@@ -63,6 +61,19 @@ def propose_spin_flip_zeroMag(key, s, info):
     doFlip = random.randint(flipKey, (1,), 0, 5)[0]
     return jax.lax.cond(doFlip == 0, lambda x: 1 - x, lambda x: x, s)
 
+def propose_RWM(key, s, info):
+    """
+    Proposal move for random walk metropolis (RWM).
+    
+    Args:
+        key: An instance of ``jax.random.PRNGKey``.
+        s: The configuration.
+        Info: A dictonary containing the variance Σ^2 for the random displacement.
+
+    Return: 
+        s': The new proposed configuration. 
+    """
+    pass
 
 class MCSampler:
     """A sampler class.
@@ -100,13 +111,17 @@ class MCSampler:
         ``mu`` parameter must be set to 1.0, to sample the unchanged POVM distribution.
     """
 
-    def __init__(self, net, sampleShape, key, updateProposer=None, numChains=1, updateProposerArg=None,
-                 numSamples=100, thermalizationSweeps=10, sweepSteps=10, initState=None, mu=2, logProbFactor=0.5):
+    def __init__(self, net, sampleShape, key=None, updateProposer=None, numChains=1, updateProposerArg=None,
+                 numSamples=100, thermalizationSweeps=None, sweepSteps=10, initState=None, mu=2, logProbFactor=0.5):
         """Initializes the MCSampler class.
 
         """
 
-        self.sampleShape = sampleShape
+        # Changed
+        if isinstance(sampleShape, tuple):
+            self.sampleShape = sampleShape
+        else: 
+            self.sampleShape = (sampleShape,)
 
         self.net = net
         if (not net.is_generator) and (updateProposer is None):
@@ -115,9 +130,9 @@ class MCSampler:
         if isinstance(self.net.net, SymNet):
             self.orbit = self.net.net.orbit.orbit
 
-        stateShape = (global_defs.device_count(), numChains) + sampleShape
+        stateShape = (global_defs.device_count(), numChains) + self.sampleShape
         if initState is None:
-            initState = jnp.zeros(sampleShape, dtype=np.int32)
+            initState = jnp.zeros(self.sampleShape, dtype=np.int32)
         self.states = jnp.stack([initState] * (global_defs.device_count() * numChains), axis=0).reshape(stateShape)
 
         # Make sure that net is initialized
@@ -131,12 +146,12 @@ class MCSampler:
         self.updateProposer = updateProposer
         self.updateProposerArg = updateProposerArg
 
-        if isinstance(key,jax.Array):
-            self.key = key
-        else:
-            self.key = jax.random.PRNGKey(key)
-        self.key = jax.random.split(self.key, mpi.commSize)[mpi.rank]
-        self.key = jax.random.split(self.key, global_defs.device_count())
+        # CHANGED
+        self.key = key
+
+        # CHANGED
+        if thermalizationSweeps is None:
+            thermalizationSweeps = sampleShape[0]
         self.thermalizationSweeps = thermalizationSweeps
         self.sweepSteps = sweepSteps
         self.numSamples = numSamples
@@ -171,6 +186,7 @@ class MCSampler:
 
         self.numSamples = N
 
+    # TODO: Now can be deleted
     def set_random_key(self, key):
         """Set key for pseudo random number generator.
 
@@ -179,6 +195,29 @@ class MCSampler:
         """
 
         self.key = jax.random.split(key, global_defs.device_count())
+
+    # CHANGED
+    @property
+    def key(self):
+        return self._key
+    
+    def _initialize_key(self, value):
+        if value is None: 
+            k = jax.random.PRNGKey(int(time.time()))
+        elif isinstance(value, jax.Array):
+            k = value
+        else:
+            k = jax.random.PRNGKey(value)
+
+        k = jax.random.split(k, mpi.commSize)[mpi.rank]
+        return jax.random.split(k, global_defs.device_count())
+
+    @key.setter
+    def key(self, value):
+        if isinstance(value, jax.Array):
+            self._key = value
+        else:
+            self._key = self._initialize_key(value)
 
     def get_last_number_of_samples(self):
         """Return last number of samples.
