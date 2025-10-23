@@ -61,20 +61,6 @@ def propose_spin_flip_zeroMag(key, s, info):
     doFlip = random.randint(flipKey, (1,), 0, 5)[0]
     return jax.lax.cond(doFlip == 0, lambda x: 1 - x, lambda x: x, s)
 
-def propose_RWM(key, s, info):
-    """
-    Proposal move for random walk metropolis (RWM).
-    
-    Args:
-        key: An instance of ``jax.random.PRNGKey``.
-        s: The configuration.
-        Info: A dictonary containing the variance Σ^2 for the random displacement.
-
-    Return: 
-        s': The new proposed configuration. 
-    """
-    pass
-
 class MCSampler:
     """A sampler class.
 
