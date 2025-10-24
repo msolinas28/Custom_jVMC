@@ -1,7 +1,9 @@
 import jax
+import jax.numpy as jnp
 from sampler import MCSampler
 
-from propose_cont import AbstractPropose
+import jVMC.global_defs as global_defs
+from jVMC.propose_cont import AbstractPropose
     
 class MCSamplerCont(MCSampler):
     def __init__(self, net, key=None, updateProposer=None, numChains=1, 
@@ -14,6 +16,11 @@ class MCSamplerCont(MCSampler):
 
         super().__init__(net, sampleShape, key, updateProposer, numChains, updateProposerArg, 
                         numSamples, thermalizationSweeps, sweepSteps, initState, mu, logProbFactor)
+        
+        stateShape = (global_defs.device_count(), numChains) + self.sampleShape
+        if initState is None:
+            initState = jnp.zeros(self.sampleShape, dtype=jnp.float64) 
+        self.states = jnp.stack([initState] * (global_defs.device_count() * numChains), axis=0).reshape(stateShape)
 
     def _get_samples(self, params, numSamples,
                      thermSweeps, sweepSteps,

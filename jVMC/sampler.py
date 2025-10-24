@@ -137,7 +137,7 @@ class MCSampler:
 
         # CHANGED
         if thermalizationSweeps is None:
-            thermalizationSweeps = sampleShape[0]
+            thermalizationSweeps = sampleShape[-1]
         self.thermalizationSweeps = thermalizationSweeps
         self.sweepSteps = sweepSteps
         self.numSamples = numSamples
