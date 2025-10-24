@@ -1,6 +1,9 @@
 import jax.numpy as jnp
+import jax
+from abc import ABC, abstractmethod
+import jVMC
 
-class Geometry():
+class AbstractGeometry(ABC):
     def __init__(self, n_particles, n_dim, PBC=True, extent=None):
         self._n_particles = n_particles
         self._n_dim = n_dim 
@@ -31,6 +34,43 @@ class Geometry():
     def extent(self):
         return self._extent
     
+    @abstractmethod
+    def domain(self):
+        """
+        Return the domain of the geometry.
+        """
+        pass
+    
+    @abstractmethod
+    def apply_PBC(self, x):
+        """
+        Apply PBC where needed given the geometry of the system.
+        """
+        pass
+
+    @abstractmethod
+    def uniform_populate(self, key, shape):
+        """
+        Generate configuration of the particles with positions sampled from a uniform distribution.
+        """
+        pass
+
+class HyperRectangle(AbstractGeometry):
     @property
-    def modulus(self):
-        return jnp.where(jnp.array(self.PBC), jnp.array(self.extent), jnp.inf)
+    def domain(self):
+        ext = jnp.array(self.extent)
+
+        return jnp.stack([-ext / 2, ext / 2], axis=1)
+    
+    def apply_PBC(self, x):
+        extent = jnp.array(self.extent)
+        PBC = jnp.array(self.PBC, dtype=jnp.bool_)
+
+        return jnp.where(PBC, ((x + extent/2) % extent) - extent/2, x)
+    
+    def uniform_populate(self, key, shape, dtype=jnp.float64):
+        low = self.domain[:, 0]
+        high = self.domain[:, 1]
+        samples = jax.random.uniform(jVMC.util.key_gen.format_key(key), shape, dtype=dtype)
+        
+        return low + samples * (high - low)

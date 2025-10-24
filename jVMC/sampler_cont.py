@@ -18,8 +18,10 @@ class MCSamplerCont(MCSampler):
                         numSamples, thermalizationSweeps, sweepSteps, initState, mu, logProbFactor)
         
         stateShape = (global_defs.device_count(), numChains) + self.sampleShape
+        self.key, key_init = jax.random.split(key, 2) 
         if initState is None:
-            initState = jnp.zeros(self.sampleShape, dtype=jnp.float64) 
+            # TODO: decide how to initialize
+            initState = self.updateProposer.geometry.uniform_populate(key_init, self.sampleShape, dtype=jnp.float64)
         self.states = jnp.stack([initState] * (global_defs.device_count() * numChains), axis=0).reshape(stateShape)
 
     def _get_samples(self, params, numSamples,

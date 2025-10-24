@@ -84,7 +84,7 @@ class ProposeRWM(AbstractPropose):
             s': The new proposed configuration. 
         """
         dx = (sigma * jax.random.normal(key, s.shape, dtype=s.dtype))   
-        return ((s + dx) % self.geometry.modulus).astype(s.dtype)
+        return self.geometry.apply_PBC(s + dx)
     
     def _get_new_sigma(self, sigma, numAccepted, numProposed):
         acc_rate = numAccepted / jnp.maximum(numProposed, 1)
