@@ -1,17 +1,6 @@
 import jax
 from sampler import MCSampler
-import jax.numpy as jnp
-import jax.random as random
-import numpy as np
-from jax import vmap
-import time
 
-import jVMC.mpi_wrapper as mpi
-from jVMC.nets.sym_wrapper import SymNet
-
-from functools import partial
-
-import jVMC.global_defs as global_defs
 from propose_cont import AbstractPropose
     
 class MCSamplerCont(MCSampler):
