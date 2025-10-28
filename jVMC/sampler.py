@@ -4,62 +4,42 @@ import jax.random as random
 import numpy as np
 from jax import vmap
 import time
-
-import jVMC.mpi_wrapper as mpi
-from jVMC.nets.sym_wrapper import SymNet
-
 from functools import partial
 
 import jVMC.global_defs as global_defs
+import jVMC.mpi_wrapper as mpi
+from jVMC.nets.sym_wrapper import SymNet
+from jVMC.propose import AbstractProposeCont
+from jVMC.util.key_gen import format_key
 
-
-def propose_spin_flip(key, s, info):
-    idx = random.randint(key, (1,), 0, s.size)[0]
-    idx = jnp.unravel_index(idx, s.shape)
-    update = (s[idx] + 1) % 2
-    return s.at[idx].set(update)
-
-
-def propose_POVM_outcome(key, s, info):
-    key, subkey = random.split(key)
-    idx = random.randint(subkey, (1,), 0, s.size)[0]
-    idx = jnp.unravel_index(idx, s.shape)
-    update = (s[idx] + random.randint(key, (1,), 0, 3) % 4)
-    return s.at[idx].set(update)
-
-# Changed
-def propose_spin_flip_Z2(key, s, info):
-    idxKey, flipKey = jax.random.split(key)
-    s = propose_spin_flip(idxKey, s, info)
-    # On average, do a global spin flip every 30 updates to
-    # reflect Z_2 symmetry
-    doFlip = random.randint(flipKey, (1,), 0, 5)[0]
-    return jax.lax.cond(doFlip == 0, lambda x: 1 - x, lambda x: x, s)
-
-
-def propose_spin_flip_zeroMag(key, s, info):
-    # propose spin flips that stay in the zero magnetization sector
-
-    idxKeyUp, idxKeyDown, flipKey = jax.random.split(key, num=3)
-
-    # can't use jnp.where because then it is not jit-compilable
-    # find indices based on cumsum
-    bound_up = jax.random.randint(idxKeyUp, (1,), 1, s.shape[0] * s.shape[1] / 2 + 1)
-    bound_down = jax.random.randint(idxKeyDown, (1,), 1, s.shape[0] * s.shape[1] / 2 + 1)
-
-    id_up = jnp.searchsorted(jnp.cumsum(s), bound_up)
-    id_down = jnp.searchsorted(jnp.cumsum(1 - s), bound_down)
-
-    idx_up = jnp.unravel_index(id_up, s.shape)
-    idx_down = jnp.unravel_index(id_down, s.shape)
-
-    s = s.at[idx_up[0], idx_up[1]].set(0)
-    s = s.at[idx_down[0], idx_down[1]].set(1)
-
-    # On average, do a global spin flip every 30 updates to
-    # reflect Z_2 symmetry
-    doFlip = random.randint(flipKey, (1,), 0, 5)[0]
-    return jax.lax.cond(doFlip == 0, lambda x: 1 - x, lambda x: x, s)
+# Deprecated import 
+import warnings
+from jVMC.propose import (
+    propose_POVM_outcome as _propose_POVM_outcome,
+    propose_spin_flip as _propose_spin_flip,
+    propose_spin_flip_Z2 as _propose_spin_flip_Z2,
+    propose_spin_flip_zeroMag as _propose_spin_flip_zeroMag,
+)
+_deprecated_funcs = {
+    "propose_POVM_outcome": _propose_POVM_outcome,
+    "propose_spin_flip": _propose_spin_flip,
+    "propose_spin_flip_Z2": _propose_spin_flip_Z2,
+    "propose_spin_flip_zeroMag": _propose_spin_flip_zeroMag,
+}
+def _warn_deprecated(name):
+    warnings.warn(
+        f"Importing `{name}` from jVMC.sampler is deprecated. "
+        f"Please import it from jVMC.propose instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+def __getattr__(name):
+    if name in _deprecated_funcs:
+        _warn_deprecated(name)
+        return _deprecated_funcs[name]
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+__all__ = list(_deprecated_funcs.keys())
+# End deprecated import
 
 class MCSampler:
     """A sampler class.
@@ -98,9 +78,8 @@ class MCSampler:
     """
 
     def __init__(self, net, sampleShape, key=None, updateProposer=None, numChains=1, updateProposerArg=None,
-                 numSamples=100, thermalizationSweeps=None, sweepSteps=10, initState=None, mu=2, logProbFactor=0.5):
+                 numSamples=100, thermalizationSweeps=10, sweepSteps=None, initState=None, mu=2, logProbFactor=0.5):
         """Initializes the MCSampler class.
-
         """
 
         # Changed
@@ -134,12 +113,14 @@ class MCSampler:
 
         # CHANGED
         self.key = key
+        self.key = jax.random.split(self.key, mpi.commSize)[mpi.rank]
+        self.key = jax.random.split(self.key, global_defs.device_count())
 
         # CHANGED
-        if thermalizationSweeps is None:
-            thermalizationSweeps = sampleShape[-1]
-        self.thermalizationSweeps = thermalizationSweeps
+        if sweepSteps is None:
+            sweepSteps = sampleShape[-1]
         self.sweepSteps = sweepSteps
+        self.thermalizationSweeps = thermalizationSweeps
         self.numSamples = numSamples
 
         shape = (global_defs.device_count(),) + (1,)
@@ -187,23 +168,9 @@ class MCSampler:
     def key(self):
         return self._key
     
-    def _initialize_key(self, value):
-        if value is None: 
-            k = jax.random.PRNGKey(int(time.time()))
-        elif isinstance(value, jax.Array):
-            k = value
-        else:
-            k = jax.random.PRNGKey(value)
-
-        k = jax.random.split(k, mpi.commSize)[mpi.rank]
-        return jax.random.split(k, global_defs.device_count())
-
     @key.setter
     def key(self, value):
-        if isinstance(value, jax.Array):
-            self._key = value
-        else:
-            self._key = self._initialize_key(value)
+        self._key = format_key(value)
 
     def get_last_number_of_samples(self):
         """Return last number of samples.
@@ -331,8 +298,9 @@ class MCSampler:
                      sampleShape, sweepFunction=None):
 
         # Thermalize
-        states, logAccProb, key, numProposed, numAccepted =\
-            sweepFunction(states, logAccProb, key, numProposed, numAccepted, params, thermSweeps * sweepSteps, updateProposer, updateProposerArg)
+        if self.thermalizationSweeps is not None:
+            states, logAccProb, key, numProposed, numAccepted =\
+                sweepFunction(states, logAccProb, key, numProposed, numAccepted, params, thermSweeps * sweepSteps, updateProposer, updateProposerArg)
 
         # Collect samples
         def scan_fun(c, x):
@@ -354,7 +322,7 @@ class MCSampler:
             # Generate update proposals
             newKeys = random.split(carry[2], carry[0].shape[0] + 1)
             carryKey = newKeys[-1]
-            newStates = vmap(updateProposer, in_axes=(0, 0, None))(newKeys[:len(carry[0])], carry[0], updateProposerArg)
+            newStates = vmap(updateProposer, in_axes=(0, 0, None))(newKeys[:len(carry[0])], carry[0], updateProposerArg) # Might need to change it aswell with in_axes[3]=0
 
             # Compute acceptance probabilities
             newLogAccProb = jax.vmap(lambda y: self.mu * jnp.real(net(params, y)), in_axes=(0,))(newStates)
@@ -405,7 +373,6 @@ class MCSampler:
         return jnp.array([0.])
 
 # ** end class Sampler
-
 
 class ExactSampler:
     """Class for full enumeration of basis states.
@@ -557,3 +524,93 @@ class ExactSampler:
         return jnp.inf
 
 # ** end class ExactSampler
+
+class MCSamplerCont(MCSampler):
+    def __init__(self, net, key=None, updateProposer=None, numChains=1, 
+                numSamples=2**12, thermalizationSweeps=10, sweepSteps=None, initState=None, mu=2, logProbFactor=0.5):
+        
+        if not isinstance(updateProposer, AbstractProposeCont):
+            raise ValueError(f'The argument \'updateProposer\' has to be an istance of the class \'jVMC.propose.AbstractProposeCont\'.')
+        sampleShape = (updateProposer.geometry.n_particles, updateProposer.geometry.n_dim)
+        updateProposerArg = updateProposer.updateProposerArg
+
+        if sweepSteps is None:
+            sweepSteps = updateProposer.geometry.n_particles
+
+        super().__init__(net, sampleShape, key, updateProposer, numChains, updateProposerArg, 
+                        numSamples, thermalizationSweeps, sweepSteps, initState, mu, logProbFactor)
+        
+        stateShape = (global_defs.device_count(), numChains) + self.sampleShape
+        key_init = format_key(key)
+        if initState is None:
+            # TODO: decide how to initialize
+            initState = self.updateProposer.geometry.uniform_populate(key_init, self.sampleShape, dtype=jnp.float64)
+        # TODO: All the chains are initialized in the same way... why?
+        self.states = jnp.stack([initState] * (global_defs.device_count() * numChains), axis=0).reshape(stateShape)
+
+    def _get_samples_mcmc(self, params, numSamples, multipleOf=1):
+
+        tmpP = None
+        if params is not None:
+            tmpP = self.net.params
+            self.net.set_parameters(params)
+
+        net, params = self.net.get_sampler_net()
+
+        if tmpP is not None:
+            self.net.params = tmpP        
+
+        # Initialize sampling stuff
+        self._mc_init(params)
+
+        numSamples, self.globNumSamples = mpi.distribute_sampling(numSamples, localDevices=global_defs.device_count(), numChainsPerDevice=np.lcm(self.numChains, multipleOf))
+        numSamplesStr = str(numSamples)
+
+        # check whether _get_samples is already compiled for given number of samples
+        if not numSamplesStr in self._get_samples_jitd:
+            self._get_samples_jitd[numSamplesStr] = global_defs.pmap_for_my_devices(partial(self._get_samples, sweepFunction=partial(self._sweep, net=net)),
+                                                                                    static_broadcasted_argnums=(1, 2, 3, 9, 11),
+                                                                                    in_axes=(None, None, None, None, 0, 0, 0, 0, 0, None, None, None))
+
+        (self.states, self.logAccProb, self.key, self.numProposed, self.numAccepted), configs =\
+            self._get_samples_jitd[numSamplesStr](params, numSamples, self.thermalizationSweeps, self.sweepSteps,
+                                                  self.states, self.logAccProb, self.key, self.numProposed, self.numAccepted,
+                                                  self.updateProposer, self.updateProposerArg, self.sampleShape)
+
+        tmpP = self.net.params
+        self.net.params = params["params"]
+        coeffs = self.net(configs)
+        self.net.params = tmpP
+
+        # return configs, None
+        return configs, coeffs
+
+    def _get_samples(self, params, numSamples,
+                     thermSweeps, sweepSteps,
+                     states, logAccProb, key,
+                     numProposed, numAccepted,
+                     updateProposer, updateProposerArg,
+                     sampleShape, sweepFunction=None):
+
+        # Thermalize
+        if self.thermalizationSweeps is not None:
+            if updateProposer._use_custom_thermalization:
+                states, logAccProb, key, numProposed, numAccepted, updateProposerArg =\
+                    updateProposer._custom_therm_fun(states, logAccProb, key, numProposed, numAccepted, params, sweepSteps, thermSweeps, sweepFunction, updateProposerArg)
+                updateProposer.updateProposerArg = self.updateProposerArg = updateProposerArg
+            else:
+                states, logAccProb, key, numProposed, numAccepted =\
+                    sweepFunction(states, logAccProb, key, numProposed, numAccepted, params, thermSweeps * sweepSteps, updateProposer, updateProposerArg)
+
+        # Collect samples
+        def scan_fun(c, x):
+
+            states, logAccProb, key, numProposed, numAccepted =\
+                sweepFunction(c[0], c[1], c[2], c[3], c[4], params, sweepSteps, updateProposer, updateProposerArg)
+
+            return (states, logAccProb, key, numProposed, numAccepted), states
+
+        meta, configs = jax.lax.scan(scan_fun, (states, logAccProb, key, numProposed, numAccepted), None, length=numSamples)
+
+        # return meta, configs.reshape((configs.shape[0]*configs.shape[1], -1))
+        return meta, configs.reshape((configs.shape[0] * configs.shape[1],) + sampleShape)

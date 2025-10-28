@@ -70,7 +70,6 @@ class HyperRectangle(AbstractGeometry):
     
     def uniform_populate(self, key, shape, dtype=jnp.float64):
         low = self.domain[:, 0]
-        high = self.domain[:, 1]
         samples = jax.random.uniform(jVMC.util.key_gen.format_key(key), shape, dtype=dtype)
         
-        return low + samples * (high - low)
+        return low + samples * jnp.array(self.extent)
