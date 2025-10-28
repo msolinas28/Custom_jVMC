@@ -123,6 +123,7 @@ class MCSampler:
         self.thermalizationSweeps = thermalizationSweeps
         self.numSamples = numSamples
 
+        # TODO: this is already in self.mc_init()
         shape = (global_defs.device_count(),) + (1,)
         self.numProposed = jnp.zeros(shape, dtype=np.int64)
         self.numAccepted = jnp.zeros(shape, dtype=np.int64)
