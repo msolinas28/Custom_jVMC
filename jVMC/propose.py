@@ -158,7 +158,8 @@ class RWM(AbstractProposeCont):
             states, logAccProb, key, numProposed, numAccepted = sweepFunction(states, logAccProb, key, numProposed, numAccepted,
                                       params, sweepSteps, self, sigma)
             acceptance_rate = (numAccepted - tmp_numAccepted) / jnp.maximum(numProposed, 1)
-            new_sigma = self._get_new_sigma(sigma, acceptance_rate)
+            # Paralellize across chains
+            new_sigma = jax.vmap(self._get_new_sigma)(sigma, acceptance_rate)
 
             return (states, logAccProb, key, numProposed, numAccepted, new_sigma)
 

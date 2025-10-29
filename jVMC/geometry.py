@@ -49,7 +49,7 @@ class AbstractGeometry(ABC):
         pass
 
     @abstractmethod
-    def uniform_populate(self, key, shape):
+    def uniform_populate(self, key):
         """
         Generate configuration of the particles with positions sampled from a uniform distribution.
         """
@@ -68,8 +68,9 @@ class HyperRectangle(AbstractGeometry):
 
         return jnp.where(PBC, ((x + extent/2) % extent) - extent/2, x)
     
-    def uniform_populate(self, key, shape, dtype=jnp.float64):
+    def uniform_populate(self, key, dtype=jnp.float64):
         low = self.domain[:, 0]
+        shape = (self.n_particles, self.n_dim)
         samples = jax.random.uniform(jVMC.util.key_gen.format_key(key), shape, dtype=dtype)
         
         return low + samples * jnp.array(self.extent)

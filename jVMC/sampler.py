@@ -123,10 +123,10 @@ class MCSampler:
         self.thermalizationSweeps = thermalizationSweeps
         self.numSamples = numSamples
 
-        # TODO: this is already in self.mc_init()
-        shape = (global_defs.device_count(),) + (1,)
-        self.numProposed = jnp.zeros(shape, dtype=np.int64)
-        self.numAccepted = jnp.zeros(shape, dtype=np.int64)
+        # TODO: Remove this, since it is already in self.mc_init()
+        # shape = (global_defs.device_count(),) + (1,)
+        # self.numProposed = jnp.zeros(shape, dtype=np.int64)
+        # self.numAccepted = jnp.zeros(shape, dtype=np.int64)
 
         self.numChains = numChains
 
@@ -544,20 +544,35 @@ class MCSamplerCont(MCSampler):
         self.updateProposerArg = jnp.stack([updateProposerArg] * (global_defs.device_count() * numChains), axis=0)
         self.updateProposerArg = self.updateProposerArg.reshape((global_defs.device_count(), numChains) + updateProposerArg.shape)
         
-        stateShape = (global_defs.device_count(), numChains) + self.sampleShape
-        key_init = format_key(key)
+        init_keys = jax.random.split(format_key(key), global_defs.device_count())
+        self.states = global_defs.pmap_for_my_devices(
+            partial(self._init_state, initState=initState), in_axes=(0)
+        )(init_keys)
+
+    def _init_state(self, key, initState):
+        stateShape = (self.numChains,) + self.sampleShape
+        key_init = jax.random.split(format_key(key), self.numChains)
+        # TODO: decide how to initialize
+        init_fun = jax.jit(jax.vmap(partial(self.updateProposer.geometry.uniform_populate, dtype=jnp.float64)))
+
         if initState is None:
-            # TODO: decide how to initialize
-            initState = self.updateProposer.geometry.uniform_populate(key_init, self.sampleShape, dtype=jnp.float64)
-        # TODO: All the chains are initialized in the same way... why?
-        self.states = jnp.stack([initState] * (global_defs.device_count() * numChains), axis=0).reshape(stateShape)
+            initState = init_fun(key_init)
+        elif initState.shape != stateShape:
+            if initState.shape != self.sampleShape:
+                raise ValueError(
+                    "'initState' does not have the correct shape.\n" \
+                    f"Allowed shapes are (n_chains, n_particles, n_dim) or (n_particles, n_dim), got {initState.shape}")
+            warnings.warn(
+                "Got a single sample to initialize all chains in 'initState'! \n" \
+                "It is preferred to initialize each chain in a different way.")
+            initState = jnp.stack([initState] * self.numChains).reshape(stateShape)
+        return initState
 
     def _mc_init(self, netParams):
 
         self.logAccProb = self._logAccProb_pmapd(self.states, self.mu, self.sampler_net, netParams)
 
-        shape = (global_defs.device_count(),) + (1,)
-
+        shape = (global_defs.device_count(), self.numChains)
         self.numProposed = jnp.zeros(shape, dtype=np.int64)
         self.numAccepted = jnp.zeros(shape, dtype=np.int64)
 
@@ -580,6 +595,7 @@ class MCSamplerCont(MCSampler):
         numSamplesStr = str(numSamples)
 
         # check whether _get_samples is already compiled for given number of samples
+        # pmap parallelizes across different workers
         if not numSamplesStr in self._get_samples_jitd:
             self._get_samples_jitd[numSamplesStr] = global_defs.pmap_for_my_devices(partial(self._get_samples, sweepFunction=partial(self._sweep, net=net)),
                                                                                     static_broadcasted_argnums=(1, 2, 3, 9, 11),
@@ -629,37 +645,37 @@ class MCSamplerCont(MCSampler):
     
     def _sweep(self, states, logAccProb, key, numProposed, numAccepted, params, numSteps, updateProposer, updateProposerArg, net=None):
 
+        # All the vmaps here parallelize across chains 
         def perform_mc_update(i, carry):
-
-            # All the vmap here parallelize across chains 
-
+            states, logAccProb, key, numProposed, numAccepted = carry
+            
             # Generate update proposals
-            newKeys = random.split(carry[2], carry[0].shape[0] + 1)
+            newKeys = random.split(key, states.shape[0] + 1)
             carryKey = newKeys[-1]
-            newStates = vmap(updateProposer)(newKeys[:len(carry[0])], carry[0], updateProposerArg)
+            newStates = vmap(updateProposer)(newKeys[:len(states)], states, updateProposerArg)
 
             # Compute acceptance probabilities
             newLogAccProb = jax.vmap(lambda y: self.mu * jnp.real(net(params, y)), in_axes=(0,))(newStates)
-            P = jnp.exp(newLogAccProb - carry[1])
+            P = jnp.exp(newLogAccProb - logAccProb)
 
             # Roll dice
             newKey, carryKey = random.split(carryKey,)
             accepted = random.bernoulli(newKey, P).reshape((-1,))
 
             # Bookkeeping
-            numProposed = carry[3] + len(newStates)
-            numAccepted = carry[4] + jnp.sum(accepted)
+            numProposed = numProposed + 1
+            numAccepted = numAccepted + accepted
 
             # Perform accepted updates
             def update(acc, old, new):
                 return jax.lax.cond(acc, lambda x: x[1], lambda x: x[0], (old, new))
-            carryStates = vmap(update, in_axes=(0, 0, 0))(accepted, carry[0], newStates)
+            carryStates = vmap(update)(accepted, states, newStates)
 
-            carryLogAccProb = jnp.where(accepted == True, newLogAccProb, carry[1])
+            carryLogAccProb = jnp.where(accepted == True, newLogAccProb, logAccProb)
 
             return (carryStates, carryLogAccProb, carryKey, numProposed, numAccepted)
 
-        (states, logAccProb, key, numProposed, numAccepted) =\
-            jax.lax.fori_loop(0, numSteps, perform_mc_update, (states, logAccProb, key, numProposed, numAccepted))
+        carry = (states, logAccProb, key, numProposed, numAccepted)
+        (states, logAccProb, key, numProposed, numAccepted) = jax.lax.fori_loop(0, numSteps, perform_mc_update, carry)
 
         return states, logAccProb, key, numProposed, numAccepted
