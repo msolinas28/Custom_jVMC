@@ -3,7 +3,6 @@ import jax.numpy as jnp
 import jax.random as random
 import numpy as np
 from jax import vmap
-import time
 from functools import partial
 
 import jVMC.global_defs as global_defs
