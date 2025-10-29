@@ -110,7 +110,7 @@ class AbstractProposeCont(ABC):
 
 # TODO: implement sigma as a vector and update each component separately to account for different lengths
 class RWM(AbstractProposeCont):
-    def __init__(self, geometry: AbstractGeometry, sigma=None, use_thermalization=True, adapt_rate=5e-2, target_rate=0.5):
+    def __init__(self, geometry: AbstractGeometry, sigma=None, use_thermalization=True, adapt_rate=1e-3, target_rate=0.5):
         super().__init__(geometry, use_thermalization)
         self.adapt_rate = adapt_rate
         self.target_rate = target_rate
