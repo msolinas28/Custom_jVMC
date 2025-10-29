@@ -208,7 +208,7 @@ class MCSampler:
             a way that the number of samples per processor is identical for each processor.
 
         Returns:
-            A sample of computational basis configurations drawn from :math:`p_{\\mu}(s)`.
+            Samples drawn from :math:`p_{\\mu}(s)`.
         """
 
         if numSamples is None:
