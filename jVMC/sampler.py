@@ -644,7 +644,7 @@ class MCSamplerCont(MCSampler):
     
     def _sweep(self, states, logAccProb, key, numProposed, numAccepted, params, numSteps, updateProposer, updateProposerArg, net=None):
 
-        # All the vmaps here parallelize across chains 
+        # All the vmaps here vectorize across chains 
         def perform_mc_update(i, carry):
             states, logAccProb, key, numProposed, numAccepted = carry
             

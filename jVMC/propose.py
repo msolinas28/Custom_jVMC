@@ -110,7 +110,7 @@ class AbstractProposeCont(ABC):
 
 # TODO: implement sigma as a vector and update each component separately to account for different lengths
 class RWM(AbstractProposeCont):
-    def __init__(self, geometry: AbstractGeometry, sigma=None, use_thermalization=True, adapt_rate=1e-3, target_rate=0.5):
+    def __init__(self, geometry: AbstractGeometry, sigma=None, use_thermalization=True, adapt_rate=0.1, target_rate=0.5):
         super().__init__(geometry, use_thermalization)
         self.adapt_rate = adapt_rate
         self.target_rate = target_rate
@@ -147,9 +147,7 @@ class RWM(AbstractProposeCont):
         new_sigma = sigma * jnp.exp(self.adapt_rate * (acceptance_rate - self.target_rate))
         return new_sigma # Might add clipping
 
-    def _custom_therm_fun(self,
-                          states, logAccProb, key,
-                          numProposed, numAccepted,
+    def _custom_therm_fun(self, states, logAccProb, key, numProposed, numAccepted,
                           params, sweepSteps, thermSweeps, sweepFunction, updateProposerArg):
         def therm_sweep_fun(i, carry):
             states, logAccProb, key, numProposed, numAccepted, sigma = carry
@@ -157,14 +155,11 @@ class RWM(AbstractProposeCont):
 
             states, logAccProb, key, numProposed, numAccepted = sweepFunction(states, logAccProb, key, numProposed, numAccepted,
                                       params, sweepSteps, self, sigma)
-            acceptance_rate = (numAccepted - tmp_numAccepted) / jnp.maximum(numProposed, 1)
-            # Paralellize across chains
+            acceptance_rate = (numAccepted - tmp_numAccepted) / jnp.maximum(sweepSteps, 1)
+            # Vectorize across chains
             new_sigma = jax.vmap(self._get_new_sigma)(sigma, acceptance_rate)
 
             return (states, logAccProb, key, numProposed, numAccepted, new_sigma)
 
         carry = (states, logAccProb, key, numProposed, numAccepted, updateProposerArg)
-        (states, logAccProb, key, numProposed, numAccepted, updateProposerArg) = \
-            jax.lax.fori_loop(0, thermSweeps, therm_sweep_fun, carry)
-
-        return states, logAccProb, key, numProposed, numAccepted, updateProposerArg
+        return jax.lax.fori_loop(0, thermSweeps, therm_sweep_fun, carry)
