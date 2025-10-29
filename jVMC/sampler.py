@@ -533,13 +533,16 @@ class MCSamplerCont(MCSampler):
         if not isinstance(updateProposer, AbstractProposeCont):
             raise ValueError(f'The argument \'updateProposer\' has to be an istance of the class \'jVMC.propose.AbstractProposeCont\'.')
         sampleShape = (updateProposer.geometry.n_particles, updateProposer.geometry.n_dim)
-        updateProposerArg = updateProposer.updateProposerArg
 
         if sweepSteps is None:
             sweepSteps = updateProposer.geometry.n_particles
 
-        super().__init__(net, sampleShape, key, updateProposer, numChains, updateProposerArg, 
+        super().__init__(net, sampleShape, key, updateProposer, numChains, None, 
                         numSamples, thermalizationSweeps, sweepSteps, initState, mu, logProbFactor)
+        
+        updateProposerArg = jnp.atleast_1d(self.updateProposer.Arg)
+        self.updateProposerArg = jnp.stack([updateProposerArg] * (global_defs.device_count() * numChains), axis=0)
+        self.updateProposerArg = self.updateProposerArg.reshape((global_defs.device_count(), numChains) + updateProposerArg.shape)
         
         stateShape = (global_defs.device_count(), numChains) + self.sampleShape
         key_init = format_key(key)
@@ -548,6 +551,15 @@ class MCSamplerCont(MCSampler):
             initState = self.updateProposer.geometry.uniform_populate(key_init, self.sampleShape, dtype=jnp.float64)
         # TODO: All the chains are initialized in the same way... why?
         self.states = jnp.stack([initState] * (global_defs.device_count() * numChains), axis=0).reshape(stateShape)
+
+    def _mc_init(self, netParams):
+
+        self.logAccProb = self._logAccProb_pmapd(self.states, self.mu, self.sampler_net, netParams)
+
+        shape = (global_defs.device_count(),) + (1,)
+
+        self.numProposed = jnp.zeros(shape, dtype=np.int64)
+        self.numAccepted = jnp.zeros(shape, dtype=np.int64)
 
     def _get_samples_mcmc(self, params, numSamples, multipleOf=1):
 
@@ -571,9 +583,9 @@ class MCSamplerCont(MCSampler):
         if not numSamplesStr in self._get_samples_jitd:
             self._get_samples_jitd[numSamplesStr] = global_defs.pmap_for_my_devices(partial(self._get_samples, sweepFunction=partial(self._sweep, net=net)),
                                                                                     static_broadcasted_argnums=(1, 2, 3, 9, 11),
-                                                                                    in_axes=(None, None, None, None, 0, 0, 0, 0, 0, None, None, None))
+                                                                                    in_axes=(None, None, None, None, 0, 0, 0, 0, 0, None, 0, None))
 
-        (self.states, self.logAccProb, self.key, self.numProposed, self.numAccepted), configs =\
+        (self.states, self.logAccProb, self.key, self.numProposed, self.numAccepted), configs, self.updateProposerArg =\
             self._get_samples_jitd[numSamplesStr](params, numSamples, self.thermalizationSweeps, self.sweepSteps,
                                                   self.states, self.logAccProb, self.key, self.numProposed, self.numAccepted,
                                                   self.updateProposer, self.updateProposerArg, self.sampleShape)
@@ -598,7 +610,7 @@ class MCSamplerCont(MCSampler):
             if updateProposer._use_custom_thermalization:
                 states, logAccProb, key, numProposed, numAccepted, updateProposerArg =\
                     updateProposer._custom_therm_fun(states, logAccProb, key, numProposed, numAccepted, params, sweepSteps, thermSweeps, sweepFunction, updateProposerArg)
-                updateProposer.updateProposerArg = self.updateProposerArg = updateProposerArg
+                # updateProposer.updateProposerArg = self.updateProposerArg = updateProposerArg
             else:
                 states, logAccProb, key, numProposed, numAccepted =\
                     sweepFunction(states, logAccProb, key, numProposed, numAccepted, params, thermSweeps * sweepSteps, updateProposer, updateProposerArg)
@@ -613,5 +625,41 @@ class MCSamplerCont(MCSampler):
 
         meta, configs = jax.lax.scan(scan_fun, (states, logAccProb, key, numProposed, numAccepted), None, length=numSamples)
 
-        # return meta, configs.reshape((configs.shape[0]*configs.shape[1], -1))
-        return meta, configs.reshape((configs.shape[0] * configs.shape[1],) + sampleShape)
+        return meta, configs.reshape((configs.shape[0] * configs.shape[1],) + sampleShape), updateProposerArg
+    
+    def _sweep(self, states, logAccProb, key, numProposed, numAccepted, params, numSteps, updateProposer, updateProposerArg, net=None):
+
+        def perform_mc_update(i, carry):
+
+            # All the vmap here parallelize across chains 
+
+            # Generate update proposals
+            newKeys = random.split(carry[2], carry[0].shape[0] + 1)
+            carryKey = newKeys[-1]
+            newStates = vmap(updateProposer)(newKeys[:len(carry[0])], carry[0], updateProposerArg)
+
+            # Compute acceptance probabilities
+            newLogAccProb = jax.vmap(lambda y: self.mu * jnp.real(net(params, y)), in_axes=(0,))(newStates)
+            P = jnp.exp(newLogAccProb - carry[1])
+
+            # Roll dice
+            newKey, carryKey = random.split(carryKey,)
+            accepted = random.bernoulli(newKey, P).reshape((-1,))
+
+            # Bookkeeping
+            numProposed = carry[3] + len(newStates)
+            numAccepted = carry[4] + jnp.sum(accepted)
+
+            # Perform accepted updates
+            def update(acc, old, new):
+                return jax.lax.cond(acc, lambda x: x[1], lambda x: x[0], (old, new))
+            carryStates = vmap(update, in_axes=(0, 0, 0))(accepted, carry[0], newStates)
+
+            carryLogAccProb = jnp.where(accepted == True, newLogAccProb, carry[1])
+
+            return (carryStates, carryLogAccProb, carryKey, numProposed, numAccepted)
+
+        (states, logAccProb, key, numProposed, numAccepted) =\
+            jax.lax.fori_loop(0, numSteps, perform_mc_update, (states, logAccProb, key, numProposed, numAccepted))
+
+        return states, logAccProb, key, numProposed, numAccepted

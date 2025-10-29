@@ -81,13 +81,13 @@ class AbstractProposeCont(ABC):
         pass
 
     @property
-    @abstractmethod
-    def updateProposerArg(self):
+    @abstractmethod 
+    def Arg(self): 
         pass
 
-    @updateProposerArg.setter
+    @Arg.setter
     @abstractmethod    
-    def updateProposerArg(self, **kwargs):
+    def Arg(self, **kwargs):
         pass
     
     def _custom_therm_fun(self, states, logAccProb, key, numProposed, numAccepted, 
@@ -119,15 +119,15 @@ class RWM(AbstractProposeCont):
             sigma = jnp.asarray(min(geometry.extent) * 0.1)
         elif not isinstance(sigma, jax.Array):
             sigma = jnp.asarray(sigma)
-        self.sigma = sigma
+        self._arg = sigma
 
     @property
-    def updateProposerArg(self):
-        return self.sigma
+    def Arg(self):
+        return self._arg
 
-    @updateProposerArg.setter
-    def updateProposerArg(self, sigma):
-        self.sigma = sigma
+    @Arg.setter
+    def Arg(self, value):
+        self._arg = value
     
     def __call__(self, key, s, sigma):
         """
@@ -162,7 +162,7 @@ class RWM(AbstractProposeCont):
 
             return (states, logAccProb, key, numProposed, numAccepted, new_sigma)
 
-        carry = (states, logAccProb, key, numProposed, numAccepted, jnp.atleast_1d(updateProposerArg))
+        carry = (states, logAccProb, key, numProposed, numAccepted, updateProposerArg)
         (states, logAccProb, key, numProposed, numAccepted, updateProposerArg) = \
             jax.lax.fori_loop(0, thermSweeps, therm_sweep_fun, carry)
 
