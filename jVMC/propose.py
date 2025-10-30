@@ -1,7 +1,7 @@
 import jax 
 import jax.numpy as jnp
 from abc import ABC, abstractmethod
-import jax.random as random
+import jax.random as random 
 
 from jVMC.geometry import AbstractGeometry
 from jVMC.util.key_gen import format_key
@@ -108,18 +108,26 @@ class AbstractProposeCont(ABC):
                 "Custom thermalization not enabled for this proposer."
             )
 
-# TODO: implement sigma as a vector and update each component separately to account for different lengths
 class RWM(AbstractProposeCont):
     def __init__(self, geometry: AbstractGeometry, sigma=None, use_thermalization=True, adapt_rate=0.1, target_rate=0.5):
         super().__init__(geometry, use_thermalization)
         self.adapt_rate = adapt_rate
         self.target_rate = target_rate
+        self._arg = self._init_sigma(sigma)
 
-        if sigma is None: 
-            sigma = jnp.asarray(min(geometry.extent) * 0.1)
-        elif not isinstance(sigma, jax.Array):
-            sigma = jnp.asarray(sigma)
-        self._arg = sigma
+    def _init_sigma(self, sigma):
+        if sigma is None:
+            return jnp.array(self.geometry.extent) * 0.1
+
+        sigma = jnp.asarray(sigma) if not isinstance(sigma, jax.Array) else sigma
+        if sigma.size == 1:
+            sigma = jnp.full(self.geometry.n_dim, sigma.item())
+        elif sigma.size != self.geometry.n_dim:
+            raise ValueError(
+                f"'sigma' must have the same dimension as 'geometry.n_dim' "
+                f"(expected {self.geometry.n_dim}, got {sigma.size})."
+            )
+        return sigma
 
     @property
     def Arg(self):
@@ -145,7 +153,7 @@ class RWM(AbstractProposeCont):
     
     def _get_new_sigma(self, sigma, acceptance_rate):
         new_sigma = sigma * jnp.exp(self.adapt_rate * (acceptance_rate - self.target_rate))
-        return new_sigma # Might add clipping
+        return jnp.clip(new_sigma, max=jnp.array(self.geometry.extent) / (2))
 
     def _custom_therm_fun(self, states, logAccProb, key, numProposed, numAccepted,
                           params, sweepSteps, thermSweeps, sweepFunction, updateProposerArg):
