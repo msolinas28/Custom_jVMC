@@ -171,3 +171,43 @@ class RWM(AbstractProposeCont):
 
         carry = (states, logAccProb, key, numProposed, numAccepted, updateProposerArg)
         return jax.lax.fori_loop(0, thermSweeps, therm_sweep_fun, carry)
+    
+class MALA(AbstractProposeCont):
+    def __init__(self, geometry: AbstractGeometry, tau=None, use_thermalization=True, adapt_rate=0.1, target_rate=0.5):
+        super().__init__(geometry, use_thermalization)
+        self.adapt_rate = adapt_rate
+        self.target_rate = target_rate
+        self._arg = self._init_tau(tau)
+
+    def _init_tau(self, tau):
+        if tau is None:
+            return jnp.array(self.geometry.extent) * 0.1
+        return jnp.asarray(tau) if not isinstance(tau, jax.Array) else tau
+
+    @property
+    def Arg(self):
+        return self._arg
+
+    @Arg.setter
+    def Arg(self, value):
+        self._arg = value
+    
+    def __call__(self, key, s, net, params, mu, tau):
+        log_prob_fun = lambda x: mu * jnp.real(net(params, x))
+        log_prob_fun_grad = jax.grad(log_prob_fun)
+
+        xi = jax.random.normal(format_key(key), s.shape, dtype=s.dtype)
+        drift = tau * log_prob_fun_grad(s)
+        dx = drift + jnp.sqrt(2 * tau).astype(s.dtype) * xi
+        sp = s + dx
+
+        # TODO: understand if the PBC should be applied here
+        log_q_s_sp = - jnp.sum((sp - s - tau * log_prob_fun_grad(sp)) ** 2) / (4 * tau)
+        log_q_sp_s = - jnp.sum(xi ** 2) / 0.5
+        log_prob_correction = log_q_s_sp - log_q_sp_s
+
+        return self.geometry.apply_PBC(sp), log_prob_correction
+
+    def _custom_therm_fun(self, states, logAccProb, key, numProposed, numAccepted,
+                          params, sweepSteps, thermSweeps, sweepFunction, updateProposerArg):
+        pass

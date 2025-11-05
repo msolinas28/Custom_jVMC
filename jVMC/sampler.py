@@ -322,7 +322,7 @@ class MCSampler:
             # Generate update proposals
             newKeys = random.split(carry[2], carry[0].shape[0] + 1)
             carryKey = newKeys[-1]
-            newStates = vmap(updateProposer, in_axes=(0, 0, None))(newKeys[:len(carry[0])], carry[0], updateProposerArg) # Might need to change it aswell with in_axes[3]=0
+            newStates = vmap(updateProposer, in_axes=(0, 0, None))(newKeys[:len(carry[0])], carry[0], updateProposerArg) 
 
             # Compute acceptance probabilities
             newLogAccProb = jax.vmap(lambda y: self.mu * jnp.real(net(params, y)), in_axes=(0,))(newStates)
@@ -625,7 +625,6 @@ class MCSamplerCont(MCSampler):
             if updateProposer._use_custom_thermalization:
                 states, logAccProb, key, numProposed, numAccepted, updateProposerArg =\
                     updateProposer._custom_therm_fun(states, logAccProb, key, numProposed, numAccepted, params, sweepSteps, thermSweeps, sweepFunction, updateProposerArg)
-                # updateProposer.updateProposerArg = self.updateProposerArg = updateProposerArg
             else:
                 states, logAccProb, key, numProposed, numAccepted =\
                     sweepFunction(states, logAccProb, key, numProposed, numAccepted, params, thermSweeps * sweepSteps, updateProposer, updateProposerArg)
@@ -651,7 +650,7 @@ class MCSamplerCont(MCSampler):
             # Generate update proposals
             newKeys = random.split(key, states.shape[0] + 1)
             carryKey = newKeys[-1]
-            newStates = vmap(updateProposer)(newKeys[:len(states)], states, updateProposerArg)
+            newStates = vmap(updateProposer)(newKeys[:len(states)], states, updateProposerArg) # TODO: add here corrections
 
             # Compute acceptance probabilities
             newLogAccProb = jax.vmap(lambda y: self.mu * jnp.real(net(params, y)), in_axes=(0,))(newStates)
