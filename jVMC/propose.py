@@ -193,8 +193,8 @@ class MALA(AbstractProposeCont):
         self._arg = value
     
     def __call__(self, key, s, net, params, mu, tau):
-        log_prob_fun = lambda x: mu * jnp.real(net(params, x))
-        log_prob_fun_grad = jax.grad(log_prob_fun)
+        log_prob_fun = lambda x: mu * jnp.real(net(params, x)) # put inside grad directly
+        log_prob_fun_grad = jax.grad(log_prob_fun, )
 
         xi = jax.random.normal(format_key(key), s.shape, dtype=s.dtype)
         drift = tau * log_prob_fun_grad(s)
