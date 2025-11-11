@@ -650,11 +650,11 @@ class MCSamplerCont(MCSampler):
             # Generate update proposals
             newKeys = random.split(key, states.shape[0] + 1)
             carryKey = newKeys[-1]
-            newStates = vmap(updateProposer)(newKeys[:len(states)], states, updateProposerArg) # TODO: add here corrections
+            newStates, log_prob_correction = vmap(updateProposer)(newKeys[:len(states)], states, updateProposerArg) 
 
             # Compute acceptance probabilities
             newLogAccProb = jax.vmap(lambda y: self.mu * jnp.real(net(params, y)), in_axes=(0,))(newStates)
-            P = jnp.exp(newLogAccProb - logAccProb)
+            P = jnp.exp(newLogAccProb - logAccProb + log_prob_correction)
 
             # Roll dice
             newKey, carryKey = random.split(carryKey,)

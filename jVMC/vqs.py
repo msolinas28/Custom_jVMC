@@ -344,10 +344,10 @@ class NQS:
             Real part of the NQS and current parameters
         """
 
-        evalReal = lambda p,x: jnp.real( self.net.apply(p,x) )
+        evalReal = lambda p, x: jnp.real(self.net.apply(p, x))
         if "eval_real" in dir(self.net):
             if callable(self.net.eval_real):
-                evalReal = lambda p,x: jnp.real( self.net.apply(p,x,method=self.net.eval_real) )
+                evalReal = lambda p, x: jnp.real(self.net.apply(p, x, method=self.net.eval_real))
 
         return evalReal, self.parameters
 

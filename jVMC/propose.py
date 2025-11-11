@@ -2,9 +2,11 @@ import jax
 import jax.numpy as jnp
 from abc import ABC, abstractmethod
 import jax.random as random 
+from functools import partial
 
 from jVMC.geometry import AbstractGeometry
 from jVMC.util.key_gen import format_key
+from jVMC.vqs import NQS
 
 def propose_spin_flip(key, s, info):
     idx = random.randint(key, (1,), 0, s.size)[0]
@@ -77,6 +79,8 @@ class AbstractProposeCont(ABC):
 
         Returns:
             s_prime: The new proposed configuration.
+            log_prob_correction: Correction given by non-symmetric proposal moves. 
+                                 Please return 0 as second arg if no correctionn is needed. 
         """
         pass
 
@@ -113,7 +117,7 @@ class RWM(AbstractProposeCont):
         super().__init__(geometry, use_thermalization)
         self.adapt_rate = adapt_rate
         self.target_rate = target_rate
-        self._arg = self._init_sigma(sigma)
+        self.Arg = self._init_sigma(sigma)
 
     def _init_sigma(self, sigma):
         if sigma is None:
@@ -149,11 +153,11 @@ class RWM(AbstractProposeCont):
             s': The new proposed configuration. 
         """
         dx = (sigma * jax.random.normal(format_key(key), s.shape, dtype=s.dtype))   
-        return self.geometry.apply_PBC(s + dx)
+        return self.geometry.apply_PBC(s + dx), 0
     
     def _get_new_sigma(self, sigma, acceptance_rate):
         new_sigma = sigma * jnp.exp(self.adapt_rate * (acceptance_rate - self.target_rate))
-        return jnp.clip(new_sigma, max=jnp.array(self.geometry.extent) / (2))
+        return jnp.clip(new_sigma, max=jnp.array(self.geometry.extent) / 2)
 
     def _custom_therm_fun(self, states, logAccProb, key, numProposed, numAccepted,
                           params, sweepSteps, thermSweeps, sweepFunction, updateProposerArg):
@@ -173,16 +177,24 @@ class RWM(AbstractProposeCont):
         return jax.lax.fori_loop(0, thermSweeps, therm_sweep_fun, carry)
     
 class MALA(AbstractProposeCont):
-    def __init__(self, geometry: AbstractGeometry, tau=None, use_thermalization=True, adapt_rate=0.1, target_rate=0.5):
+    def __init__(self, geometry: AbstractGeometry, vqs, tau=None, use_thermalization=True, adapt_rate=0.1, target_rate=0.5, mu=2):
         super().__init__(geometry, use_thermalization)
         self.adapt_rate = adapt_rate
         self.target_rate = target_rate
-        self._arg = self._init_tau(tau)
+        self.Arg = self._init_tau(tau)
+        
+        if not isinstance(vqs, NQS):
+            raise ValueError('The argument "net" has to be an istance of jVMC.vqs.NQS.')
+        self.vqs = vqs
+        self.mu = mu
 
+    # TODO: implement version for tau in more dims
     def _init_tau(self, tau):
         if tau is None:
-            return jnp.array(self.geometry.extent) * 0.1
-        return jnp.asarray(tau) if not isinstance(tau, jax.Array) else tau
+            return jnp.array(self.geometry.extent)[0] * 0.01
+        if tau < 0:
+            raise ValueError('"tau" can not be negative.')
+        return jnp.asarray(tau)
 
     @property
     def Arg(self):
@@ -192,22 +204,39 @@ class MALA(AbstractProposeCont):
     def Arg(self, value):
         self._arg = value
     
-    def __call__(self, key, s, net, params, mu, tau):
-        log_prob_fun = lambda x: mu * jnp.real(net(params, x)) # put inside grad directly
-        log_prob_fun_grad = jax.grad(log_prob_fun, )
+    def __call__(self, key, s, tau):
+        params = self.vqs.parameters
+        log_prob_fun = partial(lambda x, p: self.mu * jnp.real(self.vqs.net.apply(p, x)), p=params)
+        log_prob_fun_grad = jax.grad(log_prob_fun)
 
         xi = jax.random.normal(format_key(key), s.shape, dtype=s.dtype)
         drift = tau * log_prob_fun_grad(s)
         dx = drift + jnp.sqrt(2 * tau).astype(s.dtype) * xi
         sp = s + dx
 
-        # TODO: understand if the PBC should be applied here
         log_q_s_sp = - jnp.sum((sp - s - tau * log_prob_fun_grad(sp)) ** 2) / (4 * tau)
-        log_q_sp_s = - jnp.sum(xi ** 2) / 0.5
+        log_q_sp_s = - jnp.sum(xi ** 2) * 0.5
         log_prob_correction = log_q_s_sp - log_q_sp_s
 
-        return self.geometry.apply_PBC(sp), log_prob_correction
+        return self.geometry.apply_PBC(sp), log_prob_correction.squeeze()
+    
+    def _get_new_tau(self, tau, acceptance_rate):
+        new_tau = tau * jnp.exp(self.adapt_rate * (acceptance_rate - self.target_rate))
+        return jnp.clip(new_tau, max=jnp.array(self.geometry.extent)[0] / 2) # TODO: change when tau gets more dims
 
     def _custom_therm_fun(self, states, logAccProb, key, numProposed, numAccepted,
                           params, sweepSteps, thermSweeps, sweepFunction, updateProposerArg):
-        pass
+        def therm_sweep_fun(i, carry):
+            states, logAccProb, key, numProposed, numAccepted, tau = carry
+            tmp_numAccepted = numAccepted
+
+            states, logAccProb, key, numProposed, numAccepted = sweepFunction(states, logAccProb, key, numProposed, numAccepted,
+                                      params, sweepSteps, self, tau)
+            acceptance_rate = (numAccepted - tmp_numAccepted) / jnp.maximum(sweepSteps, 1)
+            # Vectorize across chains
+            new_tau = jax.vmap(self._get_new_tau)(tau, acceptance_rate)
+
+            return (states, logAccProb, key, numProposed, numAccepted, new_tau)
+
+        carry = (states, logAccProb, key, numProposed, numAccepted, updateProposerArg)
+        return jax.lax.fori_loop(0, thermSweeps, therm_sweep_fun, carry)
