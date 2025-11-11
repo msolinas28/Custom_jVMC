@@ -214,7 +214,7 @@ class MALA(AbstractProposeCont):
         dx = drift + jnp.sqrt(2 * tau).astype(s.dtype) * xi
         sp = s + dx
 
-        log_q_s_sp = - jnp.sum((sp - s - tau * log_prob_fun_grad(sp)) ** 2) / (4 * tau)
+        log_q_s_sp = - jnp.sum((s - sp - tau * log_prob_fun_grad(sp)) ** 2) / (4 * tau)
         log_q_sp_s = - jnp.sum(xi ** 2) * 0.5
         log_prob_correction = log_q_s_sp - log_q_sp_s
 
