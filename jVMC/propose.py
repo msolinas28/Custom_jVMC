@@ -256,8 +256,6 @@ class MALA(AbstractProposeCont):
     def __call__(self, key, s, updateProposerArg):
         tau = updateProposerArg["tau"]
         params = updateProposerArg["params"]
-        print('ciao')
-        jax.debug.print("First param value: {}", jax.tree.leaves(params)[0][0, 0])
         log_prob_fun = partial(lambda x, p: self.mu * jnp.real(self.apply_fun(p, x)), p=params)
         log_prob_fun_grad = jax.grad(log_prob_fun)
 
