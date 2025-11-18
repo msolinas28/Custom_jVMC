@@ -7,13 +7,18 @@ from functools import partial
 from jVMC.geometry import AbstractGeometry
 from jVMC.util.key_gen import format_key
 from jVMC.vqs import NQS
+import jVMC.global_defs as global_defs
+
+def shard_array_across_chains(arr, numChains):
+    arr_atleast_1d = jnp.atleast_1d(arr)
+    sharded_arr = jnp.stack([arr_atleast_1d] * (global_defs.device_count() * numChains), axis=0)
+    return sharded_arr.reshape((global_defs.device_count(), numChains) + arr_atleast_1d.shape)
 
 def propose_spin_flip(key, s, info):
     idx = random.randint(key, (1,), 0, s.size)[0]
     idx = jnp.unravel_index(idx, s.shape)
     update = (s[idx] + 1) % 2
     return s.at[idx].set(update)
-
 
 def propose_POVM_outcome(key, s, info):
     key, subkey = random.split(key)
@@ -57,11 +62,12 @@ def propose_spin_flip_zeroMag(key, s, info):
     return jax.lax.cond(doFlip == 0, lambda x: 1 - x, lambda x: x, s)
 
 class AbstractProposeCont(ABC):
-    def __init__(self, geometry, use_custom_thermalization=False):
+    def __init__(self, geometry: AbstractGeometry, use_custom_thermalization=False):
         if not isinstance(geometry, AbstractGeometry):
             raise ValueError("The argument 'geometry' has to be an instance of the class 'jVMC.geometry.AbstractGeometry'.")
         self._geometry = geometry
         self._use_custom_thermalization = use_custom_thermalization
+        self._proposerArg = None
 
     @property
     def geometry(self):
@@ -86,13 +92,27 @@ class AbstractProposeCont(ABC):
 
     @property
     @abstractmethod 
-    def Arg(self): 
+    def proposerArg_in_axes(self):
+        """
+        Return a dictionary with the same shape as self._proposerArg,
+        which indicates which arguments of the proposer must be sharded across
+        different devices.
+        """
         pass
 
-    @Arg.setter
-    @abstractmethod    
-    def Arg(self, **kwargs):
+    @abstractmethod 
+    def init_proposerArg(self, vqs, numChains):
+        """
+        Initialize all the arguments of the proposer with the right shape 
+        for sharding across devices and chains.
+        """
         pass
+
+    @abstractmethod
+    def update_proposerArg(self, vqs):
+        """
+        Update the arguments of the proposer that depend on the network.
+        """
     
     def _custom_therm_fun(self, states, logAccProb, key, numProposed, numAccepted, 
                           params, sweepSteps, thermSweeps, sweepFunction):
@@ -113,35 +133,44 @@ class AbstractProposeCont(ABC):
             )
 
 class RWM(AbstractProposeCont):
-    def __init__(self, geometry: AbstractGeometry, sigma=None, use_thermalization=True, adapt_rate=0.1, target_rate=0.5):
+    def __init__(self, geometry, sigma=None, use_thermalization=True, adapt_rate=0.1, target_rate=0.5):
         super().__init__(geometry, use_thermalization)
-        self.adapt_rate = adapt_rate
-        self.target_rate = target_rate
-        self.Arg = self._init_sigma(sigma)
-
-    def _init_sigma(self, sigma):
-        if sigma is None:
-            return jnp.array(self.geometry.extent) * 0.1
-
-        sigma = jnp.asarray(sigma) if not isinstance(sigma, jax.Array) else sigma
-        if sigma.size == 1:
-            sigma = jnp.full(self.geometry.n_dim, sigma.item())
-        elif sigma.size != self.geometry.n_dim:
-            raise ValueError(
-                f"'sigma' must have the same dimension as 'geometry.n_dim' "
-                f"(expected {self.geometry.n_dim}, got {sigma.size})."
-            )
-        return sigma
+        self._adapt_rate = adapt_rate
+        self._target_rate = target_rate
+        self._sigma = sigma
 
     @property
-    def Arg(self):
-        return self._arg
-
-    @Arg.setter
-    def Arg(self, value):
-        self._arg = value
+    def adapt_rate(self):
+        return self._adapt_rate
     
-    def __call__(self, key, s, sigma):
+    @property
+    def target_rate(self):
+        return self._target_rate
+            
+    @property
+    def proposerArg_in_axes(self):
+        return {"sigma": 0}
+    
+    def init_proposerArg(self, vqs, numChains):
+        if self._sigma is None:
+            sigma = jnp.array(self.geometry.extent) * 0.1
+        else: 
+            sigma = jnp.asarray(self._sigma) if not isinstance(self._sigma, jax.Array) else self._sigma
+            if sigma.size == 1:
+                sigma = jnp.full(self.geometry.n_dim, sigma.item())
+            elif sigma.size != self.geometry.n_dim:
+                raise ValueError(
+                    f"'sigma' must have the same dimension as 'geometry.n_dim' "
+                    f"(expected {self.geometry.n_dim}, got {sigma.size})."
+                )
+        sigma = shard_array_across_chains(jnp.asarray(sigma), numChains)
+
+        self._proposerArg = {"sigma": sigma}
+    
+    def update_proposerArg(self, vqs):
+        pass
+    
+    def __call__(self, key, s, updateProposerArg):
         """
         Proposal move for random walk metropolis (RWM).
         
@@ -152,6 +181,7 @@ class RWM(AbstractProposeCont):
         Return: 
             s': The new proposed configuration. 
         """
+        sigma = updateProposerArg["sigma"]
         dx = (sigma * jax.random.normal(format_key(key), s.shape, dtype=s.dtype))   
         return self.geometry.apply_PBC(s + dx), 0
     
@@ -162,53 +192,73 @@ class RWM(AbstractProposeCont):
     def _custom_therm_fun(self, states, logAccProb, key, numProposed, numAccepted,
                           params, sweepSteps, thermSweeps, sweepFunction, updateProposerArg):
         def therm_sweep_fun(i, carry):
-            states, logAccProb, key, numProposed, numAccepted, sigma = carry
+            states, logAccProb, key, numProposed, numAccepted, updateProposerArg = carry
             tmp_numAccepted = numAccepted
 
             states, logAccProb, key, numProposed, numAccepted = sweepFunction(states, logAccProb, key, numProposed, numAccepted,
-                                      params, sweepSteps, self, sigma)
+                                      params, sweepSteps, self, updateProposerArg)
             acceptance_rate = (numAccepted - tmp_numAccepted) / jnp.maximum(sweepSteps, 1)
             # Vectorize across chains
-            new_sigma = jax.vmap(self._get_new_sigma)(sigma, acceptance_rate)
+            new_sigma = jax.vmap(self._get_new_sigma)(updateProposerArg["sigma"], acceptance_rate)
+            updateProposerArg = {**updateProposerArg, "sigma": new_sigma}
 
-            return (states, logAccProb, key, numProposed, numAccepted, new_sigma)
+            return (states, logAccProb, key, numProposed, numAccepted, updateProposerArg)
 
         carry = (states, logAccProb, key, numProposed, numAccepted, updateProposerArg)
         return jax.lax.fori_loop(0, thermSweeps, therm_sweep_fun, carry)
     
 class MALA(AbstractProposeCont):
-    def __init__(self, geometry: AbstractGeometry, vqs, tau=None, use_thermalization=True, adapt_rate=0.1, target_rate=0.5, mu=2):
+    def __init__(self, geometry, appy_fun, tau=None, use_thermalization=True, adapt_rate=0.1, target_rate=0.5, mu=2):
         super().__init__(geometry, use_thermalization)
-        self.adapt_rate = adapt_rate
-        self.target_rate = target_rate
-        self.Arg = self._init_tau(tau)
+        self._adapt_rate = adapt_rate
+        self._target_rate = target_rate
+        self._apply_fun = appy_fun
+        self._mu = mu
+        self._tau = tau
         
-        if not isinstance(vqs, NQS):
-            raise ValueError('The argument "net" has to be an istance of jVMC.vqs.NQS.')
-        self.vqs = vqs
-        self.mu = mu
-
-    # TODO: implement version for tau in more dims
-    def _init_tau(self, tau):
-        if tau is None:
-            return jnp.array(self.geometry.extent)[0] * 0.01
-        if tau < 0:
-            raise ValueError('"tau" can not be negative.')
-        return jnp.asarray(tau)
+    @property
+    def apply_fun(self):
+        return self._apply_fun
 
     @property
-    def Arg(self):
-        return self._arg
+    def mu(self):
+        return self._mu
 
-    @Arg.setter
-    def Arg(self, value):
-        self._arg = value
+    @property
+    def adapt_rate(self):
+        return self._adapt_rate
     
-    def __call__(self, key, s, tau):
-        params = self.vqs.parameters
+    @property
+    def target_rate(self):
+        return self._target_rate
+
+    @property
+    def proposerArg_in_axes(self):
+        return {"params": None, "tau": 0}
+    
+    def init_proposerArg(self, vqs, numChains):
+        # TODO: implement version for tau in more dims
+        if self._tau is None:
+            tau = jnp.array(self.geometry.extent)[0] * 0.01
+        elif self._tau < 0:
+            raise ValueError('"tau" can not be negative.')
+        else:
+            tau = self._tau
+        tau = shard_array_across_chains(jnp.asarray(tau), numChains)
+
+        self._proposerArg = {"tau": tau, "params": vqs.parameters}
+    
+    def update_proposerArg(self, vqs):
+        if self._proposerArg is None:
+            raise RuntimeError("Must call init_proposerArg before update_proposerArg.")
+        self._proposerArg["params"] = vqs.parameters
+    
+    def __call__(self, key, s, updateProposerArg):
+        tau = updateProposerArg["tau"]
+        params = updateProposerArg["params"]
         print('ciao')
         jax.debug.print("First param value: {}", jax.tree.leaves(params)[0][0, 0])
-        log_prob_fun = partial(lambda x, p: self.mu * jnp.real(self.vqs.net.apply(p, x)), p=params)
+        log_prob_fun = partial(lambda x, p: self.mu * jnp.real(self.apply_fun(p, x)), p=params)
         log_prob_fun_grad = jax.grad(log_prob_fun)
 
         xi = jax.random.normal(format_key(key), s.shape, dtype=s.dtype)
@@ -229,16 +279,17 @@ class MALA(AbstractProposeCont):
     def _custom_therm_fun(self, states, logAccProb, key, numProposed, numAccepted,
                           params, sweepSteps, thermSweeps, sweepFunction, updateProposerArg):
         def therm_sweep_fun(i, carry):
-            states, logAccProb, key, numProposed, numAccepted, tau = carry
+            states, logAccProb, key, numProposed, numAccepted, updateProposerArg = carry
             tmp_numAccepted = numAccepted
 
             states, logAccProb, key, numProposed, numAccepted = sweepFunction(states, logAccProb, key, numProposed, numAccepted,
-                                      params, sweepSteps, self, tau)
+                                      params, sweepSteps, self, updateProposerArg)
             acceptance_rate = (numAccepted - tmp_numAccepted) / jnp.maximum(sweepSteps, 1)
             # Vectorize across chains
-            new_tau = jax.vmap(self._get_new_tau)(tau, acceptance_rate)
+            new_tau = jax.vmap(self._get_new_tau)(updateProposerArg["tau"], acceptance_rate)
+            updateProposerArg = {**updateProposerArg, "tau": new_tau}
 
-            return (states, logAccProb, key, numProposed, numAccepted, new_tau)
+            return (states, logAccProb, key, numProposed, numAccepted, updateProposerArg)
 
         carry = (states, logAccProb, key, numProposed, numAccepted, updateProposerArg)
         return jax.lax.fori_loop(0, thermSweeps, therm_sweep_fun, carry)

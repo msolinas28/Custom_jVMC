@@ -525,6 +525,8 @@ class ExactSampler:
 
 # ** end class ExactSampler
 
+# TODO: MCSamplerCont.updateProposerArg is no longer used. Now everything is inside updateProposer._proposerArg.
+#       Therefore this property should be removed.
 class MCSamplerCont(MCSampler):
     def __init__(self, net, key=None, updateProposer=None, numChains=1, 
                 numSamples=2**12, thermalizationSweeps=10, sweepSteps=None, initState=None, mu=2, logProbFactor=0.5):
@@ -539,10 +541,7 @@ class MCSamplerCont(MCSampler):
         super().__init__(net, sampleShape, key, updateProposer, numChains, None, 
                         numSamples, thermalizationSweeps, sweepSteps, initState, mu, logProbFactor)
         
-        updateProposerArg = jnp.atleast_1d(self.updateProposer.Arg)
-        self.updateProposerArg = jnp.stack([updateProposerArg] * (global_defs.device_count() * numChains), axis=0)
-        self.updateProposerArg = self.updateProposerArg.reshape((global_defs.device_count(), numChains) + updateProposerArg.shape)
-        
+        self.updateProposer.init_proposerArg(net, self.numChains)
         init_keys = jax.random.split(format_key(key), global_defs.device_count())
         self.states = global_defs.pmap_for_my_devices(
             partial(self._init_state, initState=initState), in_axes=(0)
@@ -589,21 +588,23 @@ class MCSamplerCont(MCSampler):
 
         # Initialize sampling stuff
         self._mc_init(params)
+        self.updateProposer.update_proposerArg(self.net)
 
         numSamples, self.globNumSamples = mpi.distribute_sampling(numSamples, localDevices=global_defs.device_count(), numChainsPerDevice=np.lcm(self.numChains, multipleOf))
         numSamplesStr = str(numSamples)
 
         # check whether _get_samples is already compiled for given number of samples
-        # pmap parallelizes across different workers
         if not numSamplesStr in self._get_samples_jitd:
-            self._get_samples_jitd[numSamplesStr] = global_defs.pmap_for_my_devices(partial(self._get_samples, sweepFunction=partial(self._sweep, net=net)),
-                                                                                    static_broadcasted_argnums=(1, 2, 3, 9, 11),
-                                                                                    in_axes=(None, None, None, None, 0, 0, 0, 0, 0, None, 0, None))
+            self._get_samples_jitd[numSamplesStr] = global_defs.pmap_for_my_devices(
+                partial(self._get_samples, sweepFunction=partial(self._sweep, net=net)),
+                static_broadcasted_argnums=(1, 2, 3, 9, 11),
+                in_axes=(None, None, None, None, 0, 0, 0, 0, 0, None, self.updateProposer.proposerArg_in_axes, None)
+            )
 
-        (self.states, self.logAccProb, self.key, self.numProposed, self.numAccepted), configs, self.updateProposerArg =\
+        (self.states, self.logAccProb, self.key, self.numProposed, self.numAccepted), configs, self.updateProposer._proposerArg =\
             self._get_samples_jitd[numSamplesStr](params, numSamples, self.thermalizationSweeps, self.sweepSteps,
                                                   self.states, self.logAccProb, self.key, self.numProposed, self.numAccepted,
-                                                  self.updateProposer, self.updateProposerArg, self.sampleShape)
+                                                  self.updateProposer, self.updateProposer._proposerArg, self.sampleShape)
 
         tmpP = self.net.params
         self.net.params = params["params"]
@@ -650,7 +651,10 @@ class MCSamplerCont(MCSampler):
             # Generate update proposals
             newKeys = random.split(key, states.shape[0] + 1)
             carryKey = newKeys[-1]
-            newStates, log_prob_correction = vmap(updateProposer)(newKeys[:len(states)], states, updateProposerArg) 
+            newStates, log_prob_correction = vmap(
+                updateProposer, 
+                in_axes=(0, 0, updateProposer.proposerArg_in_axes)
+            )(newKeys[:len(states)], states, updateProposerArg) 
 
             # Compute acceptance probabilities
             newLogAccProb = jax.vmap(lambda y: self.mu * jnp.real(net(params, y)), in_axes=(0,))(newStates)
