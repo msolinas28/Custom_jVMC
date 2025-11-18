@@ -206,6 +206,8 @@ class MALA(AbstractProposeCont):
     
     def __call__(self, key, s, tau):
         params = self.vqs.parameters
+        print('ciao')
+        jax.debug.print("First param value: {}", jax.tree.leaves(params)[0][0, 0])
         log_prob_fun = partial(lambda x, p: self.mu * jnp.real(self.vqs.net.apply(p, x)), p=params)
         log_prob_fun_grad = jax.grad(log_prob_fun)
 
