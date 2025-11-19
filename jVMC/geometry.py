@@ -18,6 +18,16 @@ class AbstractGeometry(ABC):
             raise ValueError(f'Extent has to be a tuple, got {extent}.')
         self._extent = extent
 
+    def __eq__(self, other):
+        if not isinstance(other, AbstractGeometry):
+            return NotImplemented
+        return (
+            self.n_particles == other.n_particles and
+            self.n_dim == other.n_dim and
+            self.PBC == other.PBC and
+            self.extent == other.extent
+        )
+
     @property
     def n_particles(self):
         return self._n_particles
