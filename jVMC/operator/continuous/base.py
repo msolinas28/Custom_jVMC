@@ -22,7 +22,7 @@ class Operator(ABC):
         if isinstance(other, (int, float, complex)):
             return SumOperator(ScaledOperator(IdentityOperator(self.geometry), other), self)
         else:
-            return NotImplemented
+            raise NotImplemented
         
     def __neg__(self):
         return ScaledOperator(self, -1)
@@ -39,7 +39,7 @@ class Operator(ABC):
         if isinstance(other, (int, float, complex)):
             return SumOperator(ScaledOperator(IdentityOperator(self.geometry), other), -self)
         else:
-            return NotImplemented
+            raise NotImplemented
         
     def __mul__(self, other):
         if isinstance(other, (int, float, complex)):
@@ -53,7 +53,7 @@ class Operator(ABC):
         if isinstance(other, (int, float, complex)):
             return ScaledOperator(self, other)
         else:
-            return NotImplemented
+            raise NotImplemented
     
     def local_value(self, s, apply_fun, parameters):
         """
