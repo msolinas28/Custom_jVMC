@@ -37,4 +37,4 @@ class TotalKineticOperator(Operator):
         grad_log_psi = jax.grad(log_psi) 
         laplacian_logpsi = self.mass * (laplacian(grad_log_psi)(s) + jnp.abs(grad_log_psi(s)) ** 2) 
 
-        return 0.5 * jnp.real(laplacian_logpsi)
+        return - 0.5 * jnp.real(laplacian_logpsi)
