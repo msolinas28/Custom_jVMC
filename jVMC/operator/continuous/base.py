@@ -4,11 +4,17 @@ import jax.numpy as jnp
 from abc import ABC, abstractmethod
 from jVMC.geometry import AbstractGeometry
 
+# TODO: might implement an "acting_on" property
 class Operator(ABC):
-    def __init__(self, geometry: AbstractGeometry):
+    def __init__(self, geometry: AbstractGeometry, is_multiplicative: bool):
         if not isinstance(geometry, AbstractGeometry):
             raise TypeError(f"geometry must be an AbstractGeometry, got {type(geometry)}")
         self.geometry = geometry
+        self._is_multiplicative = is_multiplicative
+
+    @property
+    def is_multiplicative(self):
+        return self._is_multiplicative
 
     def __add__(self, other):
         if isinstance(other, (int, float, complex)):
@@ -45,7 +51,10 @@ class Operator(ABC):
         if isinstance(other, (int, float, complex)):
             return ScaledOperator(self, other)
         elif isinstance(other, Operator):
-            return MulOperator(self, other)
+            if self.is_multiplicative and other.is_multiplicative:
+                return MulOperator(self, other)
+            else:
+                raise NotImplementedError("Multiplication only implemented for multiplicative operators.")
         else:
             raise NotImplemented
         
@@ -63,7 +72,7 @@ class Operator(ABC):
 
 class IdentityOperator(Operator):
     def __init__(self, geometry):
-        super().__init__(geometry)
+        super().__init__(geometry, is_multiplicative=True)
 
     def local_value(self, s, apply_fun, parameters):
         return jnp.asarray(1)
@@ -73,7 +82,7 @@ class SumOperator(Operator):
         if O_1.geometry != O_2.geometry:
             raise ValueError("Operators must share the same geometry.")
 
-        super().__init__(O_1.geometry)
+        super().__init__(O_1.geometry, O_1.is_multiplicative and O_2.is_multiplicative)
         self.O_1 = O_1
         self.O_2 = O_2
 
@@ -84,7 +93,7 @@ class ScaledOperator(Operator):
     def  __init__(self, O: Operator, scalar):
         if not isinstance(scalar, (int, float, complex)):
             raise ValueError('The second element has to be a scalar')
-        super().__init__(O.geometry)
+        super().__init__(O.geometry, O.is_multiplicative)
         self.scalar = scalar
         self.O = O
 
@@ -96,9 +105,9 @@ class MulOperator(Operator):
         if O_1.geometry != O_2.geometry:
             raise ValueError("Operators must share the same geometry.")
 
-        super().__init__(O_1.geometry)
+        super().__init__(O_1.geometry, is_multiplicative=True)
         self.O_1 = O_1
         self.O_2 = O_2
 
     def local_value(self, s, apply_fun, parameters):
-        NotImplementedError
+        return self.O_1.local_value(s, apply_fun, parameters) * self.O_1.local_value(s, apply_fun, parameters)
