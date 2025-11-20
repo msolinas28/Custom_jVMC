@@ -110,4 +110,4 @@ class MulOperator(Operator):
         self.O_2 = O_2
 
     def local_value(self, s, apply_fun, parameters):
-        return self.O_1.local_value(s, apply_fun, parameters) * self.O_1.local_value(s, apply_fun, parameters)
+        return self.O_1.local_value(s, apply_fun, parameters) * self.O_2.local_value(s, apply_fun, parameters)
