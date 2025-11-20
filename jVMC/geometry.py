@@ -73,14 +73,17 @@ class HyperRectangle(AbstractGeometry):
         return jnp.stack([-ext / 2, ext / 2], axis=1)
     
     def apply_PBC(self, x):
-        extent = jnp.array(self.extent)
-        PBC = jnp.array(self.PBC, dtype=jnp.bool_)
+        extent = jnp.tile(jnp.array(self.extent), self.n_particles)
+        PBC = jnp.tile(jnp.array(self.PBC, dtype=jnp.bool_), self.n_particles)
 
         return jnp.where(PBC, ((x + extent/2) % extent) - extent/2, x)
     
     def uniform_populate(self, key, dtype=jnp.float64):
-        low = self.domain[:, 0]
-        shape = (self.n_particles, self.n_dim)
+        low = self.domain[:, 0]      
+        shape = (self.n_particles * self.n_dim,)
         samples = jax.random.uniform(jVMC.util.key_gen.format_key(key), shape, dtype=dtype)
-        
-        return low + samples * jnp.array(self.extent)
+
+        low_flat = jnp.repeat(low, self.n_particles)
+        extent_flat = jnp.repeat(jnp.array(self.extent), self.n_particles)
+
+        return self.apply_PBC(low_flat + samples * extent_flat)

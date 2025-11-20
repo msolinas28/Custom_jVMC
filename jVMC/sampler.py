@@ -533,7 +533,7 @@ class MCSamplerCont(MCSampler):
         
         if not isinstance(updateProposer, AbstractProposeCont):
             raise ValueError(f'The argument \'updateProposer\' has to be an istance of the class \'jVMC.propose.AbstractProposeCont\'.')
-        sampleShape = (updateProposer.geometry.n_particles, updateProposer.geometry.n_dim)
+        sampleShape = (updateProposer.geometry.n_particles * updateProposer.geometry.n_dim,)
 
         if sweepSteps is None:
             sweepSteps = updateProposer.geometry.n_particles
@@ -559,7 +559,7 @@ class MCSamplerCont(MCSampler):
             if initState.shape != self.sampleShape:
                 raise ValueError(
                     "'initState' does not have the correct shape.\n" \
-                    f"Allowed shapes are (n_chains, n_particles, n_dim) or (n_particles, n_dim), got {initState.shape}")
+                    f"Allowed shapes are (n_chains, n_particles * n_dim) or (n_particles * n_dim, ), got {initState.shape}")
             warnings.warn(
                 "Got a single sample to initialize all chains in 'initState'! \n" \
                 "It is preferred to initialize each chain in a different way.")
