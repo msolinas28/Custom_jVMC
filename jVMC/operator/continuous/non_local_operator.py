@@ -6,11 +6,11 @@ from jVMC.geometry import AbstractGeometry
 
 def laplacian(grad_f):
     def lap(x):
-        hessian_times_v = lambda v: jax.jvp(jax.grad(grad_f), (x,), (v,))[1]
         basis_vectors = jnp.eye(len(x))
-        # Vectorize across all dimensions of x
-        diag_hess = jax.vmap(hessian_times_v)(basis_vectors)
-        return jnp.sum(jnp.diagonal(diag_hess))
+        def hessian_diag_element(v):
+            return jnp.dot(jax.jvp(grad_f, (x,), (v,))[1], v)
+        # Vectorize across dimensions of grad_f
+        return jax.vmap(hessian_diag_element)(basis_vectors)
     return lap
 
 class TotalKineticOperator(Operator):
@@ -20,7 +20,7 @@ class TotalKineticOperator(Operator):
         if isinstance(mass, complex):
             raise ValueError("The property 'mass' can not be complex.")
         elif isinstance(mass, (int, float)):
-            self._mass = jnp.asarray(mass)
+            self._mass = jnp.repeat(mass, self.geometry.n_particles)
         elif isinstance(mass, (list, tuple)) or hasattr(mass, '__len__'):
             if len(mass) != geometry.n_particles:
                 raise ValueError(f"Got {len(mass)} masses which is not the same as the number of particles ({geometry.n_particles}).")
@@ -35,6 +35,11 @@ class TotalKineticOperator(Operator):
     def local_value(self, s, apply_fun, parameters):
         log_psi = lambda x: apply_fun(parameters, x)
         grad_log_psi = jax.grad(log_psi) 
-        laplacian_logpsi = self.mass * (laplacian(grad_log_psi)(s) + jnp.abs(grad_log_psi(s)) ** 2) 
+        lap_log_psi = laplacian(grad_log_psi)(s)
+        grad_log_psi = grad_log_psi(s)
+        mass = jnp.repeat(self.mass, self.geometry.n_dim)
+        laplacian_psi = jnp.real(lap_log_psi + grad_log_psi * grad_log_psi.conj())
 
-        return - 0.5 * jnp.real(laplacian_logpsi)
+        print((laplacian_psi / mass).shape)
+
+        return - 0.5 * jnp.sum(laplacian_psi / mass)
