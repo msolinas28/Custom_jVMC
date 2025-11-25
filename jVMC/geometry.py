@@ -100,6 +100,6 @@ class HyperRectangle(AbstractGeometry):
         extent = jnp.array(self.extent)
         PBC = jnp.array(self.PBC, dtype=bool)
         diff = diff - PBC * extent * jnp.round(diff / extent)
-
         sqdist = jnp.sum(diff**2, axis=-1)
+
         return jnp.sqrt(sqdist[jnp.triu_indices(x.shape[0], 1)])
