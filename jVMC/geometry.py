@@ -65,6 +65,12 @@ class AbstractGeometry(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_distance(self, x):
+        """
+        Given a configuration x, returns a vector with all pairwise distances between particles
+        """
+
 class HyperRectangle(AbstractGeometry):
     @property
     def domain(self):
@@ -87,3 +93,13 @@ class HyperRectangle(AbstractGeometry):
         extent_flat = jnp.repeat(jnp.array(self.extent), self.n_particles)
 
         return self.apply_PBC(low_flat + samples * extent_flat)
+    
+    def get_distance(self, x):
+        x = x.reshape((self.n_particles, self.n_dim))
+        diff = x[:, None, :] - x[None, :, :]
+        extent = jnp.array(self.extent)
+        PBC = jnp.array(self.PBC, dtype=bool)
+        diff = diff - PBC * extent * jnp.round(diff / extent)
+
+        sqdist = jnp.sum(diff**2, axis=-1)
+        return jnp.sqrt(sqdist[jnp.triu_indices(x.shape[0], 1)])
