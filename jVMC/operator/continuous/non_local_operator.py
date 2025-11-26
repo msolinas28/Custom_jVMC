@@ -32,7 +32,7 @@ class TotalKineticOperator(Operator):
     def mass(self):
         return self._mass
     
-    def local_value(self, s, apply_fun, parameters):
+    def _get_O_loc(self, s, apply_fun, parameters):
         log_psi = lambda x: apply_fun(parameters, x)
         grad_log_psi = jax.grad(log_psi) 
         lap_log_psi = laplacian(grad_log_psi)(s)
