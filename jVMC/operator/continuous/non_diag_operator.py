@@ -15,7 +15,7 @@ def laplacian(grad_f):
 
 class TotalKineticOperator(Operator):
     def __init__(self, geometry: AbstractGeometry, mass: float | list = 1):
-        super().__init__(geometry, is_multiplicative=False)
+        super().__init__(geometry, is_diagonal=False)
 
         if isinstance(mass, complex):
             raise ValueError("The property 'mass' can not be complex.")
@@ -36,7 +36,7 @@ class TotalKineticOperator(Operator):
     def _inverse_mass(self):
         return 1. / jnp.repeat(self.mass, self.geometry.n_dim)
     
-    def _get_O_loc(self, s, apply_fun, parameters, *args):
+    def _get_O_loc(self, s, apply_fun, parameters, kwargs):
         log_psi = lambda x: apply_fun(parameters, x)
         grad_log_psi = jax.grad(log_psi) 
         lap_log_psi = laplacian(grad_log_psi)(s)

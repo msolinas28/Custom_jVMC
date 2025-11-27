@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 class PotentialOperator(Operator):
     def __init__(self, geometry, potential):
-        super().__init__(geometry, is_multiplicative=True)
+        super().__init__(geometry, is_diagonal=True)
 
         if not callable(potential):
             raise ValueError("The property potential has to be a function.")
@@ -13,12 +13,12 @@ class PotentialOperator(Operator):
     def potential(self):
         return self._potential
         
-    def _get_O_loc(self, s, apply_fun, parameters, *args):
+    def _get_O_loc(self, s, apply_fun, parameters, kwargs):
         return self.potential(s)
     
 class CoulombInteraction(Operator):
     def __init__(self, geometry, charge=None):
-        super().__init__(geometry, True)
+        super().__init__(geometry, is_diagonal=True)
         
         if charge is not None:
             if hasattr(charge, '__len__'):
@@ -31,5 +31,5 @@ class CoulombInteraction(Operator):
         else:
             self._interaction_charge = 1
 
-    def _get_O_loc(self, s, apply_fun, parameters, *args):
+    def _get_O_loc(self, s, apply_fun, parameters, kwargs):
         return jnp.sum(self._interaction_charge / self.geometry.get_distance(s))
