@@ -32,14 +32,15 @@ class TotalKineticOperator(Operator):
     def mass(self):
         return self._mass
     
-    def _get_O_loc(self, s, apply_fun, parameters):
+    @property
+    def _inverse_mass(self):
+        return 1. / jnp.repeat(self.mass, self.geometry.n_dim)
+    
+    def _get_O_loc(self, s, apply_fun, parameters, *args):
         log_psi = lambda x: apply_fun(parameters, x)
         grad_log_psi = jax.grad(log_psi) 
         lap_log_psi = laplacian(grad_log_psi)(s)
         grad_log_psi = grad_log_psi(s)
-        mass = jnp.repeat(self.mass, self.geometry.n_dim)
         laplacian_psi = jnp.real(lap_log_psi + grad_log_psi * grad_log_psi.conj())
 
-        print((laplacian_psi / mass).shape)
-
-        return - 0.5 * jnp.sum(laplacian_psi / mass)
+        return - 0.5 * jnp.sum(laplacian_psi * self._inverse_mass)

@@ -13,7 +13,7 @@ class PotentialOperator(Operator):
     def potential(self):
         return self._potential
         
-    def _get_O_loc(self, s, apply_fun, parameters):
+    def _get_O_loc(self, s, apply_fun, parameters, *args):
         return self.potential(s)
     
 class CoulombInteraction(Operator):
@@ -31,5 +31,5 @@ class CoulombInteraction(Operator):
         else:
             self._interaction_charge = 1
 
-    def _get_O_loc(self, s, apply_fun, parameters):
+    def _get_O_loc(self, s, apply_fun, parameters, *args):
         return jnp.sum(self._interaction_charge / self.geometry.get_distance(s))
