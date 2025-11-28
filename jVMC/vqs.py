@@ -181,8 +181,12 @@ class NQS:
         self._append_gradients_dict = global_defs.pmap_for_my_devices(lambda x, y: tree_map(lambda a,b: jnp.concatenate((a[:, :], 1.j * b[:, :]), axis=1), x, y), in_axes=(0, 0))
         self._sample_jitd = {}
 
-    # **  end def __init__
+        if self.logarithmic:
+            self.apply_fun = self.net.apply
+        else:
+            self.apply_fun = lambda paramenters, x: jnp.log(self.net.apply(paramenters, x))
 
+    # **  end def __init__
 
     def init_net(self, s):
 
@@ -489,4 +493,3 @@ class NQS:
         #                        **unfreeze(self.parameters.pop("params")[0]),
         #                        "params": unfreeze(val)
         #                        })
-
