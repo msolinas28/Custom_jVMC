@@ -174,9 +174,6 @@ class Operator(metaclass=abc.ABCMeta):
 
         return self._flatten_pmapd(self.sp), self.matEl
 
-    def _get_O_loc(self, matEl, logPsiS, logPsiSP):
-        return jax.vmap(lambda x, y, z: jnp.sum(x * jnp.exp(z - y)), in_axes=(0, 0, 0))(matEl, logPsiS, logPsiSP.reshape(matEl.shape))
-
     def _get_O_loc(self, s, apply_fun, parameters, kwargs):
         # This only checks during compilation
         # only breaks if someone puts kwargs['LogPsi'] = None after calling the fun one time
@@ -187,15 +184,9 @@ class Operator(metaclass=abc.ABCMeta):
         
         sampleOffdConfigs, _ = self.get_s_primes(s, kwargs)
         logPsiSP = apply_fun(parameters, sampleOffdConfigs)
-        return jnp.sum()
-        
-        lambda x, y, z: jnp.sum(x * jnp.exp(z - y)), in_axes=(0, 0, 0))(matEl, logPsiS, logPsiSP.reshape(matEl.shape))
-
-
-    
-        
-
-
+        psi_raio = jnp.exp(logPsiSP - logPsiS)
+        matEl = 0 #TODO (understand shape)
+        return jnp.sum(matEl * psi_raio)
 
     def get_O_loc(self, s, psi: NQS, **kwargs):
         apply_fun = psi.apply_fun
