@@ -8,6 +8,12 @@ from jVMC.geometry import AbstractGeometry
 from jVMC.vqs import NQS, create_batches
 import jVMC.global_defs as global_defs
 
+def _flatten_ops(op):
+    if isinstance(op, SumOperator):
+        return op.ops
+    else:
+        return [op]
+
 class Operator(ABC):
     def __init__(self, geometry: AbstractGeometry, is_diagonal: bool):
         if not isinstance(geometry, AbstractGeometry):
@@ -35,32 +41,36 @@ class Operator(ABC):
 
     def __add__(self, other):
         if isinstance(other, (int, float, complex)):
-            return SumOperator(self, ScaledOperator(IdentityOperator(self.geometry), other))
+            right_op = _flatten_ops(ScaledOperator(IdentityOperator(self.geometry), other))
         elif isinstance(other, Operator):
-            return SumOperator(self, other)
+            right_op = _flatten_ops(other)
         else:
             raise NotImplemented
+        return SumOperator(_flatten_ops(self) + right_op)
         
     def __radd__(self, other):
         if isinstance(other, (int, float, complex)):
-            return SumOperator(ScaledOperator(IdentityOperator(self.geometry), other), self)
+            left_ops = _flatten_ops(ScaledOperator(IdentityOperator(self.geometry), other))
+            return SumOperator(left_ops + _flatten_ops(self))
         else:
             raise NotImplemented
-        
+            
     def __neg__(self):
         return ScaledOperator(self, -1)
     
     def __sub__(self, other):
         if isinstance(other, (int, float, complex)):
-            return SumOperator(self, ScaledOperator(IdentityOperator(self.geometry), -other))
+            right_op = _flatten_ops(ScaledOperator(IdentityOperator(self.geometry), -other))
         elif isinstance(other, Operator):
-            return SumOperator(self, -other)
+            right_op = _flatten_ops(-other)
         else:
             raise NotImplemented
+        return SumOperator(_flatten_ops(self) + right_op)
         
     def __rsub__(self, other):
         if isinstance(other, (int, float, complex)):
-            return SumOperator(ScaledOperator(IdentityOperator(self.geometry), other), -self)
+            left_ops = _flatten_ops(ScaledOperator(IdentityOperator(self.geometry), other))
+            return SumOperator(left_ops + _flatten_ops(-self))
         else:
             raise NotImplemented
         
@@ -116,16 +126,26 @@ class IdentityOperator(Operator):
         return jnp.asarray(1)
     
 class SumOperator(Operator):
-    def __init__(self, O_1: Operator, O_2: Operator):    
-        if O_1.geometry != O_2.geometry:
-            raise ValueError("Operators must share the same geometry.")
-
-        super().__init__(O_1.geometry, O_1.is_diagonal and O_2.is_diagonal)
-        self.O_1 = O_1
-        self.O_2 = O_2
+    def __init__(self, ops):
+        if len(ops) == 0:
+            raise ValueError("SumOperator requires at least one operator.")        
+        for o in ops:
+            if not isinstance(o, Operator):
+                raise TypeError("All entries in ops must be Operator instances.")
+            if o.geometry != ops[0].geometry:
+                raise ValueError("All operators must share the same geometry.")
+        super().__init__(ops[0].geometry, is_diagonal=all(o.is_diagonal for o in ops))
+        
+        flat = []
+        for o in ops:
+            if isinstance(o, SumOperator):
+                flat.extend(o.ops)
+            else:
+                flat.append(o)
+        self.ops = flat
 
     def _get_O_loc(self, s, apply_fun, parameters, kwargs):
-        return self.O_1._get_O_loc(s, apply_fun, parameters, kwargs) + self.O_2._get_O_loc(s, apply_fun, parameters, kwargs)
+        return jnp.asarray([O._get_O_loc(s, apply_fun, parameters, kwargs) for O in self.ops]).sum()
     
 class ScaledOperator(Operator):
     def  __init__(self, O: Operator, scalar):

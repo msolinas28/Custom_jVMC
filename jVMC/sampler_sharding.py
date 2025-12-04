@@ -4,12 +4,15 @@ import jax.random as random
 import numpy as np
 from jax import vmap
 from functools import partial
+from jax.experimental.shard_map import shard_map
 
 import jVMC.global_defs as global_defs
 import jVMC.mpi_wrapper as mpi
 from jVMC.nets.sym_wrapper import SymNet
 from jVMC.propose import AbstractProposeCont
 from jVMC.util.key_gen import format_key
+from jVMC.vqs import NQS
+from jVMC.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC
 
 # Deprecated import 
 import warnings
@@ -76,7 +79,7 @@ class MCSampler:
         ``mu`` parameter must be set to 1.0, to sample the unchanged POVM distribution.
     """
 
-    def __init__(self, net, sampleShape, key=None, updateProposer=None, numChains=1, updateProposerArg=None,
+    def __init__(self, net: NQS, sampleShape, key=None, updateProposer=None, numChains=1, updateProposerArg=None,
                  numSamples=100, thermalizationSweeps=10, sweepSteps=None, initState=None, mu=2, logProbFactor=0.5):
         """Initializes the MCSampler class.
         """
@@ -94,9 +97,8 @@ class MCSampler:
         if isinstance(self.net.net, SymNet):
             self.orbit = self.net.net.orbit.orbit
 
-        # CHANGED: the first dimension no longer has to n_devices 
         # TODO: do we really need int32?
-        stateShape = (numChains, ) + self.sampleShape
+        stateShape = (jax.local_device_count(), numChains) + self.sampleShape
         self.states = jnp.zeros(stateShape, dtype=np.int32).reshape(stateShape)
 
         # Make sure that net is initialized
@@ -112,8 +114,8 @@ class MCSampler:
 
         # CHANGED
         self.key = key
-        key = jax.random.fold_in(key, jax.process_index())
-        keys = jax.random.split(key, jax.local_device_count())
+        self.key = jax.random.fold_in(self.key, jax.process_index())
+        self.key = jax.random.split(self.key, jax.local_device_count())
 
         # CHANGED
         if sweepSteps is None:
@@ -121,23 +123,21 @@ class MCSampler:
         self.sweepSteps = sweepSteps
         self.thermalizationSweeps = thermalizationSweeps
         self.numSamples = numSamples
-
-        # TODO: Remove this, since it is already in self.mc_init()
-        # shape = (global_defs.device_count(),) + (1,)
-        # self.numProposed = jnp.zeros(shape, dtype=np.int64)
-        # self.numAccepted = jnp.zeros(shape, dtype=np.int64)
-
         self.numChains = numChains
 
         # jit'd member functions
-        self._get_samples_jitd = {}  # will hold a jit'd function for each number of samples
-        self._randomize_samples_jitd = {}  # will hold a jit'd function for each number of samples
+        self._get_samples_jsh = {}  # will hold a jit'd function for each number of samples
+        self._randomize_samples_jsh = {}  # will hold a jit'd function for each number of samples
 
-
-        # pmap'd helper function
-        self._logAccProb_pmapd = global_defs.pmap_for_my_devices(self._logAccProb,
-                                                                 in_axes=(0, None, None, None),
-                                                                 static_broadcasted_argnums=(2,))
+        self._logAccProb_jsh = jax.jit(
+            shard_map(
+                self._logAccProb,
+                mesh=MESH,
+                in_specs=(DEVICE_SPEC,) + (REPLICATED_SPEC,) * 3,
+                out_specs=REPLICATED_SPEC # TODO: understand if this is correct
+            ),
+            static_argnums=(2,)
+        )
 
     def _logAccProb(self, x, mu, sampler_net, netParams):
         # vmap is over parallel MC chains
@@ -152,16 +152,6 @@ class MCSampler:
         """
 
         self.numSamples = N
-
-    # TODO: Now can be deleted
-    def set_random_key(self, key):
-        """Set key for pseudo random number generator.
-
-        Args:
-            * ``key``: Key (jax.random.PRNGKey)
-        """
-
-        self.key = jax.random.split(key, global_defs.device_count())
 
     # CHANGED
     @property
@@ -227,7 +217,8 @@ class MCSampler:
         return configs, logPsi, p / mpi.global_sum(p)
 
     def _randomize_samples(self, samples, key, orbit):
-        """ For a given set of samples apply a random symmetry transformation to each sample
+        """ 
+        For a given set of samples apply a random symmetry transformation to each sample
         """
         orbit_indices = random.choice(key, orbit.shape[0], shape=(samples.shape[0],))
         samples = samples * 2 - 1
@@ -235,21 +226,31 @@ class MCSampler:
 
     def _get_samples_gen(self, params, numSamples, multipleOf=1):
 
-        numSamples, self.globNumSamples = mpi.distribute_sampling(numSamples, localDevices=global_defs.device_count(), numChainsPerDevice=multipleOf)
+        numSamples, self.globNumSamples = mpi.distribute_sampling(numSamples, localDevices=jax.local_device_count(), numChainsPerDevice=multipleOf)
 
-        tmpKeys = random.split(self.key[0], 3 * global_defs.device_count())
-        self.key = tmpKeys[:global_defs.device_count()]
-        tmpKey = tmpKeys[global_defs.device_count():2 * global_defs.device_count()]
-        tmpKey2 = tmpKeys[2 * global_defs.device_count():]
+        local_devices = jax.local_device_count()
+        tmpKeys = random.split(self.key[0], 3 * local_devices)
+        self.key = tmpKeys[:local_devices]
+        sample_key = tmpKeys[local_devices:2 * local_devices]
+        orbit_key = tmpKeys[2 * local_devices:]
 
-        samples = self.net.sample(numSamples, tmpKey, parameters=params)
+        # TODO: this assumes that sample_key is correctly sharded inside the method sample 
+        # (i.e. in_specs for the keys should be with self.replicater_sharding)
+        samples = self.net.sample(numSamples, sample_key, parameters=params)
+        numSamplesStr = str(numSamples)
 
-        if not str(numSamples) in self._randomize_samples_jitd:
-            self._randomize_samples_jitd[str(numSamples)] = global_defs.pmap_for_my_devices(self._randomize_samples, static_broadcasted_argnums=(), in_axes=(0, 0, None))
+        if numSamplesStr not in self._randomize_samples_jsh:
+             self._randomize_samples_jsh[numSamplesStr] = jax.jit(
+                shard_map(
+                    self._randomize_samples,
+                    mesh=MESH,
+                    in_specs=(DEVICE_SPEC,) * 2 + (REPLICATED_SPEC),
+                    out_specs=REPLICATED_SPEC
+                )
+            )
 
         if not self.orbit is None:
-            samples = self._randomize_samples_jitd[str(numSamples)](samples, tmpKey2, self.orbit)
-            # return self._randomize_samples_jitd[str(numSamples)](samples, tmpKey2, self.orbit)
+            samples = self._randomize_samples_jsh[str(numSamples)](samples, orbit_key, self.orbit)
         
         return samples, self.net(samples), jnp.ones(samples.shape[:2]) / self.globNumSamples
 
@@ -268,17 +269,23 @@ class MCSampler:
         # Initialize sampling stuff
         self._mc_init(params)
 
-        numSamples, self.globNumSamples = mpi.distribute_sampling(numSamples, localDevices=global_defs.device_count(), numChainsPerDevice=np.lcm(self.numChains, multipleOf))
+        numSamples, self.globNumSamples = mpi.distribute_sampling(numSamples, localDevices=jax.local_device_count(), numChainsPerDevice=np.lcm(self.numChains, multipleOf))
         numSamplesStr = str(numSamples)
 
         # check whether _get_samples is already compiled for given number of samples
-        if not numSamplesStr in self._get_samples_jitd:
-            self._get_samples_jitd[numSamplesStr] = global_defs.pmap_for_my_devices(partial(self._get_samples, sweepFunction=partial(self._sweep, net=net)),
-                                                                                    static_broadcasted_argnums=(1, 2, 3, 9, 11),
-                                                                                    in_axes=(None, None, None, None, 0, 0, 0, 0, 0, None, None, None))
+        if not numSamplesStr in self._get_samples_jsh:
+            self._get_samples_jsh[numSamplesStr] = jax.jit(
+                shard_map(
+                    partial(self._get_samples, sweepFunction=partial(self._sweep, net=net)),
+                    mesh=MESH,
+                    in_specs=(REPLICATED_SPEC,) * 4 + (DEVICE_SPEC,) * 5 + (REPLICATED_SPEC,) * 3,
+                    out_specs=(REPLICATED_SPEC,) * 2 # might need out_specs=((DEVICE_SPEC,) * 5, REPLICATED_SPEC)
+                ),
+                static_argnums=(1, 2, 3, 9, 11)
+            )
 
         (self.states, self.logAccProb, self.key, self.numProposed, self.numAccepted), configs =\
-            self._get_samples_jitd[numSamplesStr](params, numSamples, self.thermalizationSweeps, self.sweepSteps,
+            self._get_samples_jsh[numSamplesStr](params, numSamples, self.thermalizationSweeps, self.sweepSteps,
                                                   self.states, self.logAccProb, self.key, self.numProposed, self.numAccepted,
                                                   self.updateProposer, self.updateProposerArg, self.sampleShape)
 
@@ -352,9 +359,9 @@ class MCSampler:
 
     def _mc_init(self, netParams):
 
-        self.logAccProb = self._logAccProb_pmapd(self.states, self.mu, self.sampler_net, netParams)
+        self.logAccProb = self._logAccProb_jsh(self.states, self.mu, self.sampler_net, netParams)
 
-        shape = (global_defs.device_count(),) + (1,)
+        shape = (jax.local_device_count(),) + (1,)
 
         self.numProposed = jnp.zeros(shape, dtype=np.int64)
         self.numAccepted = jnp.zeros(shape, dtype=np.int64)
