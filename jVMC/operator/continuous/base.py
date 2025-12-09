@@ -1,28 +1,29 @@
-import jax 
+import jax
 import jax.numpy as jnp
 from abc import ABC, abstractmethod
-from typing import Callable
 import inspect
-from typing import Callable, List
 
 from jVMC.geometry import AbstractGeometry
 from jVMC.vqs import NQS, create_batches
 import jVMC.global_defs as global_defs
+
+def _has_kwargs(fun):
+    sig = inspect.signature(fun)
+    return any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values())
 
 class Operator(ABC):
     def __init__(self, geometry: AbstractGeometry, is_diagonal: bool):
         if not isinstance(geometry, AbstractGeometry):
             raise TypeError(f"geometry must be an AbstractGeometry, got {type(geometry)}")
         self.geometry = geometry
+        self._is_flattened = False
         self._is_diagonal = is_diagonal
-        self._init_pmap()
-        self._ops = [self]
         
     def _init_pmap(self):
-        self._get_O_loc_vmapd = jax.vmap(self._get_O_loc, in_axes=(0, None, None, None))
+        self._get_O_loc_vmapd = jax.vmap(self._evaluate_flat, in_axes=(0, None, None, None))
         self._get_O_loc_pmapd = global_defs.pmap_for_my_devices(
             self._get_O_loc_vmapd,
-            static_broadcasted_argnums=(1,),
+            static_broadcasted_argnums=(1, ),
             in_axes=(0, None, None, None)
         )
         self._get_O_loc_batched_pmapd = global_defs.pmap_for_my_devices(
@@ -34,58 +35,41 @@ class Operator(ABC):
     @property
     def is_diagonal(self):
         return self._is_diagonal
-
+    
     def __add__(self, other):
         if isinstance(other, (int, float, complex)):
-            new_ops = _ScaledOperator(IdentityOperator(self.geometry), other)._ops
-            is_diagonal = self.is_diagonal
+            return SumOperator(self, ScaledOperator(IdentityOperator(self.geometry), other))
         elif isinstance(other, Operator):
-            if other.geometry != self.geometry:
-                raise ValueError("Only two operators with the same geometry can be summed!")
-            new_ops = other._ops
-            is_diagonal = self.is_diagonal and other.is_diagonal
+            return SumOperator(self, other)
         else:
             raise NotImplemented
-        return _SumOperator(self._ops + new_ops, is_diagonal)
         
     def __radd__(self, other):
         if isinstance(other, (int, float, complex)):
-            left_ops = _ScaledOperator(IdentityOperator(self.geometry), other)._ops
-            return _SumOperator(left_ops + self._ops, self.is_diagonal)
+            return SumOperator(ScaledOperator(IdentityOperator(self.geometry), other), self)
         else:
             raise NotImplemented
-            
+        
     def __neg__(self):
-        return -1 * self 
+        return ScaledOperator(self, -1)
     
     def __sub__(self, other):
         if isinstance(other, (int, float, complex)):
-            new_ops = _ScaledOperator(IdentityOperator(self.geometry), -other)._ops
-            is_diagonal = self.is_diagonal
+            return SumOperator(self, ScaledOperator(IdentityOperator(self.geometry), -other))
         elif isinstance(other, Operator):
-            if other.geometry != self.geometry:
-                raise ValueError("Only two operators with the same geometry can be summed!")
-            new_ops = [-O for O in other._ops]
-            is_diagonal = self.is_diagonal and other.is_diagonal
+            return SumOperator(self, -other)
         else:
             raise NotImplemented
-        return _SumOperator(self._ops + new_ops, is_diagonal)
         
     def __rsub__(self, other):
         if isinstance(other, (int, float, complex)):
-            left_ops = _ScaledOperator(IdentityOperator(self.geometry), other)._ops
-            return _SumOperator(left_ops + [-O for O in self._ops])
+            return SumOperator(ScaledOperator(IdentityOperator(self.geometry), other), -self)
         else:
             raise NotImplemented
         
     def __mul__(self, other):
-        if isinstance(other, (int, float, complex)):
-            ops = [_ScaledOperator(O, other) for O in self._ops]            
-            if len(ops) == 1:
-                return ops[0]
-            else:
-                return _SumOperator(ops, self.is_diagonal) 
-            #TODO Implement case for Muloperator
+        if isinstance(other, (int, float, complex)) or callable(other):
+            return ScaledOperator(self, other)
         elif isinstance(other, Operator):
             if self.is_diagonal and other.is_diagonal:
                 return MulOperator(self, other)
@@ -95,21 +79,64 @@ class Operator(ABC):
             raise NotImplemented
         
     def __rmul__(self, other):
-        if isinstance(other, (int, float, complex)):
-            ops = [_ScaledOperator(O, other) for O in self._ops]            
-            if len(ops) == 1:
-                return ops[0]
-            else:
-                return _SumOperator(ops, self.is_diagonal) 
+        if isinstance(other, (int, float, complex)) or callable(other):
+            return ScaledOperator(self, other)
         else:
             raise NotImplemented
+
+    def _flatten_tree(self):
+        instructions = []
+        stack = [(self, False)]  # (node, visited)
+
+        while stack:
+            node, visited = stack.pop()
+
+            if visited:
+                if isinstance(node, SumOperator):
+                    instructions.append(("ADD", None))
+                elif isinstance(node, MulOperator):
+                    instructions.append(("MUL", None))
+                elif isinstance(node, ScaledOperator):
+                    instructions.append(("SCALE", node.scalar))
+            else:
+                if isinstance(node, SumOperator) or isinstance(node, MulOperator):
+                    stack += [(node, True), (node.O_1, False), (node.O_2, False)]
+                elif isinstance(node, ScaledOperator):
+                    stack += [(node, True), (node.O, False)]
+                else:
+                    instructions.append(("LEAF", node))
+
+        self._instructions = instructions
+        self._is_flattened = True
+
+    def _evaluate_flat(self, s, apply_fun, parameters, kwargs):
+        stack = []
+
+        for op, arg in self._instructions:
+            if op == "LEAF":
+                stack.append(arg._get_O_loc(s, apply_fun, parameters, kwargs))
+            elif op == "SCALE":
+                scale = arg(**kwargs) if callable(arg) else arg
+                stack[-1] = scale * stack[-1]
+            elif op == "ADD":
+                a = stack.pop()
+                b = stack.pop()
+                stack.append(a + b)
+            elif op == "MUL":
+                a = stack.pop()
+                b = stack.pop()
+                stack.append(a * b)
         
-    def make_dynamic(self, f_t: Callable):
-        return TimeDependentOperator(self, f_t)
+        assert len(stack) == 1
+        return stack[0]
 
     def get_O_loc(self, s, psi: NQS, **kwargs):
-        apply_fun = psi.net.apply
+        apply_fun = psi.apply_fun
         parameters = psi.parameters
+
+        if not self._is_flattened:
+            self._flatten_tree()  
+            self._init_pmap()
 
         if psi.batchSize is not None:
             return self._get_O_loc_batched_pmapd(s, apply_fun, parameters, psi.batchSize, kwargs)
@@ -133,65 +160,43 @@ class Operator(ABC):
 
 class IdentityOperator(Operator):
     def __init__(self, geometry):
-        super().__init__(geometry, is_diagonal=True)
+        super().__init__(geometry, True)
 
     def _get_O_loc(self, s, apply_fun, parameters, kwargs):
-        return jnp.asarray(1)
-    
-class _SumOperator(Operator):
-    def __init__(self, ops, is_diagonal):
-        if len(ops) == 0:
-            raise ValueError("SumOperator requires at least one operator.")
-        super().__init__(ops[0].geometry, is_diagonal=is_diagonal)
-        self._ops = ops
+        return jnp.asarray(1.0)
+
+class SumOperator(Operator):
+    def __init__(self, O_1: Operator, O_2: Operator):    
+        if O_1.geometry != O_2.geometry:
+            raise ValueError("Operators must share the same geometry.")
+        super().__init__(O_1.geometry, O_1.is_diagonal and O_2.is_diagonal)
+        self.O_1 = O_1
+        self.O_2 = O_2
 
     def _get_O_loc(self, s, apply_fun, parameters, kwargs):
-        return jnp.asarray([O._get_O_loc(s, apply_fun, parameters, kwargs) for O in self._ops]).sum()
+        pass
     
-class _ScaledOperator(Operator):
-    def __init__(self, O: Operator, scalar):
-        if len(O._ops) !=1:
-            raise NotImplementedError
-        if not isinstance(scalar, (int, float, complex)):
-            raise ValueError('The second element has to be a scalar')
+class ScaledOperator(Operator):
+    def  __init__(self, O: Operator, scalar):
+        if not (isinstance(scalar, (int, float, complex)) or callable(scalar)):
+            raise ValueError('The second element has to be a scalar.')
+        if callable(scalar) and (not _has_kwargs(scalar)):
+            raise ValueError('Any callable that multiplies an operator has to have **kwargs in its argument.')
+
         super().__init__(O.geometry, O.is_diagonal)
-
         self.scalar = scalar
-        if isinstance(O, _ScaledOperator):
-            self.scalar *= O.scalar
-            self.O = O.O
-        else:
-            self.scalar = scalar
-            self.O = O
+        self.O = O
 
     def _get_O_loc(self, s, apply_fun, parameters, kwargs):
-        return self.scalar * self.O._get_O_loc(s, apply_fun, parameters, kwargs)
+        pass
     
 class MulOperator(Operator):
     def __init__(self, O_1: Operator, O_2: Operator):    
         if O_1.geometry != O_2.geometry:
             raise ValueError("Operators must share the same geometry.")
-
         super().__init__(O_1.geometry, is_diagonal=True)
         self.O_1 = O_1
         self.O_2 = O_2
 
     def _get_O_loc(self, s, apply_fun, parameters, kwargs):
-        return self.O_1._get_O_loc(s, apply_fun, parameters, kwargs) * self.O_2._get_O_loc(s, apply_fun, parameters, kwargs)
-    
-class TimeDependentOperator(Operator):
-    def __init__(self, O: Operator, f_t: Callable):
-        if not callable(f_t):
-            raise ValueError("The argument 'f_t' has to a be function.")
-        if len(inspect.signature(f_t).parameters) != 1:
-            raise ValueError(f"The function 'f_t' has to take only one argument, got {len(inspect.signature(f_t).parameters)}.")
-        super().__init__(O.geometry, O.is_diagonal)
-
-        self.O = O
-        self.f_t = f_t
-
-    def _get_O_loc(self, s, apply_fun, parameters, kwargs):
-        if "t" not in kwargs:
-            raise KeyError("'t' must be provided in kwargs for time-dependent operators.")
-        
-        return self.f_t(kwargs["t"]) * self.O._get_O_loc(s, apply_fun, parameters, kwargs)
+        pass
