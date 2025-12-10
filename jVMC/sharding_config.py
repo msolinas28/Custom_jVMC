@@ -5,6 +5,9 @@ from jax.sharding import PartitionSpec as P
 
 try:
     jax.distributed.initialize()
+    num_processes = jax.process_count()
+    num_devices = jax.device_count() 
+    print(f"JAX distributed initialized: {num_processes} processes and {num_devices} devices.")
 except RuntimeError:
     pass
 

@@ -101,6 +101,7 @@ class MCSampler:
 
         # Make sure that net is initialized
         self.net(self.states)
+        # self.net.init_net(self.states)
         self.sampler_net, _ = self.net.get_sampler_net()
 
         self.logProbFactor = logProbFactor

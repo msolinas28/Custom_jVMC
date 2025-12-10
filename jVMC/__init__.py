@@ -5,6 +5,7 @@ from . import operator
 from . import util
 from . import mpi_wrapper
 from . import vqs
+from . import vqs_sharding
 from . import sampler
 from . import sampler_sharding
 from . import stats
