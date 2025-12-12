@@ -86,7 +86,7 @@ class MCSampler:
         else: 
             self.sampleShape = (sampleShape,)
 
-        self.net = net
+        self._net = net
         if (not net.is_generator) and (updateProposer is None):
             raise RuntimeError("Instantiation of MCSampler: `updateProposer` is `None` and cannot be used for MCMC sampling.")
         self.orbit = None
@@ -142,6 +142,10 @@ class MCSampler:
     def key(self, value):
         self._key = format_key(value)
         self._is_state_initialized = False
+
+    @property
+    def net(self):
+        return self._net
 
     def _init_state(self):
         tmp = jax.random.fold_in(self.key, jax.process_index())
@@ -318,8 +322,9 @@ class MCSampler:
             self.net.params = tmpP        
 
         self.logAccProb = self._logAccProb_jsh(self.states, self.mu, params)
-        self.numProposed = jax.device_put(jnp.zeros((self.numChains,), dtype=np.int64), DEVICE_SHARDING)
-        self.numAccepted = jax.device_put(jnp.zeros((self.numChains,), dtype=np.int64), DEVICE_SHARDING)
+        # Each devices handles its own acceptance rate
+        self.numProposed = jax.device_put(jnp.zeros((jax.device_count(),), dtype=np.int64), DEVICE_SHARDING)
+        self.numAccepted = jax.device_put(jnp.zeros((jax.device_count(),), dtype=np.int64), DEVICE_SHARDING)
 
         numSamplesStr = str(self.samplesPerChain)
 
@@ -372,38 +377,34 @@ class MCSampler:
         return meta, configs.reshape((configs.shape[0] * configs.shape[1],) + sampleShape)
 
     def _sweep(self, states, logAccProb, key, numProposed, numAccepted, params, numSteps, updateProposer, updateProposerArg, net=None):
-
-        def perform_mc_update(i, carry):
-            states, logAccProb, key, numProposed, numAccepted = carry
-            # Generate update proposals
-            tmp = random.split(key, states.shape[0] + 1)
-            proposerKeys = tmp[:-1]
-            carryKey = tmp[-1]
-            newStates = vmap(updateProposer, in_axes=(0, 0, None))(proposerKeys, states, updateProposerArg) 
-
-            # Compute acceptance probabilities
-            newLogAccProb = jax.vmap(lambda y: self.mu * jnp.real(net(params, y)), in_axes=(0,))(newStates)
+        def perform_mc_update_single_chain(state, logAccProb, key_single):
+            # Generate update proposal
+            proposerKey, newKey = random.split(key_single)
+            newState = updateProposer(proposerKey, state, updateProposerArg)
+            
+            # Compute acceptance probability
+            newLogAccProb = self.mu * net(params, newState)
             P = jnp.exp(newLogAccProb - logAccProb)
-
+            
             # Roll dice
-            newKey, carryKey = random.split(carryKey,)
-            accepted = random.bernoulli(newKey, P).reshape((-1,))
-
-            # Bookkeeping
-            numProposed = numProposed + len(newStates)
+            acceptKey, newKey = random.split(newKey)
+            accepted = random.bernoulli(acceptKey, P)
+            
+            # Perform update if accepted
+            state = jax.lax.cond(accepted, lambda: newState, lambda: state)
+            newLogAccProb = jax.lax.cond(accepted, lambda: newLogAccProb, lambda: logAccProb)
+            
+            return state, newLogAccProb, newKey, accepted
+        
+        def sweep_step(carry, _):
+            states, logAccProb, keys, numProposed, numAccepted = carry
+            newStates, newLogAccProb, newKeys, accepted = jax.vmap(perform_mc_update_single_chain)(states, logAccProb, keys)
+            numProposed = numProposed + states.shape[0]
             numAccepted = numAccepted + jnp.sum(accepted)
+            return (newStates, newLogAccProb, newKeys, numProposed, numAccepted), None
 
-            # Perform accepted updates
-            def update(acc, old, new):
-                return jax.lax.cond(acc, lambda x: x[1], lambda x: x[0], (old, new))
-            carryStates = vmap(update, in_axes=(0, 0, 0))(accepted, states, newStates)
-
-            carryLogAccProb = jnp.where(accepted == True, newLogAccProb, logAccProb)
-
-            return (carryStates, carryLogAccProb, carryKey, numProposed, numAccepted)
-
-        (states, logAccProb, key, numProposed, numAccepted) =\
-            jax.lax.fori_loop(0, numSteps, perform_mc_update, (states, logAccProb, key, numProposed, numAccepted))
+        (states, logAccProb, key, numProposed, numAccepted), _ = \
+            jax.lax.scan(sweep_step, (states, logAccProb, key, numProposed, numAccepted), None, length=numSteps)
 
         return states, logAccProb, key, numProposed, numAccepted
         
