@@ -121,10 +121,6 @@ class MCSampler:
         self.numSamples = numSamples
         self.numChains = numChains
 
-        # jit'd member functions
-        self._get_samples_jsh = {}  # will hold a jit'd function for each number of samples
-        self._randomize_samples_jsh = {}  # will hold a jit'd function for each number of samples
-
     @property
     def thermalizationSweeps(self):
         return self._thermalizationSweeps
@@ -160,6 +156,7 @@ class MCSampler:
         self._numChains = value
         self._is_state_initialized = False
         self._get_samples_jsh = {}
+        self._randomize_samples_jsh = {}
 
     @property
     def key(self):
@@ -314,7 +311,7 @@ class MCSampler:
         samples = samples * 2 - 1
         return jax.vmap(lambda o, idx, s: (o[idx].dot(s.ravel()).reshape(s.shape) + 1) // 2, in_axes=(None, 0, 0))(orbit, orbit_indices, samples)
 
-    def _get_samples_gen(self, params): # TODO: This will work only once NQS will be sharded too
+    def _get_samples_gen(self): # TODO: This will work only once NQS will be sharded too
         tmpKeys = random.split(self.key[0], 3 * self.numChains)
         self.key = tmpKeys[:self.numChains]
         sample_key = tmpKeys[self.numChains:2*self.numChains]
@@ -323,7 +320,7 @@ class MCSampler:
         sample_key = jax.device_put(sample_key, DEVICE_SHARDING)
         orbit_key = jax.device_put(orbit_key, DEVICE_SHARDING)
 
-        samples = self.net.sample(self._samplePerChain, sample_key, parameters=params)
+        samples = self.net.sample(self._samplePerChain, sample_key, parameters=self.net.parameters)
         numSamplesStr = str(self._samplePerChain)
 
         if numSamplesStr not in self._randomize_samples_jsh:
