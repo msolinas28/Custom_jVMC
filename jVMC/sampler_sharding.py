@@ -5,6 +5,7 @@ import numpy as np
 from jax import vmap
 from functools import partial
 from jax.experimental.shard_map import shard_map
+from jax.experimental import multihost_utils
 
 import jVMC.global_defs as global_defs
 import jVMC.mpi_wrapper as mpi
@@ -172,15 +173,23 @@ class MCSampler:
         return self._net
 
     def _init_state(self):
-        if len(self.key.shape) > 1:
-            self._key = self.key[0]
-        tmp = jax.random.fold_in(self.key, jax.process_index())
-        tmp = jax.random.split(tmp, self.numChains + 1)
-        self._key = tmp[:-1]
-        initStateKey = tmp[-1]
-        self._key = jax.device_put(self.key, DEVICE_SHARDING)
+        if jax.process_index() == 0:
+            # Only process 0 generates the keys
+            master_key = self.key[0] if len(self.key.shape) > 1 else self.key
+            tmp = jax.random.split(master_key, self.numChains + 1)
+            keys = tmp[:-1]
+            initStateKey = tmp[-1]
+        else:
+            # Other processes create dummy data with correct shape
+            keys = jnp.zeros((self.numChains, 2), dtype=jnp.uint32)
+            initStateKey = jnp.zeros(2, dtype=jnp.uint32)
+        # Broadcast from process 0 to all processes
+        keys = multihost_utils.broadcast_one_to_all(keys)
+        initStateKey = multihost_utils.broadcast_one_to_all(initStateKey)
+        
+        self._key = jax.device_put(keys.astype(jnp.uint32), DEVICE_SHARDING)
 
-        # Understand dtype (int32 is too much)
+        # TODO: Understand dtype (int32 is too much)
         dtype = jnp.int32
 
         if self.initial_states is not None:
@@ -190,15 +199,21 @@ class MCSampler:
                 pad = jnp.zeros((res,) + self.sampleShape, dtype=dtype)
                 self.states = jnp.concat([self.initial_states, pad])
         else:
-            self.states = jax.random.bernoulli(initStateKey, 0.5, (self.numChains,) + self.sampleShape).astype(jnp.int32)
+            self.states = jax.random.bernoulli(initStateKey.astype(jnp.uint32), 0.5, (self.numChains,) + self.sampleShape).astype(jnp.int32)
         self.states = jax.device_put(self.states, DEVICE_SHARDING)
 
-        self.net.init_net(self.states) # TODO: This will work only once NQS will be sharded too
+        # TODO: once NQS will be sharded this can be removes since the NQS will take care of 
+        #       making sure that the net is initialized.
+        #       Then the second line can be moved in the init of the sampler class.
+        self.net.init_net(self.states)
         self.sampler_net, _ = self.net.get_sampler_net()
 
-        self._logAccProb_jsh = jax.jit(
+        def _log_prob_fun(s, mu, p):
+            # vmap is over parallel MC chains
+            return jax.vmap(lambda x: mu * jnp.real(self.sampler_net(p, x)))(s)
+        self._log_prob_fun_jsh = jax.jit(
             shard_map(
-                partial(self._logAccProb, sampler_net=self.sampler_net),
+                _log_prob_fun,
                 mesh=MESH,
                 in_specs=(DEVICE_SPEC,) + (REPLICATED_SPEC,) * 2,
                 out_specs=DEVICE_SPEC
@@ -206,10 +221,6 @@ class MCSampler:
         )
         
         self._is_state_initialized = True
-
-    def _logAccProb(self, x, mu, netParams, sampler_net):
-        # vmap is over parallel MC chains
-        return jax.vmap(lambda y: mu * jnp.real(sampler_net(netParams, y)))(x)
     
     def _distribute_sampling(self):
         """
@@ -253,7 +264,7 @@ class MCSampler:
             print(f"INFO: Total samples adjusted: {self.numSamples} -> {totalSamples}")
         self.numSamples = totalSamples
 
-    def sample(self, parameters=None, numSamples=None):
+    def sample(self, numSamples=None, parameters=None):
         """
         Generate random samples from wave function.
 
@@ -301,6 +312,8 @@ class MCSampler:
         if parameters is not None:
             self.net.set_parameters(parameters_tmp)
         
+        configs = configs + jax.process_index() * 10_000
+
         return configs, logPsi, p 
 
     def _randomize_samples(self, samples, key, orbit):
@@ -339,7 +352,7 @@ class MCSampler:
         return samples, self.net(samples), jnp.ones(samples.shape[:2]) / self.numSamples
 
     def _get_samples_mcmc(self):
-        self.logAccProb = self._logAccProb_jsh(self.states, self.mu, self.net.parameters)
+        self.logProb = self._log_prob_fun_jsh(self.states, self.mu, self.net.parameters)
         # Each devices handles its own acceptance rate
         self.numProposed = jax.device_put(jnp.zeros((MESH.shape["devices"],), dtype=np.int64), DEVICE_SHARDING)
         self.numAccepted = jax.device_put(jnp.zeros((MESH.shape["devices"],), dtype=np.int64), DEVICE_SHARDING)
@@ -367,8 +380,8 @@ class MCSampler:
                 )
             )
 
-        (self.states, self.logAccProb, self._key, self.numProposed, self.numAccepted), configs =\
-            self._get_samples_jsh[numSamplesStr](self.net.parameters, self.states, self.logAccProb, self.key, 
+        (self.states, self.logProb, self._key, self.numProposed, self.numAccepted), configs =\
+            self._get_samples_jsh[numSamplesStr](self.net.parameters, self.states, self.logProb, self.key, 
                                                  self.numProposed, self.numAccepted, self.updateProposerArg)
 
         coeffs = jax.vmap(lambda x: self.net.net.apply(self.net.parameters, x))(configs) # TODO: This has to be change with self.net(configs) once VQS will be sharded
@@ -379,35 +392,35 @@ class MCSampler:
 
         return configs, coeffs, p / jnp.sum(p)
 
-    def _get_samples(self, params, states, logAccProb, key, numProposed, numAccepted, updateProposerArg,
+    def _get_samples(self, params, states, logProb, key, numProposed, numAccepted, updateProposerArg,
                      numSamples, thermSweeps, sweepSteps, updateProposer, sweepFunction, sampleShape):
 
         # Thermalize
         if self.thermalizationSweeps is not None:
-            states, logAccProb, key, numProposed, numAccepted =\
-                sweepFunction(states, logAccProb, key, numProposed, numAccepted, params, thermSweeps * sweepSteps, updateProposer, updateProposerArg)
+            states, logProb, key, numProposed, numAccepted =\
+                sweepFunction(states, logProb, key, numProposed, numAccepted, params, thermSweeps * sweepSteps, updateProposer, updateProposerArg)
 
         # Collect samples
         def scan_fun(c, x):
-            states, logAccProb, key, numProposed, numAccepted =\
+            states, logProb, key, numProposed, numAccepted =\
                 sweepFunction(c[0], c[1], c[2], c[3], c[4], params, sweepSteps, updateProposer, updateProposerArg)
 
-            return (states, logAccProb, key, numProposed, numAccepted), states
+            return (states, logProb, key, numProposed, numAccepted), states
 
-        meta, configs = jax.lax.scan(scan_fun, (states, logAccProb, key, numProposed, numAccepted), None, length=numSamples)
+        meta, configs = jax.lax.scan(scan_fun, (states, logProb, key, numProposed, numAccepted), None, length=numSamples)
 
         # Reshape in from (numChains, numSamplesPerChain, sampleShape) to (numChains * numSamplesPerChain, sampleShape)
         return meta, configs.reshape((configs.shape[0] * configs.shape[1],) + sampleShape)
 
-    def _sweep(self, states, logAccProb, key, numProposed, numAccepted, params, numSteps, updateProposer, updateProposerArg, net=None):
-        def perform_mc_update_single_chain(state, logAccProb, key_single):
+    def _sweep(self, states, logProb, key, numProposed, numAccepted, params, numSteps, updateProposer, updateProposerArg, net=None):
+        def perform_mc_update_single_chain(state, logProb, key_single):
             # Generate update proposal
             proposerKey, newKey = random.split(key_single)
             newState = updateProposer(proposerKey, state, updateProposerArg)
             
             # Compute acceptance probability
-            newLogAccProb = self.mu * net(params, newState)
-            P = jnp.exp(newLogAccProb - logAccProb)
+            newLogProb = self.mu * net(params, newState)
+            P = jnp.exp(newLogProb - logProb)
             
             # Roll dice
             acceptKey, newKey = random.split(newKey)
@@ -415,21 +428,21 @@ class MCSampler:
             
             # Perform update if accepted
             state = jax.lax.cond(accepted, lambda: newState, lambda: state)
-            newLogAccProb = jax.lax.cond(accepted, lambda: newLogAccProb, lambda: logAccProb)
+            newLogProb = jax.lax.cond(accepted, lambda: newLogProb, lambda: logProb)
             
-            return state, newLogAccProb, newKey, accepted
+            return state, newLogProb, newKey, accepted
         
         def sweep_step(carry, _):
-            states, logAccProb, keys, numProposed, numAccepted = carry
-            newStates, newLogAccProb, newKeys, accepted = jax.vmap(perform_mc_update_single_chain)(states, logAccProb, keys)
+            states, logProb, keys, numProposed, numAccepted = carry
+            newStates, newLogProb, newKeys, accepted = jax.vmap(perform_mc_update_single_chain)(states, logProb, keys)
             numProposed = numProposed + states.shape[0]
             numAccepted = numAccepted + jnp.sum(accepted)
-            return (newStates, newLogAccProb, newKeys, numProposed, numAccepted), None
+            return (newStates, newLogProb, newKeys, numProposed, numAccepted), None
 
-        (states, logAccProb, key, numProposed, numAccepted), _ = \
-            jax.lax.scan(sweep_step, (states, logAccProb, key, numProposed, numAccepted), None, length=numSteps)
+        (states, logProb, key, numProposed, numAccepted), _ = \
+            jax.lax.scan(sweep_step, (states, logProb, key, numProposed, numAccepted), None, length=numSteps)
 
-        return states, logAccProb, key, numProposed, numAccepted
+        return states, logProb, key, numProposed, numAccepted
         
     def acceptance_ratio(self):
         """Get acceptance ratio.
