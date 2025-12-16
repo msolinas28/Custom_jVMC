@@ -82,9 +82,9 @@ class MCSampler:
     def __init__(self, net: NQS, sampleShape, key=None, updateProposer=None, numChains=32, updateProposerArg=None,
                  numSamples=128, thermalizationSweeps=10, sweepSteps=None, initState=None, mu=2, logProbFactor=0.5):
         if isinstance(sampleShape, tuple):
-            self.sampleShape = sampleShape
+            self._sampleShape = sampleShape
         else: 
-            self.sampleShape = (sampleShape,)
+            self._sampleShape = (sampleShape,)
 
         self._net = net
         if (not net.is_generator) and (updateProposer is None):
@@ -107,7 +107,7 @@ class MCSampler:
         self.mu = mu
         if mu < 0 or mu > 2:
             raise ValueError("mu must be in the range [0, 2]")
-        self.updateProposer = updateProposer
+        self._updateProposer = updateProposer
         self.updateProposerArg = updateProposerArg
 
         if key is None:
@@ -126,6 +126,32 @@ class MCSampler:
         self._randomize_samples_jsh = {}  # will hold a jit'd function for each number of samples
 
     @property
+    def thermalizationSweeps(self):
+        return self._thermalizationSweeps
+    
+    @thermalizationSweeps.setter
+    def thermalizationSweeps(self, value):
+        self._thermalizationSweeps = value
+        self._get_samples_jsh = {}
+    
+    @property
+    def sweepSteps(self):
+        return self._sweepSteps
+    
+    @sweepSteps.setter
+    def sweepSteps(self, value):
+        self._sweepSteps = value
+        self._get_samples_jsh = {}
+
+    @property
+    def sampleShape(self):
+        return self._sampleShape
+
+    @property
+    def updateProposer(self):
+        return self._updateProposer
+
+    @property
     def numChains(self):
         return self._numChains
     
@@ -133,6 +159,7 @@ class MCSampler:
     def numChains(self, value):
         self._numChains = value
         self._is_state_initialized = False
+        self._get_samples_jsh = {}
 
     @property
     def key(self):
@@ -148,6 +175,8 @@ class MCSampler:
         return self._net
 
     def _init_state(self):
+        if len(self.key.shape) > 1:
+            self._key = self.key[0]
         tmp = jax.random.fold_in(self.key, jax.process_index())
         tmp = jax.random.split(tmp, self.numChains + 1)
         self._key = tmp[:-1]
@@ -220,8 +249,8 @@ class MCSampler:
             self._numChains = adjusted_chains
         
         # Use ceiling division to ensure at least numSamples total samples
-        self.samplesPerChain = (self.numSamples + self.numChains - 1) // self.numChains
-        totalSamples = self.samplesPerChain * self.numChains
+        self._samplePerChain = (self.numSamples + self.numChains - 1) // self.numChains
+        totalSamples = self._samplePerChain * self.numChains
         
         if totalSamples > self.numSamples:
             print(f"INFO: Total samples adjusted: {self.numSamples} -> {totalSamples}")
@@ -254,25 +283,28 @@ class MCSampler:
             Samples drawn from :math:`p_{\\mu}(s)`.
         """
 
-        if numSamples is None:
-            numSamples = self.numSamples
+        if numSamples is not None:
+            samples_tmp = self.numSamples 
+            self.numSamples = numSamples
+        if parameters is not None:
+            parameters_tmp = self.net.params
+            self.net.set_parameters(parameters)
+
         self._distribute_sampling()
-        
         if not self._is_state_initialized:
             self._init_state()
 
         if self.net.is_generator:
-            if parameters is not None:
-                tmpP = self.net.params
-                self.net.set_parameters(parameters)
-            configs, coeffs, ps = self._get_samples_gen(self.net.parameters, numSamples)
-            if parameters is not None:
-                self.net.params = tmpP
-            return configs, coeffs, ps
-
-        configs, logPsi = self._get_samples_mcmc(parameters)
-        p = jnp.exp((1.0 / self.logProbFactor - self.mu) * jnp.real(logPsi))
-        return configs, logPsi, p / mpi.global_sum(p)
+            configs, logPsi, p = self._get_samples_gen()
+        else:
+            configs, logPsi, p = self._get_samples_mcmc()
+             
+        if numSamples is not None:
+            self.numSamples = samples_tmp
+        if parameters is not None:
+            self.net.set_parameters(parameters_tmp)
+        
+        return configs, logPsi, p 
 
     def _randomize_samples(self, samples, key, orbit):
         """ 
@@ -291,8 +323,8 @@ class MCSampler:
         sample_key = jax.device_put(sample_key, DEVICE_SHARDING)
         orbit_key = jax.device_put(orbit_key, DEVICE_SHARDING)
 
-        samples = self.net.sample(self.samplesPerChain, sample_key, parameters=params)
-        numSamplesStr = str(self.samplesPerChain)
+        samples = self.net.sample(self._samplePerChain, sample_key, parameters=params)
+        numSamplesStr = str(self._samplePerChain)
 
         if numSamplesStr not in self._randomize_samples_jsh:
              self._randomize_samples_jsh[numSamplesStr] = jax.jit(
@@ -305,59 +337,53 @@ class MCSampler:
             )
 
         if not self.orbit is None:
-            samples = self._randomize_samples_jsh[self.samplesPerChain](samples, orbit_key, self.orbit)
+            samples = self._randomize_samples_jsh[self._samplePerChain](samples, orbit_key, self.orbit)
         
         return samples, self.net(samples), jnp.ones(samples.shape[:2]) / self.numSamples
 
-    def _get_samples_mcmc(self, params):
-        tmpP = None
-        if params is not None:
-            tmpP = self.net.params
-            self.net.set_parameters(params)
-
-        # TODO: this is already done in init_state, which has already been called 
-        net, params = self.net.get_sampler_net()
-
-        if tmpP is not None:
-            self.net.params = tmpP        
-
-        self.logAccProb = self._logAccProb_jsh(self.states, self.mu, params)
+    def _get_samples_mcmc(self):
+        self.logAccProb = self._logAccProb_jsh(self.states, self.mu, self.net.parameters)
         # Each devices handles its own acceptance rate
-        self.numProposed = jax.device_put(jnp.zeros((jax.device_count(),), dtype=np.int64), DEVICE_SHARDING)
-        self.numAccepted = jax.device_put(jnp.zeros((jax.device_count(),), dtype=np.int64), DEVICE_SHARDING)
+        self.numProposed = jax.device_put(jnp.zeros((MESH.shape["devices"],), dtype=np.int64), DEVICE_SHARDING)
+        self.numAccepted = jax.device_put(jnp.zeros((MESH.shape["devices"],), dtype=np.int64), DEVICE_SHARDING)
 
-        numSamplesStr = str(self.samplesPerChain)
+        numSamplesStr = str(self._samplePerChain)
 
         # check whether _get_samples is already compiled for given number of samples
         if not numSamplesStr in self._get_samples_jsh:
+            get_samples = partial(
+                        self._get_samples, 
+                        sweepFunction=partial(self._sweep, net=self.sampler_net), 
+                        updateProposer=self.updateProposer,
+                        numSamples=self._samplePerChain,
+                        thermSweeps=self.thermalizationSweeps,
+                        sweepSteps=self.sweepSteps,
+                        sampleShape=self.sampleShape,
+                        )
+
             self._get_samples_jsh[numSamplesStr] = jax.jit(
                 shard_map(
-                    partial(self._get_samples, sweepFunction=partial(self._sweep, net=net), updateProposer=self.updateProposer),
+                    get_samples,
                     mesh=MESH,
-                    in_specs=(REPLICATED_SPEC,) * 4 + (DEVICE_SPEC,) * 5 + (REPLICATED_SPEC,) * 2,
+                    in_specs=(REPLICATED_SPEC,) + (DEVICE_SPEC,) * 5 + (REPLICATED_SPEC,),
                     out_specs=((DEVICE_SPEC,) * 5, DEVICE_SPEC)  # The returned samples are shared for memory efficiency
-                ),
-                static_argnums=(1, 2, 3)
+                )
             )
 
-        (self.states, self.logAccProb, self.key, self.numProposed, self.numAccepted), configs =\
-            self._get_samples_jsh[numSamplesStr](params, self.samplesPerChain, self.thermalizationSweeps, self.sweepSteps,
-                                                self.states, self.logAccProb, self.key, self.numProposed, self.numAccepted,
-                                                self.updateProposerArg, self.sampleShape)
+        (self.states, self.logAccProb, self._key, self.numProposed, self.numAccepted), configs =\
+            self._get_samples_jsh[numSamplesStr](self.net.parameters, self.states, self.logAccProb, self.key, 
+                                                 self.numProposed, self.numAccepted, self.updateProposerArg)
 
-        tmpP = self.net.params
-        self.net.params = params["params"]
-        coeffs = self.net(configs) # TODO: This will work only once NQS will be sharded too
-        self.net.params = tmpP
+        coeffs = jax.vmap(lambda x: self.net.net.apply(self.net.parameters, x))(configs) # TODO: This has to be change with self.net(configs) once VQS will be sharded
+        # TODO: Once VQS is sharded p will have to be divided by jnp.global_sum(p) or jax.lax.psum(jnp.sum(p), axis_name=MESH.axis_names[0]) 
+        # (to understad which is correct one)
+        # If automatic parallelism works as it should this is not needed 
+        p = jnp.exp((1.0 / self.logProbFactor - self.mu) * jnp.real(coeffs))
 
-        return configs, coeffs
+        return configs, coeffs, p / jnp.sum(p)
 
-    def _get_samples(self, params, numSamples,
-                     thermSweeps, sweepSteps,
-                     states, logAccProb, key,
-                     numProposed, numAccepted,
-                     updateProposerArg, sampleShape, 
-                     updateProposer, sweepFunction=None):
+    def _get_samples(self, params, states, logAccProb, key, numProposed, numAccepted, updateProposerArg,
+                     numSamples, thermSweeps, sweepSteps, updateProposer, sweepFunction, sampleShape):
 
         # Thermalize
         if self.thermalizationSweeps is not None:
@@ -415,9 +441,9 @@ class MCSampler:
             Acceptance ratio observed in the last call to ``sample()``.
         """
 
-        numProp = mpi.global_sum(self.numProposed)
+        numProp = jnp.sum(self.numProposed)
         if numProp > 0:
-            return mpi.global_sum(self.numAccepted) / numProp
+            return jnp.sum(self.numAccepted) / numProp
 
         return jnp.array([0.])
 
