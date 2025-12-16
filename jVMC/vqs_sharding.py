@@ -1,31 +1,21 @@
 import jax
 jax.config.update("jax_enable_x64", True)
-from jax import jit, grad, vmap
+from jax import grad 
 from jax import numpy as jnp
-from jax import random
 from jax.tree_util import tree_flatten, tree_unflatten, tree_map
-from jax.flatten_util import ravel_pytree
 import flax
-import flax.linen as nn
 from flax.core.frozen_dict import freeze, unfreeze
 import numpy as np
+import flax.linen as nn
+import collections
+from math import isclose
 
 import jVMC
 import jVMC.global_defs as global_defs
-from jVMC.nets import CpxRBM
-from jVMC.nets import RBM
-import jVMC.mpi_wrapper as mpi
 
-from functools import partial
-import collections
-import time
-from math import isclose
-
-from typing import Sequence
 
 
 def create_batches(configs, b):
-
     append = b * ((configs.shape[0] + b - 1) // b) - configs.shape[0]
     pads = [(0, append), ] + [(0, 0)] * (len(configs.shape) - 1)
 
@@ -33,12 +23,10 @@ def create_batches(configs, b):
 
 
 def eval_batched(batchSize, fun, s):
-
     sb = create_batches(s, batchSize)
 
     def scan_fun(c, x):
         return c, jax.vmap(lambda y: fun(y), in_axes=(0,))(x)
-
     res = jax.lax.scan(scan_fun, None, jnp.array(sb))[1].reshape((-1,))
 
     return res[:s.shape[0]]
@@ -48,6 +36,7 @@ def flat_gradient(fun, params, arg):
     gr = tree_flatten(tree_map(lambda x: x.ravel(), gr))[0]
     gi = grad(lambda p, y: jnp.imag(fun.apply(p, y)))(params, arg)["params"]
     gi = tree_flatten(tree_map(lambda x: x.ravel(), gi))[0]
+
     return jnp.concatenate(gr) + 1.j * jnp.concatenate(gi)
 
 def flat_gradient_cpx_nonholo(fun, params, arg):
@@ -55,17 +44,20 @@ def flat_gradient_cpx_nonholo(fun, params, arg):
     gr = tree_flatten(tree_map(lambda x: [jnp.real(x.ravel()), -jnp.imag(x.ravel())], gr))[0]
     gi = grad(lambda p, y: jnp.imag(fun.apply(p, y)))(params, arg)["params"]
     gi = tree_flatten(tree_map(lambda x: [jnp.real(x.ravel()), -jnp.imag(x.ravel())], gi))[0]
+
     return jnp.concatenate(gr) + 1.j * jnp.concatenate(gi)
 
 
 def flat_gradient_real(fun, params, arg):
     g = grad(lambda p, y: jnp.real(fun.apply(p, y)))(params, arg)["params"]
     g = tree_flatten(tree_map(lambda x: x.ravel(), g))[0]
+
     return jnp.concatenate(g)
 
 def flat_gradient_holo(fun, params, arg):
     g = grad(lambda p, y: jnp.real(fun.apply(p, y)))(params, arg)["params"]
     g = tree_flatten(tree_map(lambda x: [x.ravel(), 1.j*x.ravel()], g))[0]
+
     return jnp.concatenate(g)
 
 def dict_gradient(fun, params, arg):
@@ -73,52 +65,19 @@ def dict_gradient(fun, params, arg):
     gr = tree_map(lambda x: x.ravel(), gr)
     gi = grad(lambda p, y: jnp.imag(fun.apply(p, y)))(params, arg)["params"]
     gi = tree_map(lambda x: x.ravel(), gi)
+
     return tree_map(lambda x,y: x + 1.j*y, gr, gi)
 
 
 def dict_gradient_real(fun, params, arg):
     g = grad(lambda p, y: jnp.real(fun.apply(p, y)))(params, arg)["params"]
     g = tree_map(lambda x: x.ravel(), g)
+
     return g
 
-
 class NQS:
-    """Wrapper class providing basic functionality of variational states.
-    
-    This class can operate in two modi:
-        #. Single-network ansatz
-            Quantum state of the form :math:`\\psi_\\theta(s)\\equiv\\exp(r_\\theta(s))`, \
-            where the network :math:`r_\\theta` is
-            a) holomorphic, i.e., parametrized by complex valued parameters :math:`\\vartheta`.
-            b) non-holomorphic, i.e., parametrized by real valued parameters :math:`\\theta`.
-        #. Two-network ansatz
-            Quantum state of the form 
-            :math:`\\psi_\\theta(s)\\equiv\\exp(r_{\\theta_r}(s)+i\\varphi_{\\theta_\\phi}(s))` \
-            with an amplitude network :math:`r_{\\theta_{r}}` and a phase network \
-            :math:`\\varphi_{\\theta_\\phi}` \
-            parametrized by real valued parameters :math:`\\theta_r,\\theta_\\phi`.
-
-    Initializer arguments:
-        * ``net``: Variational network.
-            A network has to be registered as pytree node and provide \
-            a ``__call__`` function for evaluation.
-            It is expected that the network is of type ``jVMC.nets.sym_wrapper.SymNet``.
-            If the network is composed of two networks, the correct wrapping structure is
-            ``jVMC.nets.sym_wrapper.SymNet(jVMC.nets.two_nets_wrapper.TwoNets)``.
-        * ``batchSize``: Batch size for batched network evaluation. Choice \
-            of this parameter impacts performance: with too small values performance \
-            is limited by memory access overheads, too large values can lead \
-            to "out of memory" issues.
-        * ``seed``: Seed for the PRNG to initialize the network parameters.
     """
-
-    def __init__(self, net, 
-                        logarithmic=True,
-                        batchSize=1000, 
-                        seed=1234, 
-                        orbit=None, 
-                        avgFun=jVMC.nets.sym_wrapper.avgFun_Coefficients_Exp):
-        """Initializes NQS class.
+        Initializes NQS class.
         
         This class can operate in two modi:
             #. Single-network ansatz
@@ -150,29 +109,33 @@ class NQS:
             * ``avgFun``: Reduction operation for the symmetrization.
         """
 
-        # The net arguments have to be instances of flax.nn.Model
-        self.realNets = False
-        self.holomorphic = False
-        self.flat_gradient_function = flat_gradient_real
-        self.dict_gradient_function = dict_gradient_real
-        self.logarithmic = logarithmic
-
-        self.initialized = False
-        self.seed = seed
-        self.parameters = None
-
-        self._isGenerator = False
+    def __init__(self, net: nn.Module, logarithmic=True, batchSize: None | int = None, 
+                 seed: None | int = None, orbit=None, avgFun=jVMC.nets.sym_wrapper.avgFun_Coefficients_Exp):
         if isinstance(net, collections.abc.Iterable):
+            for n in net:
+                if not isinstance(n, nn.Module):
+                    raise ValueError("The argument 'net' has to be an instance of flax.nn.Module.")
             net = jVMC.nets.two_nets_wrapper.TwoNets(net)
-        if not orbit is None:
-            net = jVMC.nets.sym_wrapper.SymNet(net=net, orbit=orbit, avgFun=avgFun)
+        else:
+            if not isinstance(net, nn.Module):
+                raise ValueError("The argument 'net' has to be an instance of flax.nn.Module.")
+        self._isGenerator = False
         if "sample" in dir(net):
             if callable(net.sample):
                 self._isGenerator = True
-        self.net = net
-
+        if orbit is not None:
+            net = jVMC.nets.sym_wrapper.SymNet(net=net, orbit=orbit, avgFun=avgFun)
+        self._net = net
+        
         self.batchSize = batchSize
-
+        self._logarithmic = logarithmic
+        if seed is None: 
+            seed = np.random.SeedSequence().entropy
+        self.seed = seed
+        
+        self._is_initialized = False
+        self.parameters = None
+        
         # Need to keep handles of jit'd functions to avoid recompilation
         self._eval_net_pmapd = global_defs.pmap_for_my_devices(self._eval, in_axes=(None, None, 0, None), static_broadcasted_argnums=(0, 3))
         self._get_gradients_pmapd = global_defs.pmap_for_my_devices(self._get_gradients, in_axes=(None, None, 0, None, None), static_broadcasted_argnums=(0, 3, 4))
@@ -186,14 +149,46 @@ class NQS:
         else:
             self.apply_fun = lambda paramenters, x: jnp.log(self.net.apply(paramenters, x))
 
-    # **  end def __init__
+    @property
+    def net(self):
+        return self._net
+    
+    @property
+    def logarithmic(self):
+        return self._logarithmic
+
+    @property
+    def is_generator(self):
+        return self._isGenerator
+    
+    @property
+    def holomorphic(self):
+        return self._holomorphic
+    
+    @property
+    def flat_gradient_function(self):
+        return self._flat_gradient_function
+    
+    @property
+    def dict_gradient_function(self):
+        return self._dict_gradient_function
+    
+    @property
+    def paramShapes(self):
+        return self._paramShapes
+    
+    @property
+    def numParameters(self):
+        return self._numParameters
 
     def init_net(self, s):
-
-        if not self.initialized:
-    
-            self.parameters = self.net.init(jax.random.PRNGKey(self.seed), s[0,...])
+        if not self._is_initialized:
+            test_sample = s[0,...]
             self.realParams = False
+            self._holomorphic = False
+
+            self.parameters = self.net.init(jax.random.PRNGKey(self.seed), test_sample)
+            
             dtypes = [a.dtype for a in tree_flatten(self.parameters)[0]]
             if not all(d == dtypes[0] for d in dtypes):
                 raise Exception("Network uses different parameter data types. This is not supported.")
@@ -203,29 +198,28 @@ class NQS:
             # check Cauchy-Riemann condition to test for holomorphicity
             def make_flat(t):
                 return jnp.concatenate([p.ravel() for p in tree_flatten(t)[0]])
-            grads_r = make_flat( jax.grad(lambda a,b: jnp.real(self.net.apply(a,b)))(self.parameters, s[0,...])["params"] )
-            grads_i = make_flat( jax.grad(lambda a,b: jnp.imag(self.net.apply(a,b)))(self.parameters, s[0,...])["params"] )
-            if isclose(jnp.linalg.norm(grads_r - 1.j * grads_i)/grads_r.shape[0], 0.0, abs_tol=1e-14):
+            
+            grads_r = make_flat(jax.grad(lambda a, b: jnp.real(self.net.apply(a,b)))(self.parameters, test_sample)["params"])
+            grads_i = make_flat(jax.grad(lambda a, b: jnp.imag(self.net.apply(a,b)))(self.parameters, test_sample)["params"])
+            if isclose(jnp.linalg.norm(grads_r - 1.j * grads_i) / grads_r.shape[0], 0.0, abs_tol=1e-14):
                 self.holomorphic = True
-                self.flat_gradient_function = flat_gradient_holo
+                self._flat_gradient_function = flat_gradient_holo
             else:
                 if self.realParams:
-                    self.flat_gradient_function = flat_gradient
-                    self.dict_gradient_function = dict_gradient
+                    self._flat_gradient_function = flat_gradient
+                    self._dict_gradient_function = dict_gradient
                 else:
-                    self.flat_gradient_function = flat_gradient_cpx_nonholo
+                    self._flat_gradient_function = flat_gradient_cpx_nonholo
 
-            self.paramShapes = [(p.size, p.shape) for p in tree_flatten(self.parameters["params"])[0]]
-            self.netTreeDef = jax.tree_util.tree_structure(self.parameters["params"])
-            self.numParameters = jnp.sum(jnp.array([p.size for p in tree_flatten(self.parameters["params"])[0]]))
+            self._paramShapes = [(p.size, p.shape) for p in tree_flatten(self.parameters["params"])[0]]
+            self._netTreeDef = jax.tree_util.tree_structure(self.parameters["params"])
+            self._numParameters = jnp.sum(jnp.array([p.size for p in tree_flatten(self.parameters["params"])[0]]))
 
-            self.initialized = True
-
-    # ** end init_net
-
+            self._is_initialized = True
 
     def __call__(self, s):
-        """Evaluate variational wave function.
+        """
+        Evaluate variational wave function.
         
         Compute the logarithmic wave function coefficients :math:`\\ln\\psi(s)` for \
         computational configurations :math:`s`.
@@ -395,7 +389,7 @@ class NQS:
             * ``deltaP``: Values to be added to variational parameters.
         """
 
-        if not self.initialized:
+        if not self._is_initialized:
             self.set_parameters(deltaP)
 
         # Compute new parameters
@@ -419,7 +413,7 @@ class NQS:
             * ``P``: New values of variational parameters.
         """
 
-        if not self.initialized:
+        if not self._is_initialized:
             raise RuntimeError("Error in NQS.set_parameters(): Network not initialized. Evaluate net on example input for initialization.")
 
         # Update model parameters
@@ -457,7 +451,7 @@ class NQS:
             Array holding current values of all variational parameters.
         """
 
-        if not self.initialized:
+        if not self._is_initialized:
 
             return None
 
@@ -471,13 +465,11 @@ class NQS:
 
     # **  end def set_parameters
 
-    @property
-    def is_generator(self):
-        return self._isGenerator
+    
 
     @property
     def params(self):
-        if self.initialized:
+        if self._is_initialized:
             return self.parameters["params"]
         return None
 
