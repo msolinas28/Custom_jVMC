@@ -163,6 +163,8 @@ class NQS:
     
     @parameters.setter
     def parameters(self, value):
+        if hasattr(value, "shape"):
+            value = self._param_unflatten(value)
         if 'params' not in value.keys():
             value = {'params': value}
         if isinstance(self.parameters, flax.core.frozen_dict.FrozenDict):
