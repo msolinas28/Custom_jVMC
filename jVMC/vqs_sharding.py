@@ -9,11 +9,14 @@ import numpy as np
 import flax.linen as nn
 import collections
 from math import isclose
+import warnings
+
+from jax.experimental.shard_map import shard_map
+from jVMC.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
+from jVMC.sharding_config import distribute, broadcast_split_key
 
 import jVMC
 import jVMC.global_defs as global_defs
-
-
 
 def create_batches(configs, b):
     append = b * ((configs.shape[0] + b - 1) // b) - configs.shape[0]
@@ -108,7 +111,7 @@ class NQS:
             * ``avgFun``: Reduction operation for the symmetrization.
         """
 
-    def __init__(self, net: nn.Module, logarithmic=True, batchSize: None | int = None, 
+    def __init__(self, net: nn.Module, sampleShape, logarithmic=True, batchSize: None | int = None, 
                  seed: None | int = None, orbit=None, avgFun=jVMC.nets.sym_wrapper.avgFun_Coefficients_Exp):
         if isinstance(net, collections.abc.Iterable):
             for n in net:
@@ -125,15 +128,17 @@ class NQS:
         if orbit is not None:
             net = jVMC.nets.sym_wrapper.SymNet(net=net, orbit=orbit, avgFun=avgFun)
         self._net = net
+
+        if isinstance(sampleShape, tuple):
+            self._sampleShape = sampleShape
+        else:
+            self._sampleShape = (sampleShape,)
         
         self.batchSize = batchSize
         self._logarithmic = logarithmic
         if seed is None: 
             seed = np.random.SeedSequence().entropy
         self.seed = seed
-        
-        self._is_initialized = False
-        self.parameters = None
         
         # Need to keep handles of jit'd functions to avoid recompilation
         self._eval_net_pmapd = global_defs.pmap_for_my_devices(self._eval, in_axes=(None, None, 0, None), static_broadcasted_argnums=(0, 3))
@@ -143,6 +148,8 @@ class NQS:
         self._append_gradients_dict = global_defs.pmap_for_my_devices(lambda x, y: tree_map(lambda a,b: jnp.concatenate((a[:, :], 1.j * b[:, :]), axis=1), x, y), in_axes=(0, 0))
         self._sample_jitd = {}
 
+        self.init_net()
+
         if self.logarithmic:
             self.apply_fun = self.net.apply
         else:
@@ -151,8 +158,32 @@ class NQS:
             self.apply_fun = apply_fun
 
     @property
+    def parameters(self):
+        return self._parameters
+    
+    @parameters.setter
+    def parameters(self, value):
+        if 'params' not in value.keys():
+            value = {'params': value}
+        if isinstance(self.parameters, flax.core.frozen_dict.FrozenDict):
+            value = freeze(value)
+        self._parameters = value
+
+    @property
+    def params(self):
+        return self.parameters['params']
+    
+    @params.setter
+    def params(self, value):
+        self.parameters = value
+        
+    @property
     def net(self):
         return self._net
+    
+    @property
+    def sampleShape(self):
+        return self._sampleShape
     
     @property
     def logarithmic(self):
@@ -196,42 +227,41 @@ class NQS:
         self._gradients_dict_batched_jsh = 0
         
 
-    def init_net(self, s):
-        if not self._is_initialized:
-            test_sample = s[0,...]
-            self.realParams = False
-            self._holomorphic = False
+    def init_net(self, seed: int | None):
+        dummy_sample = jnp.ones(self.sampleShape)
+        if seed == None:
+            seed = np.random.SeedSequence().entropy   
+        self._parameters = self.net.init(jax.random.PRNGKey(seed), dummy_sample)
+        self.realParams = False
+        self._holomorphic = False
+        
+        dtypes = [a.dtype for a in tree_flatten(self.parameters)[0]]
+        if not all(d == dtypes[0] for d in dtypes):
+            raise Exception("Network uses different parameter data types. This is not supported.")
+        if dtypes[0] == np.single or dtypes[0] == np.double:
+            self.realParams = True
 
-            self.parameters = self.net.init(jax.random.PRNGKey(self.seed), test_sample)
-            
-            dtypes = [a.dtype for a in tree_flatten(self.parameters)[0]]
-            if not all(d == dtypes[0] for d in dtypes):
-                raise Exception("Network uses different parameter data types. This is not supported.")
-            if dtypes[0] == np.single or dtypes[0] == np.double:
-                self.realParams = True
- 
-            # check Cauchy-Riemann condition to test for holomorphicity
-            def make_flat(t):
-                return jnp.concatenate([p.ravel() for p in tree_flatten(t)[0]])
-            
-            grads_r = make_flat(jax.grad(lambda a, b: jnp.real(self.net.apply(a,b)))(self.parameters, test_sample)["params"])
-            grads_i = make_flat(jax.grad(lambda a, b: jnp.imag(self.net.apply(a,b)))(self.parameters, test_sample)["params"])
-            if isclose(jnp.linalg.norm(grads_r - 1.j * grads_i) / grads_r.shape[0], 0.0, abs_tol=1e-14):
-                self.holomorphic = True
-                self._flat_gradient_function = flat_gradient_holo
+        # check Cauchy-Riemann condition to test for holomorphicity
+        def make_flat(t):
+            return jnp.concatenate([p.ravel() for p in tree_flatten(t)[0]])
+        
+        grads_r = make_flat(jax.grad(lambda a, b: jnp.real(self.net.apply(a,b)))(self.parameters, dummy_sample)["params"])
+        grads_i = make_flat(jax.grad(lambda a, b: jnp.imag(self.net.apply(a,b)))(self.parameters, dummy_sample)["params"])
+        if isclose(jnp.linalg.norm(grads_r - 1.j * grads_i) / grads_r.shape[0], 0.0, abs_tol=1e-14):
+            self.holomorphic = True
+            self._flat_gradient_function = flat_gradient_holo
+        else:
+            if self.realParams:
+                self._flat_gradient_function = flat_gradient
+                self._dict_gradient_function = dict_gradient
             else:
-                if self.realParams:
-                    self._flat_gradient_function = flat_gradient
-                    self._dict_gradient_function = dict_gradient
-                else:
-                    self._flat_gradient_function = flat_gradient_cpx_nonholo
+                self._flat_gradient_function = flat_gradient_cpx_nonholo
 
-            self._paramShapes = [(p.size, p.shape) for p in tree_flatten(self.parameters["params"])[0]]
-            self._netTreeDef = jax.tree_util.tree_structure(self.parameters["params"])
-            self._numParameters = jnp.sum(jnp.array([p.size for p in tree_flatten(self.parameters["params"])[0]]))
+        self._paramShapes = [(p.size, p.shape) for p in tree_flatten(self.parameters["params"])[0]]
+        self._netTreeDef = jax.tree_util.tree_structure(self.parameters["params"])
+        self._numParameters = jnp.sum(jnp.array([p.size for p in tree_flatten(self.parameters["params"])[0]]))
 
-            self._init_sh()
-            self._is_initialized = True
+        self._init_sh()
 
     def __call__(self, s):
         """
@@ -247,12 +277,11 @@ class NQS:
         
         :meta public:
         """
-        self.init_net(s)
-
+        if s.shape == self.SampleShape:
+            return self.apply_fun(self.parameters, s)
         if self.batchSize is None:
             return self._apply_fun_jsh(self.parameters, s)
-        else:
-            return self._apply_fun_batched_jsh(self.parameters, s, self.batchSize)
+        return self._apply_fun_batched_jsh(self.parameters, s, self.batchSize)
 
     def _apply_fun_batched(self, parameters, s, batchSize):
         sb = create_batches(s, batchSize)
@@ -274,12 +303,9 @@ class NQS:
             with respect to each variational parameter :math:`\\theta_k` for each \
             input configuration :math:`s`.
         """
-        self.init_net(s)
-
         if self.batchSize is None:
             return self._gradients_jsh(self.parameters, s)
-        else:
-            return self._gradients_batched_jsh(self.parameters, s, self.batchSize)
+        return self._gradients_batched_jsh(self.parameters, s, self.batchSize)
 
 
     def _get_gradients(self, parameters, s, batchSize):
@@ -289,7 +315,6 @@ class NQS:
         g = tree_map(lambda x: x.reshape((-1,) + x.shape[2:]), jax.lax.scan(scan_fun, None, sb)[1])
 
         return tree_map(lambda x: x[:s.shape[0]], g)
-
 
     def gradients_dict(self, s):
         """
@@ -305,12 +330,10 @@ class NQS:
             with respect to each variational parameter :math:`\\theta_k` for each \
             input configuration :math:`s`.
         """
-        self.init_net(s)
-
         if self.batchSize is None:
             gradOut = self._gradients_dict_jsh(self.parameters, s)
         else:
-            return self._gradients_dict_batched_jsh(self.parameters, s, self.batchSize)
+            gradOut = self._gradients_dict_batched_jsh(self.parameters, s, self.batchSize)
         if self.holomorphic:
             return self._append_gradients_dict(gradOut, gradOut)
 
@@ -330,7 +353,6 @@ class NQS:
                 start += s[0]
         
         return tree_unflatten(self._netTreeDef, PTreeShape)
-
 
     def get_sampler_net(self):
         """
@@ -354,29 +376,32 @@ class NQS:
             if parameters is not None:
                 params = parameters
 
+            numSamples = distribute(numSamples, 'samples') # TODO: after this check if batchsize divides numSaples per device
             if key is None:
                 key = np.random.SeedSequence().entropy
-            elif len(key.shape) == 1:
-                key = jax.random.split(key, numSamples)
-            elif key.shape[0] != numSamples:
-                raise ValueError("The argument key has to be either a single key or numSamples keys." \
-                                 f"Got keys with shape {key.shape} and {numSamples} numSamples.")
-
+            elif len(key.shape) > 1:
+                key = key[0]
+            keys = jax.device_put(broadcast_split_key(key, numSamples), DEVICE_SHARDING)
+    
             numSamplesStr = str(numSamples)
-
             # check whether _get_samples is already compiled for given number of samples
             if not numSamplesStr in self._sample_jitd:
-                self._sample_jitd[numSamplesStr] = global_defs.pmap_for_my_devices(lambda p, n, k: self.net.apply(p, n, k, method=self.net.sample),
-                                                                                   static_broadcasted_argnums=(1,), in_axes=(None, None, 0))
+                self._sample_jitd[numSamplesStr] = jax.jit(
+                    shard_map(
+                        lambda p, n, k: self.net.apply(p, n, k, method=self.net.sample), 
+                        mesh=MESH,
+                        in_specs=(REPLICATED_SPEC,) * 2 + (DEVICE_SPEC,),
+                        out_specs=(DEVICE_SPEC,)
+                    )
+                )
 
-            samples = self._sample_jitd[numSamplesStr](params, int(numSamples), key)
-
-            return samples
+            return self._sample_jitd[numSamplesStr](params, numSamples, keys)
 
         return None
 
     def update_parameters(self, deltaP):
-        """Update variational parameters.
+        """
+        Update variational parameters.
         
         Sets new values of all variational parameters by adding given values.
         If parameters are not initialized, parameters are set to ``deltaP``.
@@ -384,33 +409,23 @@ class NQS:
         Args:
             * ``deltaP``: Values to be added to variational parameters.
         """
-
-        if not self._is_initialized:
-            self.set_parameters(deltaP)
-
-        # Compute new parameters
-        newParams = jax.tree_util.tree_map(
-            jax.lax.add, self.params,
-            self._param_unflatten(deltaP)
-        )
-
-        # Update model parameters
-        self.params = newParams
-
-    # **  end def update_parameters
-
+        self.parameters = jax.tree_util.tree_map(jax.lax.add, self.params, self._param_unflatten(deltaP))
 
     def set_parameters(self, P):
-        """Set variational parameters.
+        """
+        Set variational parameters.
         
         Sets new values of all variational parameters.
         
         Args:
             * ``P``: New values of variational parameters.
         """
-
-        if not self._is_initialized:
-            raise RuntimeError("Error in NQS.set_parameters(): Network not initialized. Evaluate net on example input for initialization.")
+        warnings.warn(
+            "set_parameters() is deprecated and will be removed in a future release; "
+            "assign to `self.parameters` or 'self.params' directly instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         # Update model parameters
         if isinstance(P, flax.core.frozen_dict.FrozenDict):
@@ -418,66 +433,29 @@ class NQS:
         else:
             self.params = self._param_unflatten(P)
 
-    # **  end def set_parameters
-
-
-    def _param_unflatten(self, P):
-
-        # Reshape parameter update according to net tree structure
-        PTreeShape = []
-        start = 0
-        for s in self.paramShapes:
-            if not self.realParams:
-                PTreeShape.append( ( P[start:start + s[0]] + 1.j * P[start + s[0]:start + 2*s[0]]).reshape(s[1]) )
-                start += 2*s[0]
-            else:
-                PTreeShape.append(P[start:start + s[0]].reshape(s[1]))
-                start += s[0]
-        
-        # Return unflattened parameters
-        return tree_unflatten(self.netTreeDef, PTreeShape)
-
-    # **  end def _param_unflatten
-
-
     def get_parameters(self):
-        """Get variational parameters.
+        """
+        Get variational parameters.
         
         Returns:
             Array holding current values of all variational parameters.
         """
-
-        if not self._is_initialized:
-
-            return None
-
-
         if not self.realParams:
-            paramOut = jnp.concatenate([jnp.concatenate([p.ravel().real, p.ravel().imag]) for p in tree_flatten(self.params)[0]])
-        else:
-            paramOut = jnp.concatenate([p.ravel() for p in tree_flatten(self.params)[0]])
+            return jnp.concatenate([jnp.concatenate([p.ravel().real, p.ravel().imag]) for p in tree_flatten(self.params)[0]])
+        return jnp.concatenate([p.ravel() for p in tree_flatten(self.params)[0]])
 
-        return paramOut
-
-    # **  end def set_parameters
-
-    
-
-    @property
-    def params(self):
-        if self._is_initialized:
-            return self.parameters["params"]
-        return None
-
-    @params.setter
-    def params(self, val):
-        # Replace 'params' in parameters by `val`
-        ps = unfreeze(self.parameters)
-        ps["params"] = unfreeze(val)
-        if isinstance(self.parameters, flax.core.frozen_dict.FrozenDict):
-            ps = freeze(ps)
-        self.parameters = ps
-        # self.parameters = freeze({
-        #                        **unfreeze(self.parameters.pop("params")[0]),
-        #                        "params": unfreeze(val)
-        #                        })
+    def _param_unflatten(self, P):
+        """
+        Reshape parameter array update according to net tree structure
+        """
+        PTreeShape = []
+        start = 0
+        for s in self.paramShapes:
+            if not self.realParams:
+                PTreeShape.append((P[start:start + s[0]] + 1.j * P[start + s[0]:start + 2 * s[0]]).reshape(s[1]))
+                start += 2 * s[0]
+            else:
+                PTreeShape.append(P[start:start + s[0]].reshape(s[1]))
+                start += s[0]
+        
+        return tree_unflatten(self._netTreeDef, PTreeShape)

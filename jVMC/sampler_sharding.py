@@ -14,6 +14,7 @@ from jVMC.propose import AbstractProposeCont
 from jVMC.util.key_gen import format_key
 from jVMC.vqs_sharding import NQS
 from jVMC.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
+from jVMC.sharding_config import distribute, broadcast_split_key
 
 # Deprecated import 
 import warnings
@@ -80,12 +81,13 @@ class MCSampler:
         ``mu`` parameter must be set to 1.0, to sample the unchanged POVM distribution.
     """
 
-    def __init__(self, net: NQS, sampleShape, key=None, updateProposer=None, numChains=32, updateProposerArg=None,
+    def __init__(self, net: NQS, sampleShape=None, key=None, updateProposer=None, numChains=32, updateProposerArg=None,
                  numSamples=128, thermalizationSweeps=10, sweepSteps=None, initState=None, mu=2, logProbFactor=0.5):
-        if isinstance(sampleShape, tuple):
-            self._sampleShape = sampleShape
-        else: 
-            self._sampleShape = (sampleShape,)
+        if sampleShape is None:
+            sampleShape = net.sampleShape
+        elif sampleShape != net.sampleShape:
+            raise ValueError(f'The provided sampleShape ({sampleShape}) is different from the one of the NQS ({net.sampleShape}).')
+        self._sampleShape = sampleShape
 
         self._net = net
         if (not net.is_generator) and (updateProposer is None):
@@ -173,21 +175,11 @@ class MCSampler:
         return self._net
 
     def _init_state(self):
-        if jax.process_index() == 0:
-            # Only process 0 generates the keys
-            master_key = self.key[0] if len(self.key.shape) > 1 else self.key
-            tmp = jax.random.split(master_key, self.numChains + 1)
-            keys = tmp[:-1]
-            initStateKey = tmp[-1]
-        else:
-            # Other processes create dummy data with correct shape
-            keys = jnp.zeros((self.numChains, 2), dtype=jnp.uint32)
-            initStateKey = jnp.zeros(2, dtype=jnp.uint32)
-        # Broadcast from process 0 to all processes
-        keys = multihost_utils.broadcast_one_to_all(keys)
-        initStateKey = multihost_utils.broadcast_one_to_all(initStateKey)
-        
-        self._key = jax.device_put(keys.astype(jnp.uint32), DEVICE_SHARDING)
+        master_key = self.key[0] if self.key.ndim > 1 else self.key
+        all_keys = broadcast_split_key(master_key, self.numChains + 1)
+        keys = all_keys[:-1]
+        initStateKey = all_keys[-1]
+        self._key = jax.device_put(keys, DEVICE_SHARDING)
 
         # TODO: Understand dtype (int32 is too much)
         dtype = jnp.int32
@@ -199,7 +191,7 @@ class MCSampler:
                 pad = jnp.zeros((res,) + self.sampleShape, dtype=dtype)
                 self.states = jnp.concat([self.initial_states, pad])
         else:
-            self.states = jax.random.bernoulli(initStateKey.astype(jnp.uint32), 0.5, (self.numChains,) + self.sampleShape).astype(jnp.int32)
+            self.states = jax.random.bernoulli(initStateKey, 0.5, (self.numChains,) + self.sampleShape).astype(jnp.int32)
         self.states = jax.device_put(self.states, DEVICE_SHARDING)
 
         # TODO: once NQS will be sharded this can be removes since the NQS will take care of 
@@ -242,19 +234,7 @@ class MCSampler:
             3. Rounds up samples per chain using ceiling division to ensure 
                at least numSamples total samples are generated
         """
-        total_devices = MESH.shape["devices"]
-        
-        # Ensure numChains >= total_devices and divisible by total_devices
-        if self.numChains < total_devices:
-            print(f"WARNING: Number of chains ({self.numChains}) is smaller than total devices ({total_devices}).")
-            print(f"         Increased to: {total_devices}")
-            self._numChains = total_devices
-        elif self.numChains % total_devices != 0:
-            # Round up to next multiple of total_devices
-            adjusted_chains = ((self.numChains + total_devices - 1) // total_devices) * total_devices
-            print(f"WARNING: Number of chains ({self.numChains}) not divisible by devices ({total_devices}).")
-            print(f"         Increased to: {adjusted_chains}")
-            self._numChains = adjusted_chains
+        self._numChains = distribute(self.numChains, 'chains')
         
         # Use ceiling division to ensure at least numSamples total samples
         self._samplePerChain = (self.numSamples + self.numChains - 1) // self.numChains
