@@ -298,10 +298,6 @@ class MCSampler:
             parameters_tmp = self.net.params
             self.net.set_parameters(parameters)
 
-        self._distribute_sampling()
-        if not self._is_state_initialized:
-            self._init_state()
-
         if self.net.is_generator:
             configs, logPsi, p = self._get_samples_gen()
         else:
@@ -311,8 +307,6 @@ class MCSampler:
             self.numSamples = samples_tmp
         if parameters is not None:
             self.net.set_parameters(parameters_tmp)
-        
-        configs = configs + jax.process_index() * 10_000
 
         return configs, logPsi, p 
 
@@ -325,33 +319,35 @@ class MCSampler:
         return jax.vmap(lambda o, idx, s: (o[idx].dot(s.ravel()).reshape(s.shape) + 1) // 2, in_axes=(None, 0, 0))(orbit, orbit_indices, samples)
 
     def _get_samples_gen(self): # TODO: This will work only once NQS will be sharded too
-        tmpKeys = random.split(self.key[0], 3 * self.numChains)
-        self.key = tmpKeys[:self.numChains]
-        sample_key = tmpKeys[self.numChains:2*self.numChains]
-        orbit_key = tmpKeys[2*self.numChains:]
-        self.key = jax.device_put(self.key, DEVICE_SHARDING)
-        sample_key = jax.device_put(sample_key, DEVICE_SHARDING)
+        tmpKeys = random.split(self.key, 2 + self.numSamples)
+        self._key = tmpKeys[0] # For the next call to self.sample()
+        sample_key = tmpKeys[1]
+        orbit_key = tmpKeys[2:]
         orbit_key = jax.device_put(orbit_key, DEVICE_SHARDING)
 
-        samples = self.net.sample(self._samplePerChain, sample_key, parameters=self.net.parameters)
-        numSamplesStr = str(self._samplePerChain)
+        samples = self.net.sample(self.numSamples, sample_key)
+        numSamplesStr = str(self.numSamples)
 
         if numSamplesStr not in self._randomize_samples_jsh:
              self._randomize_samples_jsh[numSamplesStr] = jax.jit(
                 shard_map(
                     self._randomize_samples,
                     mesh=MESH,
-                    in_specs=(DEVICE_SPEC,) * 2 + (REPLICATED_SPEC),
+                    in_specs=(DEVICE_SPEC,) * 2 + (REPLICATED_SPEC,),
                     out_specs=DEVICE_SHARDING
                 )
             )
 
-        if not self.orbit is None:
-            samples = self._randomize_samples_jsh[self._samplePerChain](samples, orbit_key, self.orbit)
+        if self.orbit is not None:
+            samples = self._randomize_samples_jsh[numSamplesStr](samples, orbit_key, self.orbit)
         
         return samples, self.net(samples), jnp.ones(samples.shape[:2]) / self.numSamples
 
     def _get_samples_mcmc(self):
+        self._distribute_sampling()
+        if not self._is_state_initialized:
+            self._init_state()
+
         self.logProb = self._log_prob_fun_jsh(self.states, self.mu, self.net.parameters)
         # Each devices handles its own acceptance rate
         self.numProposed = jax.device_put(jnp.zeros((MESH.shape["devices"],), dtype=np.int64), DEVICE_SHARDING)
