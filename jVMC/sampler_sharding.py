@@ -124,6 +124,8 @@ class MCSampler:
         self.numSamples = numSamples
         self.numChains = numChains
 
+        self.sampler_net, _ = self.net.get_sampler_net()
+
     @property
     def thermalizationSweeps(self):
         return self._thermalizationSweeps
@@ -193,12 +195,6 @@ class MCSampler:
         else:
             self.states = jax.random.bernoulli(initStateKey, 0.5, (self.numChains,) + self.sampleShape).astype(jnp.int32)
         self.states = jax.device_put(self.states, DEVICE_SHARDING)
-
-        # TODO: once NQS will be sharded this can be removes since the NQS will take care of 
-        #       making sure that the net is initialized.
-        #       Then the second line can be moved in the init of the sampler class.
-        self.net.init_net(self.states)
-        self.sampler_net, _ = self.net.get_sampler_net()
 
         def _log_prob_fun(s, mu, p):
             # vmap is over parallel MC chains
