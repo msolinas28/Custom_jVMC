@@ -70,12 +70,119 @@ def dict_gradient(fun, params, arg):
 
     return tree_map(lambda x,y: x + 1.j*y, gr, gi)
 
-
 def dict_gradient_real(fun, params, arg):
     g = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
     g = tree_map(lambda x: x.ravel(), g)
 
     return g
+
+from functools import wraps
+import jax
+import jax.numpy as jnp
+from jax import tree_map
+
+def create_batched_fn(base_fn, batch_size_attr='batchSize'):
+    """
+    Creates a batched version of a function that uses scan.
+    
+    Args:
+        base_fn: The vmapped function to batch
+        batch_size_attr: Name of the attribute containing batch size
+    """
+    def batched_fn(self, parameters, s, batch_size):
+        sb = create_batches(s, batch_size)
+        def scan_fun(c, x):
+            return c, base_fn(parameters, x)
+        return jax.lax.scan(scan_fun, None, jnp.array(sb))[1].reshape((-1,))[:s.shape[0]]
+    return batched_fn
+
+from functools import wraps
+import jax
+import jax.numpy as jnp
+from jax import tree_map
+
+def auto_shard_method(method):
+    """
+    Decorator that uses the decorated method as the base implementation
+    and automatically creates vmapped, sharded, and batched versions.
+    """
+    @wraps(method)
+    def wrapper(self, s, *args, **kwargs):
+        # Use the decorated method itself as the base function
+        base_fn = lambda p, x: method(self, x, *args, **kwargs)
+        
+        # Create derived function names
+        method_name = method.__name__
+        vmapd_name = f'_{method_name}_vmapd'
+        jsh_name = f'_{method_name}_jsh'
+        batched_name = f'_{method_name}_batched'
+        batched_jsh_name = f'_{method_name}_batched_jsh'
+        
+        # Lazy initialization
+        if not hasattr(self, vmapd_name):
+            # Create vmapped version
+            vmapd_fn = jax.vmap(lambda p, x: method(self, x), in_axes=(None, 0))
+            setattr(self, vmapd_name, vmapd_fn)
+            
+            # Create sharded vmapped version
+            jsh_fn = _shard_map(vmapd_fn, (REPLICATED_SPEC, DEVICE_SPEC))
+            setattr(self, jsh_name, jsh_fn)
+            
+            # Create batched version
+            def batched_fn(parameters, s, batch_size):
+                sb = create_batches(s, batch_size)
+                def scan_fun(c, x):
+                    return c, vmapd_fn(parameters, x)
+                return jax.lax.scan(scan_fun, None, jnp.array(sb))[1].reshape((-1,))[:s.shape[0]]
+            
+            setattr(self, batched_name, batched_fn)
+            
+            # Create sharded batched version
+            batched_jsh_fn = _shard_map(batched_fn, (REPLICATED_SPEC, DEVICE_SPEC, REPLICATED_SPEC))
+            setattr(self, batched_jsh_name, batched_jsh_fn)
+        
+        # Get the functions
+        vmap_fun = getattr(self, vmapd_name)
+        jsh_fun = getattr(self, jsh_name)
+        batched_jsh_fun = getattr(self, batched_jsh_name)
+        
+        # Case: single sample
+        if s.shape == self.sampleShape:
+            return method(self, s, *args, **kwargs)
+        
+        num_devices = MESH.size
+        total_samples = s.shape[0]
+        
+        # Case: fewer samples than devices -> fall back to vmap
+        if total_samples < num_devices:
+            return vmap_fun(self.parameters, s)
+        
+        # Case: not divisible by num_devices -> pad
+        original_size = total_samples
+        if total_samples % num_devices != 0:
+            pad_size = num_devices - (total_samples % num_devices)
+            s = jnp.concatenate([s, jnp.repeat(s[-1:], pad_size, axis=0)], axis=0)
+            total_samples = s.shape[0]
+        
+        # Calculate samples per device
+        samples_per_device = total_samples // num_devices
+        
+        # Case: batch_size is None or samples_per_device <= batch_size
+        if self.batchSize is None or samples_per_device <= self.batchSize:
+            result = jsh_fun(self.parameters, s)
+        else:
+            result = batched_jsh_fun(self.parameters, s, self.batchSize)
+        
+        # Unpad if necessary
+        if original_size != total_samples:
+            if isinstance(result, dict) or hasattr(result, 'keys'):
+                result = tree_map(lambda x: x[:original_size], result)
+            else:
+                result = result[:original_size]
+        
+        return result
+    
+    return wrapper
 
 class NQS:
     """
