@@ -5,7 +5,6 @@ import numpy as np
 from jax import vmap
 from functools import partial
 from jax.experimental.shard_map import shard_map
-from jax.experimental import multihost_utils
 
 import jVMC.global_defs as global_defs
 import jVMC.mpi_wrapper as mpi
@@ -43,7 +42,6 @@ def __getattr__(name):
         return _deprecated_funcs[name]
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 __all__ = list(_deprecated_funcs.keys())
-# End deprecated import
 
 class MCSampler:
     """A sampler class.
@@ -272,7 +270,7 @@ class MCSampler:
             self.numSamples = numSamples
         if parameters is not None:
             parameters_tmp = self.net.params
-            self.net.set_parameters(parameters)
+            self.net.parameters = parameters
 
         if self.net.is_generator:
             configs, logPsi, p = self._get_samples_gen()
@@ -282,7 +280,7 @@ class MCSampler:
         if numSamples is not None:
             self.numSamples = samples_tmp
         if parameters is not None:
-            self.net.set_parameters(parameters_tmp)
+            self.net.parameters = parameters_tmp
 
         return configs, logPsi, p 
 

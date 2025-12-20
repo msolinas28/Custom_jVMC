@@ -4,21 +4,21 @@ from jax import grad
 from jax import numpy as jnp
 from jax.tree_util import tree_flatten, tree_unflatten, tree_map
 import flax
-from flax.core.frozen_dict import freeze, unfreeze
+from flax.core.frozen_dict import freeze
 import numpy as np
 import flax.linen as nn
 import collections
 from math import isclose
 import warnings
+from functools import partial 
 
 from jax.experimental.shard_map import shard_map
 from jVMC.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
 from jVMC.sharding_config import distribute, broadcast_split_key
-
 import jVMC
-import jVMC.global_defs as global_defs
 
 def create_batches(configs, b):
+    print('ciao')
     append = b * ((configs.shape[0] + b - 1) // b) - configs.shape[0]
     pads = [(0, append), ] + [(0, 0)] * (len(configs.shape) - 1)
 
@@ -33,142 +33,49 @@ def eval_batched(batchSize, fun, s):
 
     return res[:s.shape[0]]
 
-def flat_gradient(fun, params, arg):
-    gr = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
+def flat_gradient(fun, parameters, arg):
+    gr = grad(lambda p, y: jnp.real(fun(p, y)))(parameters, arg)["params"]
     gr = tree_flatten(tree_map(lambda x: x.ravel(), gr))[0]
-    gi = grad(lambda p, y: jnp.imag(fun(p, y)))(params, arg)["params"]
+    gi = grad(lambda p, y: jnp.imag(fun(p, y)))(parameters, arg)["params"]
     gi = tree_flatten(tree_map(lambda x: x.ravel(), gi))[0]
 
     return jnp.concatenate(gr) + 1.j * jnp.concatenate(gi)
 
-def flat_gradient_cpx_nonholo(fun, params, arg):
-    gr = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
+def flat_gradient_cpx_nonholo(fun, parameters, arg):
+    gr = grad(lambda p, y: jnp.real(fun(p, y)))(parameters, arg)["params"]
     gr = tree_flatten(tree_map(lambda x: [jnp.real(x.ravel()), -jnp.imag(x.ravel())], gr))[0]
-    gi = grad(lambda p, y: jnp.imag(fun(p, y)))(params, arg)["params"]
+    gi = grad(lambda p, y: jnp.imag(fun(p, y)))(parameters, arg)["params"]
     gi = tree_flatten(tree_map(lambda x: [jnp.real(x.ravel()), -jnp.imag(x.ravel())], gi))[0]
 
     return jnp.concatenate(gr) + 1.j * jnp.concatenate(gi)
 
 
-def flat_gradient_real(fun, params, arg):
-    g = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
+def flat_gradient_real(fun, parameters, arg):
+    g = grad(lambda p, y: jnp.real(fun(p, y)))(parameters, arg)["params"]
     g = tree_flatten(tree_map(lambda x: x.ravel(), g))[0]
 
     return jnp.concatenate(g)
 
-def flat_gradient_holo(fun, params, arg):
-    g = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
+def flat_gradient_holo(fun, parameters, arg):
+    g = grad(lambda p, y: jnp.real(fun(p, y)))(parameters, arg)["params"]
     g = tree_flatten(tree_map(lambda x: [x.ravel(), 1.j*x.ravel()], g))[0]
 
     return jnp.concatenate(g)
 
-def dict_gradient(fun, params, arg):
-    gr = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
+def dict_gradient(fun, parameters, arg):
+    gr = grad(lambda p, y: jnp.real(fun(p, y)))(parameters, arg)["params"]
     gr = tree_map(lambda x: x.ravel(), gr)
-    gi = grad(lambda p, y: jnp.imag(fun(p, y)))(params, arg)["params"]
+    gi = grad(lambda p, y: jnp.imag(fun(p, y)))(parameters, arg)["params"]
     gi = tree_map(lambda x: x.ravel(), gi)
 
     return tree_map(lambda x,y: x + 1.j*y, gr, gi)
 
-def dict_gradient_real(fun, params, arg):
-    g = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
+
+def dict_gradient_real(fun, parameters, arg):
+    g = grad(lambda p, y: jnp.real(fun(p, y)))(parameters, arg)["params"]
     g = tree_map(lambda x: x.ravel(), g)
 
     return g
-
-from functools import wraps, partial
-import jax
-import jax.numpy as jnp
-from jax import tree_map
-
-def batch_fun(batch_size, s, parameters, fun, *args, **kwargs):
-    sb = create_batches(s, batch_size)
-    def scan_fun(c, x):
-        return c, fun(parameters, x, *args, **kwargs) 
-    return jax.lax.scan(scan_fun, None, jnp.array(sb))[1].reshape((-1,))[:s.shape[0]]
-
-def auto_shard(vmap_in_axes=(), in_specs=(), out_specs=DEVICE_SPEC, batch_fun=batch_fun):
-    """
-    Decorator that extracts the base function from the decorated method
-    and automatically creates vmapped, sharded, and batched versions.
-    
-    The decorated method should return a function that will be transformed.
-    This function should have signature: fun(parameters, s, *args, **kwargs)
-    
-    Args:
-        vmap_in_axes: Tuple of axes for vmap beyond (parameters, samples)
-        in_specs: Tuple of input specs for shard_map beyond (REPLICATED_SPEC, DEVICE_SPEC)
-        out_specs: Output spec for shard_map (default: DEVICE_SPEC)
-        batch_fun: Function to use for batching (default: batch_fun)
-    """
-    def decorator(method):
-        @wraps(method)
-        def wrapper(self, s, *args, **kwargs):
-            method_name = method.__name__
-            vmapd_name = f'_{method_name}_vmapd'
-            jsh_name = f'_{method_name}_jsh'
-            batched_name = f'_{method_name}_batched'
-            batched_jsh_name = f'_{method_name}_batched_jsh'
-            
-            # Lazy initialization
-            if not hasattr(self, vmapd_name):
-                base_fn = method(self)
-                full_in_specs = (REPLICATED_SPEC, DEVICE_SPEC) + in_specs
-                
-                vmapd_fn = jax.vmap(base_fn, in_axes=(None, 0) + vmap_in_axes)
-                setattr(self, vmapd_name, vmapd_fn)
-                
-                jsh_fn = jax.jit(shard_map(vmapd_fn, MESH, full_in_specs, out_specs))
-                setattr(self, jsh_name, jsh_fn)
-                
-                batched_fun_partial = partial(batch_fun, fun=vmapd_fn)
-                setattr(self, batched_name, batched_fun_partial)
-            
-                batched_in_specs = (REPLICATED_SPEC, DEVICE_SPEC, REPLICATED_SPEC) + in_specs
-                batched_jsh_fn = jax.jit(shard_map(batched_fun_partial, MESH, batched_in_specs, out_specs)) 
-                setattr(self, batched_jsh_name, batched_jsh_fn)
-            
-            base_fn = getattr(self, base_fn_name)
-            vmap_fun = getattr(self, vmapd_name)
-            jsh_fun = getattr(self, jsh_name)
-            batched_jsh_fun = getattr(self, batched_jsh_name)
-            
-            # Case: single sample
-            if s.shape == self.sampleShape:
-                return base_fn(self.parameters, s, *args, **kwargs)
-            
-            num_devices = MESH.size
-            total_samples = s.shape[0]
-            
-            # Case: fewer samples than devices -> fall back to vmap
-            if total_samples < num_devices:
-                return vmap_fun(self.parameters, s, *args, **kwargs)
-            
-            # Case: not divisible by num_devices -> pad
-            original_size = total_samples
-            if total_samples % num_devices != 0:
-                pad_size = num_devices - (total_samples % num_devices)
-                s = jnp.concatenate([s, jnp.repeat(s[-1:], pad_size, axis=0)], axis=0)
-                total_samples = s.shape[0]
-            
-            # Calculate samples per device
-            samples_per_device = total_samples // num_devices
-            
-            # Case: batch_size is None or samples_per_device <= batch_size
-            if self.batchSize is None or samples_per_device <= self.batchSize:
-                result = jsh_fun(self.parameters, s, *args, **kwargs)
-            else:
-                result = batched_jsh_fun(self.batchSize, s, self.parameters, *args, **kwargs)
-            
-            # Unpad if necessary
-            if original_size != total_samples:
-                if isinstance(result, dict) or hasattr(result, 'keys'):
-                    result = tree_map(lambda x: x[:original_size], result)
-                else:
-                    result = result[:original_size]
-            return result
-        return wrapper
-    return decorator
 
 class NQS:
     """
@@ -227,7 +134,7 @@ class NQS:
         else:
             self._sampleShape = (sampleShape,)
         
-        self.batchSize = batchSize
+        self._batchSize = batchSize
         self._logarithmic = logarithmic
         
         self.init_net(seed)
@@ -259,6 +166,10 @@ class NQS:
     @params.setter
     def params(self, value):
         self.parameters = value
+
+    @property
+    def batchSize(self):
+        return self._batchSize
         
     @property
     def net(self):
@@ -302,27 +213,31 @@ class NQS:
     
     def _init_sh(self):
         def _shard_map(fun, in_specs):
-            return jax.jit(shard_map(fun, MESH, in_specs, (DEVICE_SPEC,)))
+            return jax.jit(shard_map(fun, MESH, in_specs, DEVICE_SPEC))
 
-        self._apply_fun_vmapd = jax.vmap(lambda p, x: self.apply_fun(p, x), in_axes=(None, 0))
+        self._apply_fun_single = lambda p, x: self.apply_fun(p, x)
+        self._apply_fun_vmapd = jax.vmap(self._apply_fun_single, in_axes=(None, 0))
         self._apply_fun_jsh = _shard_map(self._apply_fun_vmapd, (REPLICATED_SPEC, DEVICE_SPEC))
-        self._apply_fun_batched_jsh = _shard_map(self._apply_fun_batched, (REPLICATED_SPEC, DEVICE_SPEC, REPLICATED_SPEC))
+        self._apply_fun_batched_jsh = _shard_map(partial(self._apply_fun_batched, batchSize=self.batchSize), (REPLICATED_SPEC, DEVICE_SPEC))
 
-        self._gradients_vmapd = jax.vmap(lambda p, x: self.flat_gradient_function(self.net.apply, p, x), in_axes=(None, 0))
+        # TODO: to change with self.apply_fun once all the other classes are changed
+        self._gradients_single = lambda p, x: self.flat_gradient_function(self.net.apply, p, x)
+        self._gradients_vmapd = jax.vmap(self._gradients_single, in_axes=(None, 0))
         self._gradients_jsh = _shard_map(self._gradients_vmapd, (REPLICATED_SPEC, DEVICE_SPEC))
-        self._gradients_batched_jsh = _shard_map(self._gradients_batched, (REPLICATED_SPEC, DEVICE_SPEC, REPLICATED_SPEC))
+        self._gradients_batched_jsh = _shard_map(partial(self._gradients_batched, batchSize=self.batchSize), (REPLICATED_SPEC, DEVICE_SPEC))
 
-        self._gradients_dict_vmapd = jax.vmap(lambda p, x: self.dict_gradient_function(self.net.apply, p, x), in_axes=(None, 0))
+        self._gradients_dict_single = lambda p, x: self.dict_gradient_function(self.net.apply, p, x)
+        self._gradients_dict_vmapd = jax.vmap(self._gradients_dict_single, in_axes=(None, 0))
         self._gradients_dict_jsh = _shard_map(self._gradients_dict_vmapd, (REPLICATED_SPEC, DEVICE_SPEC))
-        self._gradients_dict_batched_jsh = _shard_map(self._gradients_dict_batched, (REPLICATED_SPEC, DEVICE_SPEC, REPLICATED_SPEC))
+        self._gradients_dict_batched_jsh = _shard_map(partial(self._gradients_dict_batched, batchSize=self.batchSize), (REPLICATED_SPEC, DEVICE_SPEC))
 
-        self._append_gradients_dict = _shard_map(
-            jax.vmap(lambda x, y: tree_map(lambda a, b: jnp.concatenate((a[:, :], 1.j * b[:, :]), axis=1), x, y)),
-            (DEVICE_SPEC, DEVICE_SPEC)
-        )
+        self._append_gradients_dict_single = lambda x, y: tree_map(lambda a, b: jnp.concatenate((a, 1.j * b)), x, y)
+        self._append_gradients_dict = lambda x, y: tree_map(lambda a, b: jnp.concatenate((a[:, :], 1.j * b[:, :]), axis=1), x, y)
+        self._append_gradients_dict_jsh = _shard_map(self._append_gradients_dict, (DEVICE_SPEC, DEVICE_SPEC))
 
         self._sample_jsh = {}
     
+
     def init_net(self, seed: int | None):
         dummy_sample = jnp.ones(self.sampleShape)
         if seed == None:
@@ -346,12 +261,14 @@ class NQS:
         if isclose(jnp.linalg.norm(grads_r - 1.j * grads_i) / grads_r.shape[0], 0.0, abs_tol=1e-14):
             self._holomorphic = True
             self._flat_gradient_function = flat_gradient_holo
+            self._dict_gradient_function = dict_gradient_real
         else:
             if self._realParams:
                 self._flat_gradient_function = flat_gradient
                 self._dict_gradient_function = dict_gradient
             else:
                 self._flat_gradient_function = flat_gradient_cpx_nonholo
+                self._dict_gradient_function = dict_gradient_real
 
         self._paramShapes = [(p.size, p.shape) for p in tree_flatten(self.parameters["params"])[0]]
         self._netTreeDef = jax.tree_util.tree_structure(self.parameters["params"])
@@ -400,7 +317,7 @@ class NQS:
         if self.batchSize is None or samples_per_device <= self.batchSize:
             result = jsh_fun(self.parameters, s)
         else:
-            result = batched_jsh_fun(self.parameters, s, self.batchSize)
+            result = batched_jsh_fun(self.parameters, s)
         
         if original_size != total_samples:
             if isinstance(result, dict) or hasattr(result, 'keys'):
@@ -409,7 +326,6 @@ class NQS:
                 result = result[:original_size]
         return result
 
-    @auto_shard()
     def __call__(self, s):
         """
         Evaluate variational wave function.
@@ -424,7 +340,8 @@ class NQS:
         
         :meta public:
         """        
-        return self.apply_fun(self.parameters, s)
+        return self._handle_sharding_cases(self._apply_fun_single, self._apply_fun_vmapd, 
+                                           self._apply_fun_jsh, self._apply_fun_batched_jsh, s)
 
     def _apply_fun_batched(self, parameters, s, batchSize):
         sb = create_batches(s, batchSize)
@@ -446,9 +363,8 @@ class NQS:
             with respect to each variational parameter :math:`\\theta_k` for each \
             input configuration :math:`s`.
         """
-        return self._handle_sharding_cases(self._flat_gradient_function, self._gradients_vmapd,
-                                           self._gradients_jsh, self._gradients_batched_jsh)
-
+        return self._handle_sharding_cases(self._gradients_single, self._gradients_vmapd,
+                                           self._gradients_jsh, self._gradients_batched_jsh, s)
 
     def _gradients_batched(self, parameters, s, batchSize):
         sb = create_batches(s, batchSize)
@@ -472,16 +388,15 @@ class NQS:
             with respect to each variational parameter :math:`\\theta_k` for each \
             input configuration :math:`s`.
         """
-        if s.shape == self.sampleShape:
-            return self.flat_gradient_function(self.net.apply, self.parameters, s)
-        if self.batchSize is None:
-            gradOut = self._gradients_dict_jsh(self.parameters, s)
-        else:
-            gradOut = self._gradients_dict_batched_jsh(self.parameters, s, self.batchSize)
+        result = self._handle_sharding_cases(self._gradients_dict_single, self._gradients_dict_vmapd,
+                                             self._gradients_dict_jsh, self._gradients_dict_batched_jsh, s)
+        
         if self.holomorphic:
-            return self._append_gradients_dict(gradOut, gradOut)
-
-        return gradOut
+            if s.shape == self.sampleShape:
+                return self._append_gradients_dict_single(result, result)
+            else:
+                return self._append_gradients_dict_jsh(result, result)
+        return result
     
     def _gradients_dict_batched(self, parameters, s, batchSize):
         sb = create_batches(s, batchSize)
@@ -585,6 +500,7 @@ class NQS:
         else:
             self.params = self._param_unflatten(P)
 
+    # TODO: change name to make it more explicit that it returns the params in array form
     def get_parameters(self):
         """
         Get variational parameters.
@@ -600,6 +516,11 @@ class NQS:
         """
         Reshape parameter array update according to net tree structure
         """
+        if isinstance(P, dict):
+            if 'params' in P.keys():
+                return P['params']
+            else:
+                return P
         PTreeShape = []
         start = 0
         for s in self.paramShapes:
