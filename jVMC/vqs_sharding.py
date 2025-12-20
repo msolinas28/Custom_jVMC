@@ -4,21 +4,21 @@ from jax import grad
 from jax import numpy as jnp
 from jax.tree_util import tree_flatten, tree_unflatten, tree_map
 import flax
-from flax.core.frozen_dict import freeze, unfreeze
+from flax.core.frozen_dict import freeze
 import numpy as np
 import flax.linen as nn
 import collections
 from math import isclose
 import warnings
+from functools import partial 
 
 from jax.experimental.shard_map import shard_map
 from jVMC.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
 from jVMC.sharding_config import distribute, broadcast_split_key
-
 import jVMC
-import jVMC.global_defs as global_defs
 
 def create_batches(configs, b):
+    print('ciao')
     append = b * ((configs.shape[0] + b - 1) // b) - configs.shape[0]
     pads = [(0, append), ] + [(0, 0)] * (len(configs.shape) - 1)
 
@@ -134,7 +134,7 @@ class NQS:
         else:
             self._sampleShape = (sampleShape,)
         
-        self.batchSize = batchSize
+        self._batchSize = batchSize
         self._logarithmic = logarithmic
         
         self.init_net(seed)
@@ -166,6 +166,10 @@ class NQS:
     @params.setter
     def params(self, value):
         self.parameters = value
+
+    @property
+    def batchSize(self):
+        return self._batchSize
         
     @property
     def net(self):
@@ -209,19 +213,19 @@ class NQS:
     
     def _init_sh(self):
         def _shard_map(fun, in_specs):
-            return jax.jit(shard_map(fun, MESH, in_specs, (DEVICE_SPEC,)))
+            return jax.jit(shard_map(fun, MESH, in_specs, DEVICE_SPEC))
 
         self._apply_fun_vmapd = jax.vmap(lambda p, x: self.apply_fun(p, x), in_axes=(None, 0))
         self._apply_fun_jsh = _shard_map(self._apply_fun_vmapd, (REPLICATED_SPEC, DEVICE_SPEC))
-        self._apply_fun_batched_jsh = _shard_map(self._apply_fun_batched, (REPLICATED_SPEC, DEVICE_SPEC, REPLICATED_SPEC))
+        self._apply_fun_batched_jsh = _shard_map(partial(self._apply_fun_batched, batchSize=self.batchSize), (REPLICATED_SPEC, DEVICE_SPEC))
 
         self._gradients_vmapd = jax.vmap(lambda p, x: self.flat_gradient_function(self.net.apply, p, x), in_axes=(None, 0))
         self._gradients_jsh = _shard_map(self._gradients_vmapd, (REPLICATED_SPEC, DEVICE_SPEC))
-        self._gradients_batched_jsh = _shard_map(self._gradients_batched, (REPLICATED_SPEC, DEVICE_SPEC, REPLICATED_SPEC))
+        self._gradients_batched_jsh = _shard_map(partial(self._gradients_batched, batchSize=self.batchSize), (REPLICATED_SPEC, DEVICE_SPEC))
 
         self._gradients_dict_vmapd = jax.vmap(lambda p, x: self.dict_gradient_function(self.net.apply, p, x), in_axes=(None, 0))
         self._gradients_dict_jsh = _shard_map(self._gradients_dict_vmapd, (REPLICATED_SPEC, DEVICE_SPEC))
-        self._gradients_dict_batched_jsh = _shard_map(self._gradients_dict_batched, (REPLICATED_SPEC, DEVICE_SPEC, REPLICATED_SPEC))
+        self._gradients_dict_batched_jsh = _shard_map(partial(self._gradients_dict_batched, batchSize=self.batchSize), (REPLICATED_SPEC, DEVICE_SPEC))
 
         self._append_gradients_dict = _shard_map(
             jax.vmap(lambda x, y: tree_map(lambda a, b: jnp.concatenate((a[:, :], 1.j * b[:, :]), axis=1), x, y)),
@@ -308,7 +312,7 @@ class NQS:
         if self.batchSize is None or samples_per_device <= self.batchSize:
             result = jsh_fun(self.parameters, s)
         else:
-            result = batched_jsh_fun(self.parameters, s, self.batchSize)
+            result = batched_jsh_fun(self.parameters, s)
         
         if original_size != total_samples:
             if isinstance(result, dict) or hasattr(result, 'keys'):

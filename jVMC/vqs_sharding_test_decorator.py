@@ -76,113 +76,99 @@ def dict_gradient_real(fun, params, arg):
 
     return g
 
-from functools import wraps
+from functools import wraps, partial
 import jax
 import jax.numpy as jnp
 from jax import tree_map
 
-def create_batched_fn(base_fn, batch_size_attr='batchSize'):
+def batch_fun(batch_size, s, parameters, fun, *args, **kwargs):
+    sb = create_batches(s, batch_size)
+    def scan_fun(c, x):
+        return c, fun(parameters, x, *args, **kwargs) 
+    return jax.lax.scan(scan_fun, None, jnp.array(sb))[1].reshape((-1,))[:s.shape[0]]
+
+def auto_shard(vmap_in_axes=(), in_specs=(), out_specs=DEVICE_SPEC, batch_fun=batch_fun):
     """
-    Creates a batched version of a function that uses scan.
+    Decorator that extracts the base function from the decorated method
+    and automatically creates vmapped, sharded, and batched versions.
+    
+    The decorated method should return a function that will be transformed.
+    This function should have signature: fun(parameters, s, *args, **kwargs)
     
     Args:
-        base_fn: The vmapped function to batch
-        batch_size_attr: Name of the attribute containing batch size
+        vmap_in_axes: Tuple of axes for vmap beyond (parameters, samples)
+        in_specs: Tuple of input specs for shard_map beyond (REPLICATED_SPEC, DEVICE_SPEC)
+        out_specs: Output spec for shard_map (default: DEVICE_SPEC)
+        batch_fun: Function to use for batching (default: batch_fun)
     """
-    def batched_fn(self, parameters, s, batch_size):
-        sb = create_batches(s, batch_size)
-        def scan_fun(c, x):
-            return c, base_fn(parameters, x)
-        return jax.lax.scan(scan_fun, None, jnp.array(sb))[1].reshape((-1,))[:s.shape[0]]
-    return batched_fn
-
-from functools import wraps
-import jax
-import jax.numpy as jnp
-from jax import tree_map
-
-def auto_shard_method(method):
-    """
-    Decorator that uses the decorated method as the base implementation
-    and automatically creates vmapped, sharded, and batched versions.
-    """
-    @wraps(method)
-    def wrapper(self, s, *args, **kwargs):
-        # Use the decorated method itself as the base function
-        base_fn = lambda p, x: method(self, x, *args, **kwargs)
-        
-        # Create derived function names
-        method_name = method.__name__
-        vmapd_name = f'_{method_name}_vmapd'
-        jsh_name = f'_{method_name}_jsh'
-        batched_name = f'_{method_name}_batched'
-        batched_jsh_name = f'_{method_name}_batched_jsh'
-        
-        # Lazy initialization
-        if not hasattr(self, vmapd_name):
-            # Create vmapped version
-            vmapd_fn = jax.vmap(lambda p, x: method(self, x), in_axes=(None, 0))
-            setattr(self, vmapd_name, vmapd_fn)
+    def decorator(method):
+        @wraps(method)
+        def wrapper(self, s, *args, **kwargs):
+            method_name = method.__name__
+            vmapd_name = f'_{method_name}_vmapd'
+            jsh_name = f'_{method_name}_jsh'
+            batched_name = f'_{method_name}_batched'
+            batched_jsh_name = f'_{method_name}_batched_jsh'
             
-            # Create sharded vmapped version
-            jsh_fn = _shard_map(vmapd_fn, (REPLICATED_SPEC, DEVICE_SPEC))
-            setattr(self, jsh_name, jsh_fn)
+            # Lazy initialization
+            if not hasattr(self, vmapd_name):
+                base_fn = method(self)
+                full_in_specs = (REPLICATED_SPEC, DEVICE_SPEC) + in_specs
+                
+                vmapd_fn = jax.vmap(base_fn, in_axes=(None, 0) + vmap_in_axes)
+                setattr(self, vmapd_name, vmapd_fn)
+                
+                jsh_fn = jax.jit(shard_map(vmapd_fn, MESH, full_in_specs, out_specs))
+                setattr(self, jsh_name, jsh_fn)
+                
+                batched_fun_partial = partial(batch_fun, fun=vmapd_fn)
+                setattr(self, batched_name, batched_fun_partial)
             
-            # Create batched version
-            def batched_fn(parameters, s, batch_size):
-                sb = create_batches(s, batch_size)
-                def scan_fun(c, x):
-                    return c, vmapd_fn(parameters, x)
-                return jax.lax.scan(scan_fun, None, jnp.array(sb))[1].reshape((-1,))[:s.shape[0]]
+                batched_in_specs = (REPLICATED_SPEC, DEVICE_SPEC, REPLICATED_SPEC) + in_specs
+                batched_jsh_fn = jax.jit(shard_map(batched_fun_partial, MESH, batched_in_specs, out_specs)) 
+                setattr(self, batched_jsh_name, batched_jsh_fn)
             
-            setattr(self, batched_name, batched_fn)
+            base_fn = getattr(self, base_fn_name)
+            vmap_fun = getattr(self, vmapd_name)
+            jsh_fun = getattr(self, jsh_name)
+            batched_jsh_fun = getattr(self, batched_jsh_name)
             
-            # Create sharded batched version
-            batched_jsh_fn = _shard_map(batched_fn, (REPLICATED_SPEC, DEVICE_SPEC, REPLICATED_SPEC))
-            setattr(self, batched_jsh_name, batched_jsh_fn)
-        
-        # Get the functions
-        vmap_fun = getattr(self, vmapd_name)
-        jsh_fun = getattr(self, jsh_name)
-        batched_jsh_fun = getattr(self, batched_jsh_name)
-        
-        # Case: single sample
-        if s.shape == self.sampleShape:
-            return method(self, s, *args, **kwargs)
-        
-        num_devices = MESH.size
-        total_samples = s.shape[0]
-        
-        # Case: fewer samples than devices -> fall back to vmap
-        if total_samples < num_devices:
-            return vmap_fun(self.parameters, s)
-        
-        # Case: not divisible by num_devices -> pad
-        original_size = total_samples
-        if total_samples % num_devices != 0:
-            pad_size = num_devices - (total_samples % num_devices)
-            s = jnp.concatenate([s, jnp.repeat(s[-1:], pad_size, axis=0)], axis=0)
+            # Case: single sample
+            if s.shape == self.sampleShape:
+                return base_fn(self.parameters, s, *args, **kwargs)
+            
+            num_devices = MESH.size
             total_samples = s.shape[0]
-        
-        # Calculate samples per device
-        samples_per_device = total_samples // num_devices
-        
-        # Case: batch_size is None or samples_per_device <= batch_size
-        if self.batchSize is None or samples_per_device <= self.batchSize:
-            result = jsh_fun(self.parameters, s)
-        else:
-            result = batched_jsh_fun(self.parameters, s, self.batchSize)
-        
-        # Unpad if necessary
-        if original_size != total_samples:
-            if isinstance(result, dict) or hasattr(result, 'keys'):
-                result = tree_map(lambda x: x[:original_size], result)
+            
+            # Case: fewer samples than devices -> fall back to vmap
+            if total_samples < num_devices:
+                return vmap_fun(self.parameters, s, *args, **kwargs)
+            
+            # Case: not divisible by num_devices -> pad
+            original_size = total_samples
+            if total_samples % num_devices != 0:
+                pad_size = num_devices - (total_samples % num_devices)
+                s = jnp.concatenate([s, jnp.repeat(s[-1:], pad_size, axis=0)], axis=0)
+                total_samples = s.shape[0]
+            
+            # Calculate samples per device
+            samples_per_device = total_samples // num_devices
+            
+            # Case: batch_size is None or samples_per_device <= batch_size
+            if self.batchSize is None or samples_per_device <= self.batchSize:
+                result = jsh_fun(self.parameters, s, *args, **kwargs)
             else:
-                result = result[:original_size]
-        
-        return result
-    
-    return wrapper
+                result = batched_jsh_fun(self.batchSize, s, self.parameters, *args, **kwargs)
+            
+            # Unpad if necessary
+            if original_size != total_samples:
+                if isinstance(result, dict) or hasattr(result, 'keys'):
+                    result = tree_map(lambda x: x[:original_size], result)
+                else:
+                    result = result[:original_size]
+            return result
+        return wrapper
+    return decorator
 
 class NQS:
     """
@@ -337,7 +323,6 @@ class NQS:
 
         self._sample_jsh = {}
     
-
     def init_net(self, seed: int | None):
         dummy_sample = jnp.ones(self.sampleShape)
         if seed == None:
@@ -424,6 +409,7 @@ class NQS:
                 result = result[:original_size]
         return result
 
+    @auto_shard()
     def __call__(self, s):
         """
         Evaluate variational wave function.
@@ -438,8 +424,7 @@ class NQS:
         
         :meta public:
         """        
-        return self._handle_sharding_cases(self.apply_fun, self._apply_fun_vmapd, 
-                                           self._apply_fun_jsh, self._apply_fun_batched_jsh, s)
+        return self.apply_fun(self.parameters, s)
 
     def _apply_fun_batched(self, parameters, s, batchSize):
         sb = create_batches(s, batchSize)
