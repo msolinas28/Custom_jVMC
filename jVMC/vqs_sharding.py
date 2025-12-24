@@ -14,10 +14,9 @@ from functools import partial, wraps
 import warnings
 
 import jVMC
+from jVMC.util.key_gen import generate_seed
 from jVMC.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
 from jVMC.sharding_config import distribute, broadcast_split_key
-
-
 
 def flat_gradient(fun, params, arg):
     gr = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
@@ -316,7 +315,7 @@ class NQS:
     def init_net(self, seed: int | None):
         dummy_sample = jnp.ones(self.sampleShape)
         if seed == None:
-            seed = np.random.SeedSequence().entropy   
+            seed = generate_seed()
         self._parameters = self.net.init(jax.random.PRNGKey(seed), dummy_sample)
         self._realParams = False
         self._holomorphic = False
@@ -436,7 +435,7 @@ class NQS:
 
             numSamples = distribute(numSamples, 'samples') # TODO: after this check if batchsize divides numSaples per device
             if key is None:
-                key = jax.random.PRNGKey(np.random.SeedSequence().entropy)
+                key = jax.random.PRNGKey(generate_seed())
             elif len(key.shape) > 1:
                 key = key[0]
             keys = jax.device_put(broadcast_split_key(key, numSamples), DEVICE_SHARDING)

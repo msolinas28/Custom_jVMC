@@ -5,12 +5,13 @@ import numpy as np
 from jax import vmap
 from functools import partial
 from jax.experimental.shard_map import shard_map
+from abc import ABC, abstractmethod
 
 import jVMC.global_defs as global_defs
 import jVMC.mpi_wrapper as mpi
 from jVMC.nets.sym_wrapper import SymNet
 from jVMC.propose import AbstractProposeCont
-from jVMC.util.key_gen import format_key
+from jVMC.util.key_gen import format_key, generate_seed
 from jVMC.vqs_sharding import NQS
 from jVMC.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
 from jVMC.sharding_config import distribute, broadcast_split_key
@@ -43,10 +44,11 @@ def __getattr__(name):
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 __all__ = list(_deprecated_funcs.keys())
 
-class MCSampler:
-    """A sampler class.
+class AbstractMCSampler(ABC):
+    """
+    A sampler class.
 
-    This class provides functionality to sample computational basis states from \
+    This abstract class provides functionality to sample states from \
     the distribution 
 
         :math:`p_{\\mu}(s)=\\frac{|\\psi(s)|^{\\mu}}{\\sum_s|\\psi(s)|^{\\mu}}`.
@@ -55,12 +57,11 @@ class MCSampler:
     :math:`0\\leq\\mu<2` can be used to perform importance sampling \
     (see `[arXiv:2108.08631] <https://arxiv.org/abs/2108.08631>`_).
 
-    Sampling is automatically distributed accross MPI processes and locally available \
-    devices.
+    Sampling is automatically distributed accross processes and locally available devices.
 
     Initializer arguments:
         * ``net``: Network defining the probability distribution.
-        * ``sampleShape``: Shape of computational basis configurations.
+        * ``sampleShape``: Shape of configurations.
         * ``key``: An instance of ``jax.random.PRNGKey``. Alternatively, an ``int`` that will be used \
                    as seed to initialize a ``PRNGKey``.
         * ``updateProposer``: A function to propose updates for the MCMC algorithm. \
@@ -112,7 +113,7 @@ class MCSampler:
         self.updateProposerArg = updateProposerArg
 
         if key is None:
-            key = np.random.SeedSequence().entropy
+            key = generate_seed()
         self.key = key
 
         if sweepSteps is None:
@@ -173,16 +174,17 @@ class MCSampler:
     @property
     def net(self):
         return self._net
-
+    
+    @abstractmethod
     def _init_state(self):
+        pass
+
+    def __init_state(self, initializer, dtype):
         master_key = self.key[0] if self.key.ndim > 1 else self.key
         all_keys = broadcast_split_key(master_key, self.numChains + 1)
         keys = all_keys[:-1]
         initStateKey = all_keys[-1]
         self._key = jax.device_put(keys, DEVICE_SHARDING)
-
-        # TODO: Understand dtype (int32 is too much)
-        dtype = jnp.int32
 
         if self.initial_states is not None:
             self.states = self.initial_states.astype(dtype)
@@ -191,7 +193,7 @@ class MCSampler:
                 pad = jnp.zeros((res,) + self.sampleShape, dtype=dtype)
                 self.states = jnp.concat([self.initial_states, pad])
         else:
-            self.states = jax.random.bernoulli(initStateKey, 0.5, (self.numChains,) + self.sampleShape).astype(jnp.int32)
+            self.states = initializer(initStateKey, (self.numChains,) + self.sampleShape, dtype)
         self.states = jax.device_put(self.states, DEVICE_SHARDING)
 
         def _log_prob_fun(s, mu, p):
@@ -292,9 +294,9 @@ class MCSampler:
         samples = samples * 2 - 1
         return jax.vmap(lambda o, idx, s: (o[idx].dot(s.ravel()).reshape(s.shape) + 1) // 2, in_axes=(None, 0, 0))(orbit, orbit_indices, samples)
 
-    def _get_samples_gen(self): # TODO: This will work only once NQS will be sharded too
+    def _get_samples_gen(self):
         tmpKeys = random.split(self.key, 2 + self.numSamples)
-        self._key = tmpKeys[0] # For the next call to self.sample()
+        self._key = tmpKeys[0]
         sample_key = tmpKeys[1]
         orbit_key = tmpKeys[2:]
         orbit_key = jax.device_put(orbit_key, DEVICE_SHARDING)
@@ -354,10 +356,7 @@ class MCSampler:
             self._get_samples_jsh[numSamplesStr](self.net.parameters, self.states, self.logProb, self.key, 
                                                  self.numProposed, self.numAccepted, self.updateProposerArg)
 
-        coeffs = jax.vmap(lambda x: self.net.net.apply(self.net.parameters, x))(configs) # TODO: This has to be change with self.net(configs) once VQS will be sharded
-        # TODO: Once VQS is sharded p will have to be divided by jnp.global_sum(p) or jax.lax.psum(jnp.sum(p), axis_name=MESH.axis_names[0]) 
-        # (to understad which is correct one)
-        # If automatic parallelism works as it should this is not needed 
+        coeffs = self.net(configs)
         p = jnp.exp((1.0 / self.logProbFactor - self.mu) * jnp.real(coeffs))
 
         return configs, coeffs, p / jnp.sum(p)
@@ -426,6 +425,17 @@ class MCSampler:
             return jnp.sum(self.numAccepted) / numProp
 
         return jnp.array([0.])
+
+class MCSampler(AbstractMCSampler):
+    """
+    A sampler class.
+
+    This abstract class provides functionality to sample computationally basis.
+    """
+    def _init_state(self):
+        initializer = lambda key, shape, dtype: jax.random.bernoulli(key, 0.5, shape).astype(dtype)
+        
+        return self.__init_state(initializer, jnp.float32)
 
 # ** end class Sampler
 
@@ -582,10 +592,9 @@ class ExactSampler:
 
 # TODO: MCSamplerCont.updateProposerArg is no longer used. Now everything is inside updateProposer._proposerArg.
 #       Therefore this property should be removed.
-class MCSamplerCont(MCSampler):
-    def __init__(self, net, key=None, updateProposer=None, numChains=1, 
-                numSamples=2**12, thermalizationSweeps=10, sweepSteps=None, initState=None, mu=2, logProbFactor=0.5):
-        
+class MCSamplerCont(AbstractMCSampler):
+    def __init__(self, net: NQS, updateProposer: AbstractProposeCont, key=None, numChains=32, numSamples=2**12, 
+                 thermalizationSweeps=10, sweepSteps=None, initState=None, mu=2, logProbFactor=0.5):
         if not isinstance(updateProposer, AbstractProposeCont):
             raise ValueError(f'The argument \'updateProposer\' has to be an istance of the class \'jVMC.propose.AbstractProposeCont\'.')
         sampleShape = (updateProposer.geometry.n_particles * updateProposer.geometry.n_dim,)
@@ -596,31 +605,10 @@ class MCSamplerCont(MCSampler):
         super().__init__(net, sampleShape, key, updateProposer, numChains, None, 
                         numSamples, thermalizationSweeps, sweepSteps, initState, mu, logProbFactor)
         
-        self.updateProposer.init_proposerArg(net, self.numChains)
-        init_keys = jax.random.split(format_key(key), global_defs.device_count())
-        self.states = global_defs.pmap_for_my_devices(
-            partial(self._init_state, initState=initState), in_axes=(0)
-        )(init_keys)
+    def _init_state(self):
+        return self.__init_state(self.updateProposer.geometry.uniform_populate, jnp.float64)
 
-    def _init_state(self, key, initState):
-        stateShape = (self.numChains,) + self.sampleShape
-        key_init = jax.random.split(format_key(key), self.numChains)
-        # TODO: decide how to initialize
-        init_fun = jax.jit(jax.vmap(partial(self.updateProposer.geometry.uniform_populate, dtype=jnp.float64)))
-
-        if initState is None:
-            initState = init_fun(key_init)
-        elif initState.shape != stateShape:
-            if initState.shape != self.sampleShape:
-                raise ValueError(
-                    "'initState' does not have the correct shape.\n" \
-                    f"Allowed shapes are (n_chains, n_particles * n_dim) or (n_particles * n_dim, ), got {initState.shape}")
-            warnings.warn(
-                "Got a single sample to initialize all chains in 'initState'! \n" \
-                "It is preferred to initialize each chain in a different way.")
-            initState = jnp.stack([initState] * self.numChains).reshape(stateShape)
-        return initState
-
+    # TODO: remove it or move it in __init_state
     def _mc_init(self, netParams):
 
         self.logAccProb = self._logAccProb_pmapd(self.states, self.mu, self.sampler_net, netParams)
