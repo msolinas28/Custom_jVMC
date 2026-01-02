@@ -6,10 +6,8 @@ from functools import partial
 from jax.experimental.shard_map import shard_map
 from abc import ABC, abstractmethod
 
-import jVMC.global_defs as global_defs
-import jVMC.mpi_wrapper as mpi
 from jVMC.nets.sym_wrapper import SymNet
-from jVMC.util.key_gen import format_key, generate_seed
+from jVMC.util.key_gen import format_key
 from jVMC.vqs_sharding import NQS
 from jVMC.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
 from jVMC.sharding_config import distribute, broadcast_split_key
@@ -77,8 +75,6 @@ class AbstractMCSampler(ABC):
             raise ValueError("mu must be in the range [0, 2]")
         self._updateProposer = updateProposer
 
-        if key is None:
-            key = generate_seed()
         self.key = key
 
         if sweepSteps is None:
@@ -432,7 +428,8 @@ class MCSamplerCont(AbstractMCSampler):
         return self._init_state_general(self.updateProposer.geometry.uniform_populate, jnp.float64)
 
 class ExactSampler:
-    """Class for full enumeration of basis states.
+    """
+    Class for full enumeration of basis states.
 
     This class generates a full basis of the many-body Hilbert space. Thereby, it \
     allows to exactly perform sums over the full Hilbert space instead of stochastic \
@@ -440,142 +437,94 @@ class ExactSampler:
 
     Initialization arguments:
         * ``net``: Network defining the probability distribution.
-        * ``sampleShape``: Shape of computational basis states.
         * ``lDim``: Local Hilbert space dimension.
         * ``logProbFactor``: Factor for the log-probabilities, aquivalent to the exponent for the probability \
         distribution. For pure wave functions this should be 0.5, and 1.0 for POVMs.
     """
 
-    def __init__(self, net, sampleShape, lDim=2, logProbFactor=0.5):
+    def __init__(self, net: NQS, lDim=2, logProbFactor=0.5):
+        self._net = net
+        self._lDim = lDim
+        self._logProbFactor = logProbFactor
+        self._lastNorm = 0.
 
-        self.psi = net
-        self.N = jnp.prod(jnp.asarray(sampleShape))
-        self.sampleShape = sampleShape
-        self.lDim = lDim
-        self.logProbFactor = logProbFactor
+        self.get_probabilities = jax.jit(
+            shard_map(
+                lambda logPsi, lastNorm : jnp.exp(jnp.real(logPsi - lastNorm) / self.logProbFactor),
+                MESH,
+                in_specs=(DEVICE_SPEC, REPLICATED_SPEC),
+                out_specs=DEVICE_SPEC
+            )
+        )
 
-        # pmap'd member functions
-        self._get_basis_ldim2_pmapd = global_defs.pmap_for_my_devices(self._get_basis_ldim2, in_axes=(0, 0, None), static_broadcasted_argnums=2)
-        self._get_basis_pmapd = global_defs.pmap_for_my_devices(self._get_basis, in_axes=(0, 0, None, None), static_broadcasted_argnums=(2, 3))
-        self._compute_probabilities_pmapd = global_defs.pmap_for_my_devices(self._compute_probabilities, in_axes=(0, None, 0))
-        self._normalize_pmapd = global_defs.pmap_for_my_devices(self._normalize, in_axes=(0, None))
+    @property
+    def num_sites(self):
+        return jnp.prod(jnp.asarray(self.net.sampleShape))
+    
+    @property
+    def num_states(self):
+        return self.lDim ** self.num_sites
+    
+    @property
+    def net(self):
+        return self._net
+    
+    @property
+    def lDim(self):
+        return self._lDim
+    
+    @property
+    def logProbFactor(self):
+        return self._logProbFactor
+    
+    @property
+    def basis(self):
+        adjusted_dof = distribute(self.num_states)
+        int_repr = jax.device_put(jnp.arange(adjusted_dof), DEVICE_SHARDING)
 
-        self.get_basis()
+        def get_basis(int_repr, n_sites):
+            def make_state(int_repr, n_sites):
+                def scan_fun(c, x):
+                    locState = c % self.lDim
+                    c = (c - locState) // self.lDim
+                    
+                    return c, locState
+                _, state = jax.lax.scan(scan_fun, int_repr, jnp.arange(n_sites))
 
-        # Make sure that net params are initialized
-        self.psi(self.basis)
+                return state[::-1].reshape(self.net.sampleShape)
+            basis = jax.vmap(make_state, in_axes=(0, None))(int_repr, n_sites)
 
-        self.lastNorm = 0.
+            return basis
 
-    def get_basis(self):
+        return jax.jit(
+            shard_map(partial(get_basis, n_sites=self.num_sites), MESH, in_specs=DEVICE_SPEC, out_specs=DEVICE_SPEC)
+        )(int_repr)[:self.num_states]
+    
+    def sample(self, parameters=None, numSamples=None):
+        """
+        Return all computational basis states.
 
-        myNumStates, _ = mpi.distribute_sampling(self.lDim**self.N)
-        myFirstState = mpi.first_sample_id()
-
-        deviceCount = global_defs.device_count()
-
-        self.numStatesPerDevice = [(myNumStates + deviceCount - 1) // deviceCount] * deviceCount
-        self.numStatesPerDevice[-1] += myNumStates - deviceCount * self.numStatesPerDevice[0]
-        self.numStatesPerDevice = jnp.array(self.numStatesPerDevice)
-
-        totalNumStates = deviceCount * self.numStatesPerDevice[0]
-
-        intReps = jnp.arange(myFirstState, myFirstState + totalNumStates)
-        intReps = intReps.reshape((global_defs.device_count(), -1))
-        self.basis = jnp.zeros(intReps.shape + (self.N,), dtype=np.int32)
-        if self.lDim == 2:
-            self.basis = self._get_basis_ldim2_pmapd(self.basis, intReps, self.sampleShape)
-        else:
-            self.basis = self._get_basis_pmapd(self.basis, intReps, self.lDim, self.sampleShape)
-
-    def _get_basis_ldim2(self, states, intReps, sampleShape):
-
-        def make_state(state, intRep):
-
-            def for_fun(i, x):
-                return (jax.lax.cond(x[1] >> i & 1, lambda x: x[0].at[x[1]].set(1), lambda x: x[0], (x[0], i)), x[1])
-
-            (state, _) = jax.lax.fori_loop(0, state.shape[0], for_fun, (state, intRep))
-
-            return state.reshape(sampleShape)
-
-        basis = jax.vmap(make_state, in_axes=(0, 0))(states, intReps)
-
-        return basis
-
-    def _get_basis(self, states, intReps, lDim, sampleShape):
-
-        def make_state(state, intRep):
-
-            def scan_fun(c, x):
-                locState = c % lDim
-                c = (c - locState) // lDim
-                return c, locState
-
-            _, state = jax.lax.scan(scan_fun, intRep, state)
-
-            return state[::-1].reshape(sampleShape)
-
-        basis = jax.vmap(make_state, in_axes=(0, 0))(states, intReps)
-
-        return basis
-
-    def _compute_probabilities(self, logPsi, lastNorm, numStates):
-
-        # p = jnp.exp(2. * jnp.real(logPsi - lastNorm))
-        p = jnp.exp(jnp.real(logPsi - lastNorm) / self.logProbFactor)
-
-        def scan_fun(c, x):
-            out = jax.lax.cond(c[1] < c[0], lambda x: x[0], lambda x: x[1], (x, 0.))
-            newC = c[1] + 1
-            return (c[0], newC), out
-
-        _, p = jax.lax.scan(scan_fun, (numStates, 0), p)
-
-        return p
-
-    def _normalize(self, p, nrm):
-
-        return p / nrm
-
-    def sample(self, parameters=None, numSamples=None, multipleOf=None):
-        """Return all computational basis states.
-
-        Sampling is automatically distributed accross MPI processes and available \
-        devices.
+        Sampling is automatically distributed accross processes and available devices.
 
         Arguments:
-            * ``parameters``: Dummy argument to provide identical interface as the \
-            ``MCSampler`` class.
-            * ``numSamples``: Dummy argument to provide identical interface as the \
-            ``MCSampler`` class.
-            * ``multipleOf``: Dummy argument to provide identical interface as the \
-            ``MCSampler`` class.
+            * ``parameters``: Dummy argument to provide identical interface as the ``MCSampler`` class.
+            * ``numSamples``: Dummy argument to provide identical interface as the ``MCSampler`` class.
 
         Returns:
             ``configs, logPsi, p``: All computational basis configurations, \
-            corresponding wave function coefficients, and probabilities \
-            :math:`|\\psi(s)|^2` (normalized).
+            corresponding wave function coefficients, and probabilities :math:`|\\psi(s)|^2` (normalized).
         """
+        if parameters is not None:
+            parameters_tmp = self.net.params
+            self.net.parameters = parameters
+
+        logPsi = self.net(self.basis)
+        p = self.get_probabilities(logPsi, self._lastNorm)
+        norm = jnp.sum(p)
+        p = p / norm
+        self._lastNorm += self.logProbFactor * jnp.log(norm)
 
         if parameters is not None:
-            tmpP = self.psi.get_parameters()
-            self.psi.set_parameters(parameters)
-        logPsi = self.psi(self.basis)
-        if parameters is not None:
-            self.psi.set_parameters(tmpP)
+            self.net.parameters = parameters_tmp
 
-        p = self._compute_probabilities_pmapd(logPsi, self.lastNorm, self.numStatesPerDevice)
-
-        nrm = mpi.global_sum(p)
-        p = self._normalize_pmapd(p, nrm)
-
-        self.lastNorm += self.logProbFactor * jnp.log(nrm)
-
-        return self.basis, logPsi, p
-
-    def set_number_of_samples(self, N):
-        pass
-
-    def get_last_number_of_samples(self):
-        return jnp.inf
+        return self.basis, logPsi, p 

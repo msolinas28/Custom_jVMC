@@ -19,7 +19,7 @@ REPLICATED_SHARDING = NamedSharding(MESH, P())
 DEVICE_SPEC = P("devices")
 REPLICATED_SPEC = P()
 
-def distribute(global_size: int, label: str):
+def distribute(global_size: int, label: str | None=None):
     """
     Adjust a global array size to be compatible with device sharding.
 
@@ -55,13 +55,15 @@ def distribute(global_size: int, label: str):
     total_devices = MESH.shape["devices"]
 
     if global_size < total_devices:
-        print("WARNING: Number of {label} ({global_size}) is smaller than the total number of devices ({total_devices}).")
-        print(f"         Increased to: {total_devices}")
+        if label is not None:
+            print("WARNING: Number of {label} ({global_size}) is smaller than the total number of devices ({total_devices}).")
+            print(f"         Increased to: {total_devices}")
         return total_devices
     if global_size % total_devices != 0:
         adjusted_size = ((global_size + total_devices - 1) // total_devices) * total_devices
-        print(f"WARNING: Number of {label} ({global_size}) is not divisible by the number of devices ({total_devices}).")
-        print(f"         Increased to: {adjusted_size}")
+        if label is not None:
+            print(f"WARNING: Number of {label} ({global_size}) is not divisible by the number of devices ({total_devices}).")
+            print(f"         Increased to: {adjusted_size}")
         return adjusted_size
 
     return global_size
