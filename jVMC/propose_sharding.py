@@ -50,7 +50,7 @@ class AbstractProposer(ABC):
         which indicates which arguments of the proposer must be sharded across
         different devices.
         """
-        return jax.tree_map(
+        return jax.tree_util.tree_map(
             lambda x: DEVICE_SPEC if x is not None else REPLICATED_SPEC, 
             self.arg_in_axes, 
             is_leaf=lambda x: x is None
