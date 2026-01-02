@@ -181,7 +181,7 @@ class RWM(AbstractProposeCont):
         Return: 
             s': The new proposed configuration. 
         """
-        sigma = updateProposerArg["sigma"]
+        sigma = jnp.tile(updateProposerArg["sigma"], self.geometry.n_particles)
         dx = (sigma * jax.random.normal(format_key(key), s.shape, dtype=s.dtype))   
         return self.geometry.apply_PBC(s + dx), 0
     

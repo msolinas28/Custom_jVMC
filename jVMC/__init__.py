@@ -10,7 +10,9 @@ from . import sampler
 from . import sampler_sharding
 from . import stats
 from . import geometry
+from . import geometry_sharding
 from . import propose
+from . import propose_sharding
 
 from .version import __version__
 from .global_defs import set_pmap_devices

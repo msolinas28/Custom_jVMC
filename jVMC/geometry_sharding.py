@@ -1,7 +1,6 @@
 import jax.numpy as jnp
 import jax
 from abc import ABC, abstractmethod
-import jVMC
 
 class AbstractGeometry(ABC):
     def __init__(self, n_particles, n_dim, PBC=True, extent=None):
