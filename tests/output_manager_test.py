@@ -6,7 +6,7 @@ import numpy as np
 
 import jVMC
 from jVMC.util.output_manager import OutputManager
-import jVMC.mpi_wrapper as mpi
+
 import h5py
 import os
 

@@ -7,7 +7,7 @@ import jVMC
 from jVMC.stats import SampledObs
 import jVMC.operator as op
 from jVMC.global_defs import device_count
-import jVMC.mpi_wrapper as mpi
+
 
 
 class TestStats(unittest.TestCase):

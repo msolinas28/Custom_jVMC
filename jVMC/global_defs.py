@@ -5,21 +5,10 @@ tCpx = np.complex128
 # Real floating point
 tReal = np.float64
 
-try:
-    from mpi4py import MPI
-except Exception:
-    MPI = None
-
 import jax
 
 from functools import partial
 import collections
-
-try:
-    myDevice = jax.devices()[MPI.COMM_WORLD.Get_rank() % len(jax.devices())]
-except:
-    myDevice = jax.devices()[0]
-    print("WARNING: Could not assign devices based on MPI ranks. Assigning default device ", myDevice)
 
 myPmapDevices = jax.devices()  # [myDevice]
 myDeviceCount = len(myPmapDevices)

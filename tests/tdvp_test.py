@@ -16,7 +16,7 @@ import jVMC.nets as nets
 from jVMC.vqs import NQS
 import jVMC.operator as op
 import jVMC.sampler as sampler
-import jVMC.mpi_wrapper as mpi
+
 
 from jVMC.util import measure, ground_state_search
 

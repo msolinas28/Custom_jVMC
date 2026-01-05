@@ -14,7 +14,7 @@ import jVMC
 import jVMC.nets as nets
 from jVMC.vqs import NQS
 import jVMC.sampler as sampler
-import jVMC.mpi_wrapper as mpi
+
 
 
 def state_to_int(s):

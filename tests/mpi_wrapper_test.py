@@ -10,7 +10,7 @@ import numpy as np
 import sys
 sys.path.append(sys.path[0] + '/../')
 import jVMC
-import jVMC.mpi_wrapper as mpi
+
 
 import jVMC.global_defs as global_defs
 
