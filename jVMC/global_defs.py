@@ -5,7 +5,10 @@ tCpx = np.complex128
 # Real floating point
 tReal = np.float64
 
-from mpi4py import MPI
+try:
+    from mpi4py import MPI
+except ImportError:
+    pass
 
 import jax
 

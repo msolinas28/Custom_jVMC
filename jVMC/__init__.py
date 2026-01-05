@@ -11,9 +11,9 @@ from . import geometry
 from . import geometry_sharding
 from . import propose
 from . import propose_sharding
+from . import global_defs
 
 try:
-    from . import global_defs
     from . import mpi_wrapper
 except ImportError:
     pass
