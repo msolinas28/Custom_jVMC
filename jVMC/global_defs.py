@@ -5,11 +5,7 @@ tCpx = np.complex128
 # Real floating point
 tReal = np.float64
 
-try:
-    from mpi4py import MPI
-except Exception:
-    MPI = None
-
+from mpi4py import MPI
 import jax
 
 from functools import partial
