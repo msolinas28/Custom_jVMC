@@ -7,8 +7,8 @@ tReal = np.float64
 
 try:
     from mpi4py import MPI
-except ImportError:
-    pass
+except Exception:
+    MPI = None
 
 import jax
 
