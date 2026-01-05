@@ -1,4 +1,8 @@
-from mpi4py import MPI
+try:
+    from mpi4py import MPI
+except Exception:
+    MPI = None
+
 import jax
 import jax.numpy as jnp
 import numpy as np
