@@ -3,14 +3,20 @@ import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding
 from jax.experimental import mesh_utils, multihost_utils
 from jax.sharding import PartitionSpec as P
+import os
 
-try:
-    jax.distributed.initialize()
-    num_processes = jax.process_count()
-    num_devices = jax.device_count() 
-    print(f"JAX distributed initialized: {num_processes} processes and {num_devices} devices.")
-except RuntimeError:
-    pass
+USE_DISTRIBUTED = os.environ.get('JVMC_USE_DISTRIBUTED', 'false').lower() == 'true'
+
+if USE_DISTRIBUTED:
+    try:
+        jax.distributed.initialize()
+        num_processes = jax.process_count()
+        num_devices = jax.device_count() 
+        print(f"JAX distributed initialized: {num_processes} processes and {num_devices} devices.")
+    except Exception as e:
+        print(f"Failed to initialize JAX distributed: {e}")
+else:
+    print("Running in single-node mode (JVMC_USE_DISTRIBUTED not set)")
 
 global_devices = mesh_utils.create_device_mesh((jax.device_count(),))
 MESH = Mesh(global_devices, axis_names=("devices",))
