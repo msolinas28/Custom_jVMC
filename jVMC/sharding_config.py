@@ -3,6 +3,8 @@ import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding
 from jax.experimental import mesh_utils, multihost_utils
 from jax.sharding import PartitionSpec as P
+from functools import partial, wraps
+from jax.experimental.shard_map import shard_map
 import os
 
 USE_DISTRIBUTED = os.environ.get('JVMC_USE_DISTRIBUTED', 'false').lower() == 'true'
@@ -110,4 +112,147 @@ def broadcast_split_key(key, n_out_keys: int):
 
     return out_keys.astype(jnp.uint32)
 
+def create_batches(configs, b):
+    append = b * ((configs.shape[0] + b - 1) // b) - configs.shape[0]
+    pads = [(0, append), ] + [(0, 0)] * (len(configs.shape) - 1)
+
+    return jnp.pad(configs, pads).reshape((-1, b) + configs.shape[1:])
+
+class ShardedMethod:
+    """Decorator to automatically create sharded versions of methods."""
+    def __init__(self, use_batch=True, out_specs=DEVICE_SPEC, returns_dict=False, attr_source=None):
+        """
+        Args:
+            use_batch: Whether to create batched version
+            out_specs: Output sharding spec
+            returns_dict: If True, uses tree_map for dict reshaping in batched version
+            attr_source: If provided, get parameters/sampleShape/batchSize from kwargs[attr_source] at call time
+        """
+        self.use_batch = use_batch
+        self.vmap_in_axes = (None, 0, None) # parameters, samples, kwargs
+        self.in_specs = (REPLICATED_SPEC, DEVICE_SPEC, REPLICATED_SPEC)
+        self.out_specs = out_specs
+        self.returns_dict = returns_dict
+        self.attr_source = attr_source
+        
+    def __call__(self, method):
+        @wraps(method)
+        def wrapper(instance, s, **kwargs):
+            if not hasattr(instance, '_sharded_cache'):
+                instance._sharded_cache = {}
+            
+            method_name = method.__name__
+            if method_name not in instance._sharded_cache:
+                # Call method with s=None and kwargs to get the base lambda
+                base_fn = method(instance, None, **kwargs)
+                instance._sharded_cache[method_name] = self._create_sharded_versions(instance, base_fn)
+            
+            cache = instance._sharded_cache[method_name]
+            return self._handle_sharding_cases(instance, cache, s, kwargs)        
+        return wrapper
     
+    def _create_sharded_versions(self, instance, base_fn):
+        """Create all sharded versions of the method.
+        
+        base_fn has signature: (parameters, sample, **kwargs) -> result
+        We need to create versions that properly handle kwargs.
+        """
+        vmapd_fn = jax.vmap(base_fn, in_axes=self.vmap_in_axes)
+        jsh_fn = jax.jit(shard_map(vmapd_fn, MESH, self.in_specs, self.out_specs))
+        
+        if self.use_batch:
+            batched_fn = partial(self._batched_wrapper, instance=instance, vmapd_fn=vmapd_fn)
+            batched_jsh_fn = jax.jit(shard_map(batched_fn, MESH, self.in_specs, self.out_specs))
+        else:
+            batched_jsh_fn = None
+        
+        return {
+            'single': base_fn,
+            'vmap': vmapd_fn,
+            'jsh': jsh_fn,
+            'batched_jsh': batched_jsh_fn
+        }
+    
+    def _get_attributes(self, instance, kwargs):
+        """
+        Get parameters, sampleShape, batchSize from instance or attr_source.
+        
+        Returns a tuple of (parameters, sampleShape, batchSize, filtered_kwargs)
+        where filtered_kwargs has the attr_source removed if present.
+        """
+        filtered_kwargs = dict(kwargs)
+        
+        if self.attr_source and self.attr_source in kwargs:
+            source = kwargs[self.attr_source]
+            # Remove attr_source from kwargs to pass to computation
+            filtered_kwargs.pop(self.attr_source)
+            return source.parameters, source.sampleShape, source.batchSize, filtered_kwargs
+        
+        return instance.parameters, instance.sampleShape, instance.batchSize, filtered_kwargs
+    
+    def _handle_sharding_cases(self, instance, cache, s, kwargs):
+        """
+        Helper function to handle different sharding cases.
+        
+        kwargs may contain attr_source (e.g., 'psi') and runtime params (e.g., 't').
+        We extract attributes from attr_source and pass other kwargs to computation.
+        """
+        # Get attributes and filter out attr_source from kwargs
+        parameters, sampleShape, batchSize, filtered_kwargs = self._get_attributes(instance, kwargs)
+        
+        # Case: single sample
+        if s.shape == sampleShape:
+            return jax.jit(cache['single'])(parameters, s, filtered_kwargs)
+        
+        num_devices = MESH.size
+        total_samples = s.shape[0]
+        
+        # Case: fewer samples than devices -> fall back to vmap
+        if total_samples < num_devices:
+            return jax.jit(cache['vmap'])(parameters, s, filtered_kwargs)
+        
+        # Case: not divisible by num_devices -> pad
+        original_size = total_samples
+        if total_samples % num_devices != 0:
+            pad_size = num_devices - (total_samples % num_devices)
+            s = jnp.concatenate([s, jnp.repeat(s[-1:], pad_size, axis=0)], axis=0)
+            total_samples = s.shape[0]
+        
+        # Calculate samples per device
+        samples_per_device = total_samples // num_devices
+        
+        # Store batchSize for batched_wrapper
+        instance._temp_batchSize = batchSize
+        
+        # Case: batch_size is None or samples_per_device <= batch_size
+        if batchSize is None or samples_per_device <= batchSize:
+            result = cache['jsh'](parameters, s, filtered_kwargs)
+        else:
+            result = cache['batched_jsh'](parameters, s, filtered_kwargs)
+        
+        # Clean up temporary attribute
+        if hasattr(instance, '_temp_batchSize'):
+            delattr(instance, '_temp_batchSize')
+        
+        # Trim padding
+        if original_size != total_samples:
+            result = jax.tree_util.tree_map(lambda x: x[:original_size], result)
+        
+        return result
+    
+    def _batched_wrapper(self, parameters, s, kwargs, instance, vmapd_fn):
+        """Wrapper for batched computation."""
+        batchSize = instance._temp_batchSize 
+        sb = create_batches(s, batchSize)
+        
+        def scan_fun(c, x):
+            batch_result = vmapd_fn(parameters, x, kwargs)
+            return c, batch_result
+            
+        result = jax.lax.scan(scan_fun, None, jnp.array(sb))[1]
+        
+        if self.returns_dict:
+            result = jax.tree_util.tree_map(lambda x: x.reshape((-1,) + x.shape[2:]), result)
+            return jax.tree_util.tree_map(lambda x: x[:s.shape[0]], result)
+        else:
+            return result.reshape((-1,))[:s.shape[0]]
