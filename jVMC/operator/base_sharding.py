@@ -1,11 +1,9 @@
 import jax
-from jax import jit, vmap, grad
+from jax import vmap
 import jax.numpy as jnp
 import numpy as np
 import abc
-
 import jVMC.global_defs as global_defs
-from jVMC.vqs import NQS
 
 opDtype = global_defs.tCpx
 
@@ -56,52 +54,36 @@ class Operator(metaclass=abc.ABCMeta):
         [1.+0.j]
 
     """
-    # TODO: remoce batchsize from args. It can be taken by the vqs.
+
     def __init__(self, ElocBatchSize=-1):
+        """Initialize ``Operator``.
+        """
+
         self.compiled = False
         self.compiled_argnum = -1
         self.ElocBatchSize = ElocBatchSize
-        self._init_pmap()
 
-    def _init_pmap(self):
+        # pmap'd member functions
         self._get_s_primes_pmapd = None
         self._find_nonzero_pmapd = global_defs.pmap_for_my_devices(vmap(self._find_nonzero, in_axes=0))
-        self._set_zero_to_zero_pmapd = global_defs.pmap_for_my_devices(
-            jax.vmap(self.set_zero_to_zero, in_axes=(0, 0, 0)), # TODO: this in_axes can be removed 
-            in_axes=(0, 0, 0)
-        )
-        self._array_idx_pmapd = global_defs.pmap_for_my_devices(
-            jax.vmap(lambda data, idx: data[idx], in_axes=(0, 0)), # TODO: same here
-            in_axes=(0, 0)
-        )
+        self._set_zero_to_zero_pmapd = global_defs.pmap_for_my_devices(jax.vmap(self.set_zero_to_zero, in_axes=(0, 0, 0)), in_axes=(0, 0, 0))
+        self._array_idx_pmapd = global_defs.pmap_for_my_devices(jax.vmap(lambda data, idx: data[idx], in_axes=(0, 0)), in_axes=(0, 0))
         self._get_O_loc_pmapd = global_defs.pmap_for_my_devices(self._get_O_loc)
         self._flatten_pmapd = global_defs.pmap_for_my_devices(lambda x: x.reshape(-1, *x.shape[2:]))
-        self._alloc_Oloc_cpx_pmapd = global_defs.pmap_for_my_devices(
-            lambda s: jnp.zeros(s.shape[0],
-            dtype=global_defs.tCpx)
-        )
-        self._alloc_Oloc_real_pmapd = global_defs.pmap_for_my_devices(
-            lambda s: jnp.zeros(s.shape[0],
-            dtype=global_defs.tReal)
-        )
-        self._get_config_batch_pmapd = global_defs.pmap_for_my_devices(
-            lambda d, startIdx, sliceSize: jax.lax.dynamic_slice_in_dim(d, startIdx, sliceSize), 
-            in_axes=(0, None, None), 
-            static_broadcasted_argnums=(2,)
-        )
-        self._get_logPsi_batch_pmapd = global_defs.pmap_for_my_devices(
-            lambda d, startIdx, sliceSize: jax.lax.dynamic_slice_in_dim(d, startIdx, sliceSize), 
-            in_axes=(0, None, None), 
-            static_broadcasted_argnums=(2,)
-        )
+        self._alloc_Oloc_cpx_pmapd = global_defs.pmap_for_my_devices(lambda s: jnp.zeros(s.shape[0],
+                                                                                         dtype=global_defs.tCpx))
+        self._alloc_Oloc_real_pmapd = global_defs.pmap_for_my_devices(lambda s: jnp.zeros(s.shape[0],
+                                                                                          dtype=global_defs.tReal))
+        self._get_config_batch_pmapd = global_defs.pmap_for_my_devices(lambda d, startIdx, sliceSize: jax.lax.dynamic_slice_in_dim(d, startIdx, sliceSize), in_axes=(0, None, None), static_broadcasted_argnums=(2,))
+        self._get_logPsi_batch_pmapd = global_defs.pmap_for_my_devices(lambda d, startIdx, sliceSize: jax.lax.dynamic_slice_in_dim(d, startIdx, sliceSize), in_axes=(0, None, None), static_broadcasted_argnums=(2,))
         self._insert_Oloc_batch_pmapd = global_defs.pmap_for_my_devices(
-            lambda dst, src, beg: jax.lax.dynamic_update_slice(dst, src, [beg, ]),
-            in_axes=(0, 0, None)
-        )
+                                            lambda dst, src, beg: jax.lax.dynamic_update_slice(dst, src, [beg, ]),
+                                            in_axes=(0, 0, None)
+                                        )
         self._get_Oloc_slice_pmapd = global_defs.pmap_for_my_devices(
-            lambda d, startIdx, sliceSize: jax.lax.dynamic_slice_in_dim(d, startIdx, sliceSize), 
-            in_axes=(0, None, None), static_broadcasted_argnums=(2,)
-        )
+                                            lambda d, startIdx, sliceSize: jax.lax.dynamic_slice_in_dim(d, startIdx, sliceSize), 
+                                            in_axes=(0, None, None), static_broadcasted_argnums=(2,)
+                                        )
 
     def _find_nonzero(self, m):
 
@@ -176,11 +158,11 @@ class Operator(metaclass=abc.ABCMeta):
         return self._flatten_pmapd(self.sp), self.matEl
 
     def _get_O_loc(self, matEl, logPsiS, logPsiSP):
+
         return jax.vmap(lambda x, y, z: jnp.sum(x * jnp.exp(z - y)), in_axes=(0, 0, 0))(matEl, logPsiS, logPsiSP.reshape(matEl.shape))
 
-    def get_O_loc(self, samples, psi: NQS, **kwargs):
-        """
-        Compute :math:`O_{loc}(s)`.
+    def get_O_loc(self, samples, psi, logPsiS=None, *args):
+        """Compute :math:`O_{loc}(s)`.
 
         If the instance parameter ElocBatchSize is larger than 0 :math:`O_{loc}(s)` is computed in a batch-wise manner
         to avoid out-of-memory issues.
@@ -194,10 +176,12 @@ class Operator(metaclass=abc.ABCMeta):
         Returns:
             :math:`O_{loc}(s)` for each configuration :math:`s`.
         """
-        logPsiS = kwargs.get('LogPsiS') or psi(samples) 
 
-        if psi.batchSize is not None: # TODO: this only works if I implement the None in the vqs
-            return self.get_O_loc_batched(samples, psi, logPsiS, psi.batchSize, *args) # TODO: change order of signature
+        if logPsiS is None:
+            logPsiS = psi(samples)
+
+        if self.ElocBatchSize > 0:
+            return self.get_O_loc_batched(samples, psi, logPsiS, self.ElocBatchSize, *args)
         else:
             sampleOffdConfigs, _ = self.get_s_primes(samples, *args)
             logPsiSP = psi(sampleOffdConfigs)
