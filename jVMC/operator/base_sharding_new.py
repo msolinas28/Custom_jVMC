@@ -1,8 +1,12 @@
 from abc import ABC, abstractmethod
 import jax.numpy as jnp
 import inspect
+import jax
 
 from jVMC.vqs import NQS
+from jVMC.sharding_config import ShardedMethod, DEVICE_SPEC
+
+op_dtype = jnp.complex128
 
 def _has_kwargs(fun):
     sig = inspect.signature(fun)
@@ -15,7 +19,24 @@ def _mul_prefactor(a, b):
         return lambda **kw: a(**kw) * b
     if callable(b):
         return lambda **kw: a * b(**kw)
-    return a * b
+    return lambda **kw: a * b
+
+class OperatorString(list):
+    """
+    A list of operators to be applied sequentially, with an associated scale factor.
+    """
+    def __init__(self, operators):
+        super().__init__(operators)
+        self._scale = lambda **kw: 1
+        self._diagonal = False 
+
+    @property
+    def scale(self):
+        return self._scale
+    
+    @property
+    def diagonal(self):
+        return self._diagonal
 
 class Operator(ABC):
     def __init__(self, ldim, idx, diag, fermionic):
@@ -41,13 +62,6 @@ class Operator(ABC):
     @property
     def diag(self):
         return self._diag
-    
-    @property #TODO: fix
-    def _n_strings(self):
-        if len(self.mat_els.shape) == 1:
-            return 1
-        else:
-            return self.mat_els.shape[0] 
     
     @property
     @abstractmethod
@@ -108,102 +122,30 @@ class Operator(ABC):
         else:
             raise NotImplemented
     
-    # def _flatten(self):
-    #     strings_stack = []
-    #     op_stack = [(self, False)]
-
-    #     while op_stack:
-    #         node, visited = op_stack.pop()
-
-    #         if not visited:
-    #             op_stack.append((node, True))
-
-    #             if isinstance(node, CompositeOperator):
-    #                 op_stack.append((node.O_2, False))
-    #                 op_stack.append((node.O_1, False))
-
-    #             elif isinstance(node, ScaledOperator):
-    #                 op_stack.append((node.O, False))
-
-    #         else:
-    #             if isinstance(node, CompositeOperator):
-    #                 right = strings_stack.pop()
-    #                 left = strings_stack.pop()
-
-    #                 if node._label == 'sum':
-    #                     strings_stack.append(left + right)
-                    
-    #                 elif node._label == 'mul':
-    #                     right = strings_stack.pop()
-    #                     left = strings_stack.pop()
-    #                     out = []
-    #                     for a in left:
-    #                         for b in right:
-    #                             out.append([a, b])
-    #                     strings_stack.append(out)
-
-    #             elif isinstance(node, ScaledOperator):
-    #                 lst = strings_stack.pop()
-    #                 for s in lst:
-    #                     s._scale = _mul_prefactor(s._scale, node.scalar)
-    #                 strings_stack.append(lst)
-
-    #             else:
-    #                 strings_stack.append(node)
-
-    #     return strings_stack
-
-        # # merge diagonal-only strings
-        # merged = []
-        # diag_acc = None
-
-        # for s in strings_stack[0]:
-        #     if s.diag:
-        #         if diag_acc is None:
-        #             diag_acc = s
-        #         else:
-        #             diag_acc.prefactor = _add_prefactor(
-        #                 diag_acc.prefactor, s.prefactor
-        #             )
-        #     else:
-        #         merged.append(s)
-
-        # if diag_acc is not None:
-        #     merged.insert(0, diag_acc)
-
-        # self._strings = merged
-        # self._is_flattened = True
-
-    def _get_conn():
-        # to shard with decorator
-        pass
-
     def _get_O_loc():
         # put here the ratio times the matmul
         pass
 
     def get_O_loc(self, s, psi: NQS, **kwargs):
-        pass 
-        # if not self._is_compiled:
-        #     self._compile()
+        if 'logPsiS' in kwargs.keys():
+            logPsiS = kwargs['logPsiS']
+            kwargs.pop('logPsiS')
+        else:
+            logPsiS = psi(s)
 
-        # if 'logPsiS' in kwargs.keys():
-        #     logPsiS = kwargs['logPsiS']
-        #     kwargs.pop('logPsiS')
-        # else:
-        #     logPsiS = psi(s)
+        s_p, matEls = self.get_conn_elements(s, psi, **kwargs)
+        logPsiS_p = psi(s_p) 
 
-        # mat_elements, sp = self._get_conn() # the shape of theoutput must be standardized otherwise it will continue to recompile in the next call
-        # logPsiSp = psi(sp) 
+        return logPsiS, logPsiS_p, matEls
+        # return self._get_O_loc(matEls, logPsiS, logPsiSp)
 
-        # return self._get_O_loc(mat_elements, logPsiS, logPsiSp)
-
-    def _get_operator_strings(self):
+    def get_list_of_strings(self):
         """
         Flatten the operator tree into a list of operator strings.
-        Each operator string is a list of leaf operators to be applied sequentially.
+        Each operator string is an OperatorString (list subclass) of leaf operators 
+        to be applied sequentially, with a scale attribute.
         
-        Returns: List of operator strings, where each string is [op1, op2, ...] with a _scale attribute
+        Returns: List of OperatorString objects
         """
         strings_stack = []
         op_stack = [(self, False)]
@@ -227,123 +169,138 @@ class Operator(ABC):
                     left = strings_stack.pop()
 
                     if node._label == 'sum':
+                        # Sum: concatenate the two lists of operator strings
                         strings_stack.append(left + right)
                     
                     elif node._label == 'mul':
+                        # Product: create all combinations (distributive law)
                         out = []
                         for left_string in left:
                             for right_string in right:
-                                op_string = OperatorString(left_string.operators + right_string.operators)
-                                op_string._scale = _mul_prefactor(left_string._scale, right_string._scale)
-                                out.append(op_string)
+                                # Combine the operators from both strings
+                                combined = OperatorString(left_string + right_string)
+                                # Multiply the prefactors
+                                combined._scale = _mul_prefactor(left_string._scale, right_string._scale)
+                                out.append(combined)
                         
                         strings_stack.append(out)
 
                 elif isinstance(node, ScaledOperator):
                     lst = strings_stack.pop()
+                    # Multiply the scale of each operator string
                     for s in lst:
                         s._scale = _mul_prefactor(s._scale, node.scalar)
                     strings_stack.append(lst)
 
                 else:
-                    op_string = OperatorString(node)
-                    strings_stack.append([op_string])
-
+                    # Leaf operator: wrap in an OperatorString
+                    op_string = OperatorString([node])
+                    strings_stack.append([op_string])        
+        
         return strings_stack[0]
 
-class OperatorString:
-    """
-    Represents a single operator string: a sequence of operators to be applied.
-    Example: [B, C] means apply B then C
-    """
-    def __init__(self, operators):
-        self.operators = operators if isinstance(operators, list) else [operators]
-        self._scale = 1
-    
-    @property
-    def idx(self):
-        """Concatenated indices from all operators in the string."""
-        result = []
-        for op in self.operators:
-            if isinstance(op.idx, list):
-                result.extend(op.idx)
-            else:
-                result.append(op.idx)
-        return result
-    
-    @property
-    def map(self):
-        """Concatenated maps from all operators in the string."""
-        result = []
-        for op in self.operators:
-            if isinstance(op.map, list):
-                result.extend(op.map)
-            else:
-                result.append(op.map)
-        return result
-    
-    @property
-    def mat_els(self):
-        """Concatenated matrix elements from all operators in the string."""
-        result = []
-        for op in self.operators:
-            if isinstance(op.mat_els, list):
-                result.extend(op.mat_els)
-            else:
-                result.append(op.mat_els)
-        return result
-    
-    @property
-    def fermionic(self):
-        """Concatenated fermionic flags from all operators in the string."""
-        result = []
-        for op in self.operators:
-            if isinstance(op.fermionic, list):
-                result.extend(op.fermionic)
-            else:
-                result.append(op.fermionic)
-        return result
-    
-    @property
-    def diag(self):
-        """Check if entire string is diagonal."""
-        for op in self.operators:
-            if isinstance(op.diag, list):
-                if not all(op.diag):
-                    return False
-            else:
-                if not op.diag:
-                    return False
-        return True
-    
-    @property
-    def ldim(self):
-        """Local dimension."""
-        return self.operators[0].ldim
-    
-    @property
-    def prefactor(self):
-        """The accumulated scale factor."""
-        return self._scale
-
+    def _compile(self):
+        """
+        Compile the operator into JAX arrays for efficient computation.
+        This should be called once before using get_O_loc.
+        """
+        strings = self.get_list_of_strings()
+        max_length = max(len(s) for s in strings)
         
-
-
-
-
-
+        # Create identity operator for padding
+        IdOp = IdentityOperator(self.ldim, 0)
         
+        idxC = []
+        mapC = []
+        matElsC = []
+        fermionicC = []
+        diagonal = []
+        prefactors = []
+        
+        for op_string in strings:
+            idx_row = []
+            map_row = []
+            matels_row = []
+            fermionic_row = []
+            d = 1
+            
+            n = len(op_string)
+            for k in range(max_length):
+                k_rev = n - 1 - k
+                if k_rev >= 0:
+                    op = op_string[k_rev]
+                    idx_row.append(op.idx)
+                    map_row.append(op.map)
+                    matels_row.append(op.mat_els)
+                    fermionic_row.append(1.0 if op.fermionic else 0.0)
+                    d *= op.diag
+                else:
+                    idx_row.append(IdOp.idx)
+                    map_row.append(IdOp.map)
+                    matels_row.append(IdOp.mat_els)
+                    fermionic_row.append(0.0)
+            
+            idxC.append(idx_row)
+            mapC.append(map_row)
+            matElsC.append(matels_row)
+            fermionicC.append(fermionic_row)
+            prefactors.append(op_string.scale)
+            diagonal.append(d)
+        
+        self.idxC = jnp.array(idxC, dtype=jnp.int32)
+        self.mapC = jnp.array(mapC, dtype=jnp.int32)
+        self.matElsC = jnp.array(matElsC)
+        self.fermionicC = jnp.array(fermionicC, dtype=jnp.int32)
+        self.diagC = jnp.array(diagonal, dtype=jnp.int32)
+        self.prefactorsC = prefactors
+        
+        self._is_compiled = True
+
+    def get_conn_elements(self, s, psi: NQS, **kwargs):
+        if not self._is_compiled:
+            self._compile()
+
+        return self._get_conn_elements_(s, psi=psi, **kwargs)
+
+    @ShardedMethod(out_specs=(DEVICE_SPEC, DEVICE_SPEC), attr_source='psi')
+    def _get_conn_elements_(self, s, **kwargs):
+        return  lambda p, x, kw: self._get_conn_elements(x, kw)
+
+    def _get_conn_elements(self, s, kwargs):
+        sampleShape = s.shape
+        s = s.ravel()
+        dim = s.shape[0]
+        mask = jnp.tril(jnp.ones((dim, dim), dtype=int), -1).T
+        prefactors = jnp.array([p(**kwargs) for p in self.prefactorsC], dtype=op_dtype)
+
+        def proccess_string(s, prefactor, idx, map, matEls, fermi):
+            def apply_operator(c, x):
+                carry_sample, carry_matEl = c
+                idx, map, matEl, fermi = x
+
+                fermi_sign = jnp.prod((1 - 2 * fermi) * (2 * fermi * mask[idx] + (1 - 2 * fermi)) * carry_sample + (1 - abs(carry_sample)))
+                carry_matEl_new = carry_matEl * matEl[carry_sample[idx]] * fermi_sign
+                carry_sample_new = carry_sample.at[idx].set(map[carry_sample[idx]])
+
+                return (carry_sample_new, carry_matEl_new), None
+            
+            (s_p, matEl), _ = jax.lax.scan(apply_operator, (s, prefactor), (idx, map, matEls, fermi))
+
+            return s_p.reshape(sampleShape), matEl
+        
+        return jax.vmap(proccess_string, in_axes=(None,) + (0,) * 5)(s, prefactors, self.idxC, self.mapC, self.matElsC, self.fermionicC)
+
 class IdentityOperator(Operator):
     def __init__(self, ldim, idx):
         super().__init__(ldim, idx, True, False)
 
     @property
     def mat_els(self):
-        return jnp.ones(self.ldim)
+        return jnp.ones(self.ldim, dtype=op_dtype)
     
     @property
     def map(self):
-        return jnp.arange(self.ldim)
+        return jnp.arange(self.ldim, dtype=jnp.int16)
 
 class CompositeOperator(Operator):
     def __init__(self, O_1: Operator, O_2: Operator, label: str):

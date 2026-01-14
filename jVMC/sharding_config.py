@@ -120,19 +120,17 @@ def create_batches(configs, b):
 
 class ShardedMethod:
     """Decorator to automatically create sharded versions of methods."""
-    def __init__(self, use_batch=True, out_specs=DEVICE_SPEC, returns_dict=False, attr_source=None):
+    def __init__(self, use_batch=True, out_specs=DEVICE_SPEC, attr_source=None):
         """
         Args:
             use_batch: Whether to create batched version
             out_specs: Output sharding spec
-            returns_dict: If True, uses tree_map for dict reshaping in batched version
             attr_source: If provided, get parameters/sampleShape/batchSize from kwargs[attr_source] at call time
         """
         self.use_batch = use_batch
         self.vmap_in_axes = (None, 0, None) # parameters, samples, kwargs
         self.in_specs = (REPLICATED_SPEC, DEVICE_SPEC, REPLICATED_SPEC)
         self.out_specs = out_specs
-        self.returns_dict = returns_dict
         self.attr_source = attr_source
         
     def __call__(self, method):
@@ -250,9 +248,9 @@ class ShardedMethod:
             return c, batch_result
             
         result = jax.lax.scan(scan_fun, None, jnp.array(sb))[1]
-        
-        if self.returns_dict:
-            result = jax.tree_util.tree_map(lambda x: x.reshape((-1,) + x.shape[2:]), result)
-            return jax.tree_util.tree_map(lambda x: x[:s.shape[0]], result)
-        else:
-            return result.reshape((-1,))[:s.shape[0]]
+
+        def reshape_and_trim(x):
+            x = x.reshape((-1,) + x.shape[2:])
+            return x[:s.shape[0]]
+
+        return jax.tree_util.tree_map(reshape_and_trim, result)

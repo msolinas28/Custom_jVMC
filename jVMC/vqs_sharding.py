@@ -121,7 +121,10 @@ class NQS:
         
         self.init_net(seed)
         if self.logarithmic:
-            self.apply_fun = self.net.apply
+            def test(parameters, s, method=None):
+                print("ciao")
+                return self.net.apply(parameters, s, method=method)
+            self.apply_fun = test
         else:
             def apply_fun(parameters, s, method=None):
                 return jnp.log(self.net.apply(parameters, s, method))
@@ -252,7 +255,7 @@ class NQS:
         """ 
         return lambda p, x, kw: self.apply_fun(p, x)
 
-    @ShardedMethod(returns_dict=True)
+    @ShardedMethod()
     def gradients(self, s):
         """
         Compute gradients of logarithmic wave function.
@@ -279,7 +282,7 @@ class NQS:
                 return self._append_gradients_dict_jsh(result, result)
         return result
     
-    @ShardedMethod(returns_dict=True)
+    @ShardedMethod()
     def _gradients_dict(self, s):
         return lambda p, x, kw: self.dict_gradient_function(self.net.apply, p, x)
 

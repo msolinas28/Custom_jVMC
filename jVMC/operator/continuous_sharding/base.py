@@ -125,7 +125,7 @@ class Operator(ABC):
     def _O_loc(self, s, **kwargs):
         apply_fun = kwargs['psi'].apply_fun # This has to be here since inside the lambda psi is no longer in kwargs
         return lambda p, x, kw: self._evaluate_flat(x, p, kw, apply_fun=apply_fun)
-
+        
     @abstractmethod
     def _get_O_loc(self, s, apply_fun, parameters, kwargs):
         """
