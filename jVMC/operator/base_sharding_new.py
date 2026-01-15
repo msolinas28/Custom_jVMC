@@ -121,24 +121,7 @@ class Operator(ABC):
             return ScaledOperator(self, other)
         else:
             raise NotImplemented
-    
-    def _get_O_loc():
-        # put here the ratio times the matmul
-        pass
-
-    def get_O_loc(self, s, psi: NQS, **kwargs):
-        if 'logPsiS' in kwargs.keys():
-            logPsiS = kwargs['logPsiS']
-            kwargs.pop('logPsiS')
-        else:
-            logPsiS = psi(s)
-
-        s_p, matEls = self.get_conn_elements(s, psi, **kwargs)
-        logPsiS_p = psi(s_p) 
-
-        return logPsiS, logPsiS_p, matEls
-        # return self._get_O_loc(matEls, logPsiS, logPsiSp)
-
+        
     def get_list_of_strings(self):
         """
         Flatten the operator tree into a list of operator strings.
@@ -253,8 +236,23 @@ class Operator(ABC):
         self.fermionicC = jnp.array(fermionicC, dtype=jnp.int32)
         self.diagC = jnp.array(diagonal, dtype=jnp.int32)
         self.prefactorsC = prefactors
-        
         self._is_compiled = True
+    
+    def get_O_loc(self, s, psi: NQS, **kwargs):
+        if 'logPsiS' in kwargs.keys():
+            logPsiS = kwargs['logPsiS']
+            kwargs.pop('logPsiS')
+        else:
+            logPsiS = psi(s)
+
+        s_p, matEls = self.get_conn_elements(s, psi, **kwargs)
+        logPsiS_p = psi(s_p) 
+
+        # Automatically sharded since everything is on device
+        def O_loc(ls, lsp, m):
+            return jnp.sum(jnp.exp(lsp - ls[:,None]) * m, axis=1)
+
+        return jax.jit(O_loc)(logPsiS, logPsiS_p, matEls) # TODO: Find a way to batch this 
 
     def get_conn_elements(self, s, psi: NQS, **kwargs):
         if not self._is_compiled:
