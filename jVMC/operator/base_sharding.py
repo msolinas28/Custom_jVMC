@@ -1,315 +1,336 @@
-import jax
-from jax import vmap
+from abc import ABC, abstractmethod
 import jax.numpy as jnp
-import numpy as np
-import abc
-import jVMC.global_defs as global_defs
+import inspect
+import jax
 
-opDtype = global_defs.tCpx
+from jVMC.vqs import NQS
+from jVMC.sharding_config import ShardedMethod, DEVICE_SPEC
 
-def expand_batch(batch, batchSize):
-                outShape = list(batch.shape)
-                outShape[0] = batchSize
-                outp = jnp.zeros(tuple(outShape), dtype=batch.dtype)
-                return outp.at[:batch.shape[0]].set(batch)
+op_dtype = jnp.complex128
 
-class Operator(metaclass=abc.ABCMeta):
+def _has_kwargs(fun):
+    sig = inspect.signature(fun)
+    return any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values())
+
+def _mul_prefactor(a, b):
+    if callable(a) and callable(b):
+        return lambda **kw: a(**kw) * b(**kw)
+    if callable(a):
+        return lambda **kw: a(**kw) * b
+    if callable(b):
+        return lambda **kw: a * b(**kw)
+    return lambda **kw: a * b
+
+class OperatorString(list):
     """
-    This class defines an interface and provides functionality to compute operator matrix elements
-
-    This is an abstract class. It provides the general interface to compute operator matrix elements, \
-    but it lacks the implementation of operator definitions. Arbitrary operators can be constructed \
-    as classes that inherit from ``Operator`` and implement the ``compile()`` method.
-
-    The ``compile()`` method has to return a *jit-able* pure function with the following interface:
-
-        Arguments:
-            * ``s``: A single basis configuration.
-            * ``*args``: Further positional arguments. E.g. time in the case of time-dependent operators.
-        Returns: 
-            A tuple ``sp, matEls``, where ``sp`` is the list of connected basis configurations \
-            (as ``jax.numpy.array``) and ``matEls`` the corresponding matrix elements.
-
-    Alternatively, ``compile()`` can return a tuple of two functions, the first as described above and
-    and the second a preprocessor for the additional positional arguments ``*args``. Assuming that ``compile()``
-    returns the tuple ``(f1, f2)``, ``f1`` will be called as ``f1(s, f2(*args))`` .
-
-    *Important:* Any child class inheriting from ``Operator`` has to call ``super().__init__()`` in \
-    its constructor.
-
-    **Example:**
-
-        Here we define a :math:`\\hat\\sigma_1^x` operator acting on lattice site :math:`1` of a spin-1/2 chain.
-
-        .. literalinclude:: ../../examples/ex1_custom_operator.py
-                :linenos:
-                :language: python
-                :lines: 14-
-
-        Then we indeed obtain the correct ``sp`` and ``matEl``:
-
-        >>> print(sp)
-        [0 1 0 0]
-        >>> print(matEl)
-        [1.+0.j]
-
+    A list of operators to be applied sequentially, with an associated scale factor.
     """
+    def __init__(self, operators):
+        super().__init__(operators)
+        self._scale = lambda **kw: 1
+        self._diagonal = False 
 
-    def __init__(self, ElocBatchSize=-1):
-        """Initialize ``Operator``.
+    @property
+    def scale(self):
+        return self._scale
+    
+    @property
+    def diagonal(self):
+        return self._diagonal
+
+class Operator(ABC):
+    def __init__(self, ldim, idx, diag, fermionic):
+        self._ldim = ldim
+        self._idx = idx
+        self._diag = diag
+        self._fermionic = fermionic
+        self._is_compiled = False
+        self._scale = 1
+
+    @property
+    def ldim(self):
+        return self._ldim
+
+    @property
+    def idx(self):
+        return self._idx
+    
+    @property
+    def fermionic(self):
+        return self._fermionic
+    
+    @property
+    def diag(self):
+        return self._diag
+    
+    @property
+    @abstractmethod
+    def mat_els(self):
+        pass
+    
+    @property
+    @abstractmethod
+    def map(self):
+        pass
+    
+    def __add__(self, other):
+        if isinstance(other, (int, float, complex)):
+            # TODO: Since I don't know the total dim of the Hilbert space this is not doable
+            raise NotImplementedError 
+        elif isinstance(other, Operator):
+            return CompositeOperator(self, other, 'sum')
+        else:
+            raise NotImplemented
+        
+    def __radd__(self, other):
+        if isinstance(other, (int, float, complex)):
+            # TODO: Same as previous todo
+            raise NotImplementedError
+        else:
+            raise NotImplemented
+        
+    def __neg__(self):
+        return ScaledOperator(self, -1)
+    
+    def __sub__(self, other):
+        if isinstance(other, (int, float, complex)):
+            # TODO: Same as previous todo
+            raise NotImplementedError
+        elif isinstance(other, Operator):
+            return CompositeOperator(self, -other, 'sum')
+        else:
+            raise NotImplemented
+        
+    def __rsub__(self, other):
+        if isinstance(other, (int, float, complex)):
+            # TODO: Same as previous todo
+            raise NotImplementedError
+        else:
+            raise NotImplemented
+        
+    def __mul__(self, other):
+        if isinstance(other, (int, float, complex)) or callable(other):
+            return ScaledOperator(self, other)
+        elif isinstance(other, Operator):
+            return CompositeOperator(self, other, 'mul')
+        else:
+            raise NotImplemented
+        
+    def __rmul__(self, other):
+        if isinstance(other, (int, float, complex)) or callable(other):
+            return ScaledOperator(self, other)
+        else:
+            raise NotImplemented
+        
+    def get_list_of_strings(self):
         """
-
-        self.compiled = False
-        self.compiled_argnum = -1
-        self.ElocBatchSize = ElocBatchSize
-
-        # pmap'd member functions
-        self._get_s_primes_pmapd = None
-        self._find_nonzero_pmapd = global_defs.pmap_for_my_devices(vmap(self._find_nonzero, in_axes=0))
-        self._set_zero_to_zero_pmapd = global_defs.pmap_for_my_devices(jax.vmap(self.set_zero_to_zero, in_axes=(0, 0, 0)), in_axes=(0, 0, 0))
-        self._array_idx_pmapd = global_defs.pmap_for_my_devices(jax.vmap(lambda data, idx: data[idx], in_axes=(0, 0)), in_axes=(0, 0))
-        self._get_O_loc_pmapd = global_defs.pmap_for_my_devices(self._get_O_loc)
-        self._flatten_pmapd = global_defs.pmap_for_my_devices(lambda x: x.reshape(-1, *x.shape[2:]))
-        self._alloc_Oloc_cpx_pmapd = global_defs.pmap_for_my_devices(lambda s: jnp.zeros(s.shape[0],
-                                                                                         dtype=global_defs.tCpx))
-        self._alloc_Oloc_real_pmapd = global_defs.pmap_for_my_devices(lambda s: jnp.zeros(s.shape[0],
-                                                                                          dtype=global_defs.tReal))
-        self._get_config_batch_pmapd = global_defs.pmap_for_my_devices(lambda d, startIdx, sliceSize: jax.lax.dynamic_slice_in_dim(d, startIdx, sliceSize), in_axes=(0, None, None), static_broadcasted_argnums=(2,))
-        self._get_logPsi_batch_pmapd = global_defs.pmap_for_my_devices(lambda d, startIdx, sliceSize: jax.lax.dynamic_slice_in_dim(d, startIdx, sliceSize), in_axes=(0, None, None), static_broadcasted_argnums=(2,))
-        self._insert_Oloc_batch_pmapd = global_defs.pmap_for_my_devices(
-                                            lambda dst, src, beg: jax.lax.dynamic_update_slice(dst, src, [beg, ]),
-                                            in_axes=(0, 0, None)
-                                        )
-        self._get_Oloc_slice_pmapd = global_defs.pmap_for_my_devices(
-                                            lambda d, startIdx, sliceSize: jax.lax.dynamic_slice_in_dim(d, startIdx, sliceSize), 
-                                            in_axes=(0, None, None), static_broadcasted_argnums=(2,)
-                                        )
-
-    def _find_nonzero(self, m):
-
-        choice = jnp.zeros(m.shape, dtype=np.int64) + m.shape[0] - 1
-
-        def scan_fun(c, x):
-            b = jnp.abs(x[0]) > 1e-6
-            out = jax.lax.cond(b, lambda z: z[0], lambda z: z[1], (c[1], x[1]))
-            newcarry = jax.lax.cond(b, lambda z: (z[0] + 1, z[1] + 1), lambda z: (z[0], z[1] + 1), c)
-            return newcarry, out
-
-        carry, choice = jax.lax.scan(scan_fun, (0, 0), (m, choice))
-
-        return jnp.sort(choice), carry[0]
-
-    def set_zero_to_zero(self, m, idx, numNonzero):
-
-        def scan_fun(c, x):
-            out = jax.lax.cond(c[1] < c[0], lambda z: z[0], lambda z: z[1], (x, 0. * x))  # use 0.*x to get correct data type
-            newCarry = (c[0], c[1] + 1)
-            return newCarry, out
-
-        _, m = jax.lax.scan(scan_fun, (numNonzero, 0), m[idx])
-
-        return m
-
-    def get_s_primes(self, s, *args):
+        Flatten the operator tree into a list of operator strings.
+        Each operator string is an OperatorString (list subclass) of leaf operators 
+        to be applied sequentially, with a scale attribute.
+        
+        Returns: List of OperatorString objects
         """
-        Compute matrix elements
+        strings_stack = []
+        op_stack = [(self, False)]
 
-        For a list of computational basis states :math:`s` this member function computes the corresponding \
-        matrix elements :math:`O_{s,s'}=\\langle s|\\hat O|s'\\rangle` and their respective configurations \
-        :math:`s'`.
+        while op_stack:
+            node, visited = op_stack.pop()
 
-        Arguments:
-            * ``s``: Array of computational basis states.
-            * ``*args``: Further positional arguments that are passed on to the specific operator implementation.
+            if not visited:
+                op_stack.append((node, True))
 
-        Returns:
-            An array holding `all` configurations :math:`s'` and the corresponding matrix elements :math:`O_{s,s'}`.
+                if isinstance(node, CompositeOperator):
+                    op_stack.append((node.O_2, False))
+                    op_stack.append((node.O_1, False))
 
-        """
+                elif isinstance(node, ScaledOperator):
+                    op_stack.append((node.O, False))
 
-        def id_fun(*args):
-            return args
-
-        if (not self.compiled) or self.compiled_argnum!=len(args):
-            fun = self.compile()
-            self.compiled = True
-            self.compiled_argnum = len(args)
-            if type(fun) is tuple:
-                self.arg_fun = fun[1]
-                args = self.arg_fun(*args)
-                fun = fun[0]
             else:
-                self.arg_fun = id_fun
-            _get_s_primes = jax.vmap(fun, in_axes=(0,)+(None,)*len(args))
-            #_get_s_primes = jax.vmap(self.compile(), in_axes=(0,)+(None,)*len(args))
-            self._get_s_primes_pmapd = global_defs.pmap_for_my_devices(_get_s_primes, in_axes=(0,)+(None,)*len(args))
-        else:
-            args = self.arg_fun(*args)
+                if isinstance(node, CompositeOperator):
+                    right = strings_stack.pop()
+                    left = strings_stack.pop()
 
-        # Compute matrix elements
-        #self.sp, self.matEl = self._get_s_primes_pmapd(s, *args)
-        self.sp, self.matEl = self._get_s_primes_pmapd(s, *args)
+                    if node._label == 'sum':
+                        # Sum: concatenate the two lists of operator strings
+                        strings_stack.append(left + right)
+                    
+                    elif node._label == 'mul':
+                        # Product: create all combinations (distributive law)
+                        out = []
+                        for left_string in left:
+                            for right_string in right:
+                                # Combine the operators from both strings
+                                combined = OperatorString(left_string + right_string)
+                                # Multiply the prefactors
+                                combined._scale = _mul_prefactor(left_string._scale, right_string._scale)
+                                out.append(combined)
+                        
+                        strings_stack.append(out)
 
-        # Get only non-zero contributions
-        idx, self.numNonzero = self._find_nonzero_pmapd(self.matEl)
-        self.matEl = self._set_zero_to_zero_pmapd(self.matEl, idx[..., :jnp.max(self.numNonzero)], self.numNonzero)
-        self.sp = self._array_idx_pmapd(self.sp, idx[..., :jnp.max(self.numNonzero)])
+                elif isinstance(node, ScaledOperator):
+                    lst = strings_stack.pop()
+                    # Multiply the scale of each operator string
+                    for s in lst:
+                        s._scale = _mul_prefactor(s._scale, node.scalar)
+                    strings_stack.append(lst)
 
-        return self._flatten_pmapd(self.sp), self.matEl
-
-    def _get_O_loc(self, matEl, logPsiS, logPsiSP):
-
-        return jax.vmap(lambda x, y, z: jnp.sum(x * jnp.exp(z - y)), in_axes=(0, 0, 0))(matEl, logPsiS, logPsiSP.reshape(matEl.shape))
-
-    def get_O_loc(self, samples, psi, logPsiS=None, *args):
-        """Compute :math:`O_{loc}(s)`.
-
-        If the instance parameter ElocBatchSize is larger than 0 :math:`O_{loc}(s)` is computed in a batch-wise manner
-        to avoid out-of-memory issues.
-
-        Arguments:
-            * ``samples``: Sample of computational basis configurations :math:`s`.
-            * ``psi``: Neural quantum state.
-            * ``logPsiS``: Logarithmic amplitudes :math:`\\ln(\\psi(s))`
-            * ``*args``: Further positional arguments for the operator.
-
-        Returns:
-            :math:`O_{loc}(s)` for each configuration :math:`s`.
-        """
-
-        if logPsiS is None:
-            logPsiS = psi(samples)
-
-        if self.ElocBatchSize > 0:
-            return self.get_O_loc_batched(samples, psi, logPsiS, self.ElocBatchSize, *args)
-        else:
-            sampleOffdConfigs, _ = self.get_s_primes(samples, *args)
-            logPsiSP = psi(sampleOffdConfigs)
-            if not psi.logarithmic:
-                logPsiSP = jnp.log(logPsiSP)
-            return self.get_O_loc_unbatched(logPsiS, logPsiSP)
-
-    def get_O_loc_unbatched(self, logPsiS, logPsiSP):
-        """Compute :math:`O_{loc}(s)`.
-
-        This member function assumes that ``get_s_primes(s)`` has been called before, as \
-        internally stored matrix elements :math:`O_{s,s'}` are used.
-
-        Computes :math:`O_{loc}(s)=\\sum_{s'} O_{s,s'}\\frac{\\psi(s')}{\\psi(s)}`, given the \
-        logarithmic wave function amplitudes of the involved configurations :math:`\\ln(\\psi(s))` \
-        and :math:`\\ln\\psi(s')`
-
-        Arguments:
-            * ``logPsiS``: Logarithmic amplitudes :math:`\\ln(\\psi(s))`
-            * ``logPsiSP``: Logarithmic amplitudes :math:`\\ln(\\psi(s'))`
-
-        Returns:
-            :math:`O_{loc}(s)` for each configuration :math:`s`.
-        """
-
-        return self._get_O_loc_pmapd(self.matEl, logPsiS, logPsiSP)
-
-    def get_O_loc_batched(self, samples, psi, logPsiS, batchSize, *args):
-        """Compute :math:`O_{loc}(s)` in batches.
-
-        Computes :math:`O_{loc}(s)=\\sum_{s'} O_{s,s'}\\frac{\\psi(s')}{\\psi(s)}` in a batch-wise manner
-        to avoid out-of-memory issues.
-
-        Arguments:
-            * ``samples``: Sample of computational basis configurations :math:`s`.
-            * ``psi``: Neural quantum state.
-            * ``logPsiS``: Logarithmic amplitudes :math:`\\ln(\\psi(s))`
-            * ``batchSize``: Batch size.
-            * ``*args``: Further positional arguments for the operator.
-
-        Returns:
-            :math:`O_{loc}(s)` for each configuration :math:`s`.
-        """
-
-        Oloc = None
-
-        numSamples = samples.shape[1]
-        numBatches = numSamples // batchSize
-        remainder = numSamples % batchSize
-
-        # Minimize mismatch
-        if remainder > 0:
-            batchSize = numSamples // (numBatches+1)
-            numBatches = numSamples // batchSize
-            remainder = numSamples % batchSize
-
-        for b in range(numBatches):
-
-            batch = self._get_config_batch_pmapd(samples, b * batchSize, batchSize)
-            logPsiSbatch = self._get_logPsi_batch_pmapd(logPsiS, b * batchSize, batchSize)
-
-            sp, _ = self.get_s_primes(batch, *args)
-            logPsiSP = psi(sp)
-            if not psi.logarithmic:
-                logPsiSP = jnp.log(logPsiSP)
-
-            OlocBatch = self.get_O_loc_unbatched(logPsiSbatch, logPsiSP)
-
-            if Oloc is None:
-                if OlocBatch.dtype == global_defs.tCpx:
-                    Oloc = self._alloc_Oloc_cpx_pmapd(samples)
                 else:
-                    Oloc = self._alloc_Oloc_real_pmapd(samples)
-
-            Oloc = self._insert_Oloc_batch_pmapd(Oloc, OlocBatch, b * batchSize)
+                    # Leaf operator: wrap in an OperatorString
+                    op_string = OperatorString([node])
+                    strings_stack.append([op_string])        
         
-        if remainder > 0:
+        return strings_stack[0]
 
-            batch = self._get_config_batch_pmapd(samples, numBatches * batchSize, remainder)
-            batch = global_defs.pmap_for_my_devices(expand_batch, static_broadcasted_argnums=(1,))(batch, batchSize)
-            logPsiSbatch = self._get_logPsi_batch_pmapd(logPsiS, numBatches * batchSize, numSamples % batchSize)
-            logPsiSbatch = global_defs.pmap_for_my_devices(expand_batch, static_broadcasted_argnums=(1,))(logPsiSbatch, batchSize)
-
-            sp, _ = self.get_s_primes(batch, *args)
-
-            OlocBatch = self.get_O_loc_unbatched(logPsiSbatch, psi(sp))
+    def _compile(self):
+        """
+        Compile the operator into JAX arrays for efficient computation.
+        This should be called once before using get_O_loc.
+        """
+        strings = self.get_list_of_strings()
+        max_length = max(len(s) for s in strings)
         
-            OlocBatch = self._get_Oloc_slice_pmapd(OlocBatch, 0, remainder)
+        # Create identity operator for padding
+        IdOp = IdentityOperator(self.ldim, 0)
+        
+        idxC = []
+        mapC = []
+        matElsC = []
+        fermionicC = []
+        diagonal = []
+        prefactors = []
+        
+        for op_string in strings:
+            idx_row = []
+            map_row = []
+            matels_row = []
+            fermionic_row = []
+            d = 1
+            
+            n = len(op_string)
+            for k in range(max_length):
+                k_rev = n - 1 - k
+                if k_rev >= 0:
+                    op = op_string[k_rev]
+                    idx_row.append(op.idx)
+                    map_row.append(op.map)
+                    matels_row.append(op.mat_els)
+                    fermionic_row.append(1.0 if op.fermionic else 0.0)
+                    d *= op.diag
+                else:
+                    idx_row.append(IdOp.idx)
+                    map_row.append(IdOp.map)
+                    matels_row.append(IdOp.mat_els)
+                    fermionic_row.append(0.0)
+            
+            idxC.append(idx_row)
+            mapC.append(map_row)
+            matElsC.append(matels_row)
+            fermionicC.append(fermionic_row)
+            prefactors.append(op_string.scale)
+            diagonal.append(d)
+        
+        self.idxC = jnp.array(idxC, dtype=jnp.int32)
+        self.mapC = jnp.array(mapC, dtype=jnp.int32)
+        self.matElsC = jnp.array(matElsC)
+        self.fermionicC = jnp.array(fermionicC, dtype=jnp.int32)
+        self.diagC = jnp.array(diagonal, dtype=jnp.int32)
+        self.prefactorsC = prefactors
+        self._is_compiled = True
+    
+    def get_O_loc(self, s, psi: NQS, **kwargs):
+        if 'logPsiS' in kwargs.keys():
+            logPsiS = kwargs['logPsiS']
+            kwargs.pop('logPsiS')
+        else:
+            logPsiS = psi(s)
 
-            Oloc = self._insert_Oloc_batch_pmapd(Oloc, OlocBatch, numBatches * batchSize)
+        s_p, matEls = self.get_conn_elements(s, psi, **kwargs)
+        logPsiS_p = psi(s_p) 
 
-        return Oloc
+        # Automatically sharded since everything is on device
+        def O_loc(ls, lsp, m):
+            return jnp.sum(jnp.exp(lsp - ls[:,None]) * m, axis=1)
 
-    @abc.abstractmethod
-    def compile():
-        """An implementation of this method should return a *jit-able* function that returns for a given \
-            basis configuration ``s`` the connected configurations ``s'`` and the \
-            corresponding matrix elements.
-        """
+        return jax.jit(O_loc)(logPsiS, logPsiS_p, matEls) # TODO: Find a way to batch this 
 
-    def get_estimator_function(self, psi, *args):
-        """Get a function that computes :math:`O_{loc}(\\theta, s)`.
+    def get_conn_elements(self, s, psi: NQS, **kwargs):
+        if not self._is_compiled:
+            self._compile()
 
-        Returns a function that computes :math:`O_{loc}(\\theta, s)=\\sum_{s'} O_{s,s'}\\frac{\\psi_\\theta(s')}{\\psi_\\theta(s)}` 
-        for a given configuration :math:`s` and parameters :math:`\\theta` of a given ansatz :math:`\\psi_\\theta(s)`.
+        return self._get_conn_elements_(s, psi=psi, **kwargs)
 
-        Arguments:
-            * ``psi``: Neural quantum state.
-            * ``*args``: Further positional arguments for the operator.
+    @ShardedMethod(out_specs=(DEVICE_SPEC, DEVICE_SPEC), attr_source='psi')
+    def _get_conn_elements_(self, s, **kwargs):
+        return  lambda p, x, kw: self._get_conn_elements(x, kw)
 
-        Returns:
-            A function :math:`O_{loc}(\\theta, s)`.
-        """
+    def _get_conn_elements(self, s, kwargs):
+        sampleShape = s.shape
+        s = s.ravel()
+        dim = s.shape[0]
+        mask = jnp.tril(jnp.ones((dim, dim), dtype=int), -1).T
+        prefactors = jnp.array([p(**kwargs) for p in self.prefactorsC], dtype=op_dtype)
 
-        op_fun = self.compile()
-        if type(op_fun) is tuple:
-            op_fun_args = op_fun[1](*args)
-            op_fun = op_fun[0]
-        net_fun = psi.net.apply
+        def proccess_string(s, prefactor, idx, map, matEls, fermi):
+            def apply_operator(c, x):
+                carry_sample, carry_matEl = c
+                idx, map, matEl, fermi = x
 
-        def op_estimator(params, config):
+                fermi_sign = jnp.prod((1 - 2 * fermi) * (2 * fermi * mask[idx] + (1 - 2 * fermi)) * carry_sample + (1 - abs(carry_sample)))
+                carry_matEl_new = carry_matEl * matEl[carry_sample[idx]] * fermi_sign
+                carry_sample_new = carry_sample.at[idx].set(map[carry_sample[idx]])
 
-            sp, matEls = op_fun(config, *op_fun_args)
+                return (carry_sample_new, carry_matEl_new), None
+            
+            (s_p, matEl), _ = jax.lax.scan(apply_operator, (s, prefactor), (idx, map, matEls, fermi))
 
-            log_psi_s = net_fun(params, config)
-            log_psi_sp = jax.vmap(lambda s: net_fun(params,s))(sp)
+            return s_p.reshape(sampleShape), matEl
+        
+        return jax.vmap(proccess_string, in_axes=(None,) + (0,) * 5)(s, prefactors, self.idxC, self.mapC, self.matElsC, self.fermionicC)
 
-            #return jnp.dot(matEls, jnp.exp(log_psi_sp - log_psi_s))
-            return jnp.sum(matEls * jnp.exp(log_psi_sp - log_psi_s))
+class IdentityOperator(Operator):
+    def __init__(self, ldim, idx):
+        super().__init__(ldim, idx, True, False)
 
-        return op_estimator
+    @property
+    def mat_els(self):
+        return jnp.ones(self.ldim, dtype=op_dtype)
+    
+    @property
+    def map(self):
+        return jnp.arange(self.ldim, dtype=jnp.int16)
+
+class CompositeOperator(Operator):
+    def __init__(self, O_1: Operator, O_2: Operator, label: str):
+        if O_1.ldim != O_2.ldim:
+            raise ValueError(f'The {label} is implemented only for operators with the same local dimension')
+        super().__init__(O_1.ldim, None, None, None)
+
+        self.O_1 = O_1
+        self.O_2 = O_2
+        self._label = label
+
+    @property
+    def mat_els(self):
+        pass
+    
+    @property
+    def map(self):
+        pass
+
+class ScaledOperator(Operator):
+    def  __init__(self, O: Operator, scalar):
+        if callable(scalar) and (not _has_kwargs(scalar)):
+            raise ValueError('Any callable that multiplies an operator has to have **kwargs in its argument.')
+
+        super().__init__(O.ldim, O.idx, O.diag, O.fermionic)
+        self.scalar = scalar
+        self.O = O
+
+    @property
+    def mat_els(self):
+        pass
+    
+    @property
+    def map(self):
+        pass
