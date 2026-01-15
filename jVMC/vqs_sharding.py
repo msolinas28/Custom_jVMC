@@ -121,7 +121,11 @@ class NQS:
         
         self.init_net(seed)
         if self.logarithmic:
-            self.apply_fun = self.net.apply
+            # self.apply_fun = self.net.apply
+            def test(parameters, s):
+                print('ciao')
+                return self.net.apply(parameters, s)
+            self.apply_fun = test
         else:
             def apply_fun(parameters, s, method=None):
                 return jnp.log(self.net.apply(parameters, s, method))

@@ -158,8 +158,10 @@ class ShardedMethod:
         jsh_fn = jax.jit(shard_map(vmapd_fn, MESH, self.in_specs, self.out_specs))
         
         if self.use_batch:
-            batched_fn = partial(self._batched_wrapper, instance=instance, vmapd_fn=vmapd_fn)
-            batched_jsh_fn = jax.jit(shard_map(batched_fn, MESH, self.in_specs, self.out_specs))
+            # batched_fn = partial(self._batched_wrapper, instance=instance, vmapd_fn=vmapd_fn)
+            # batched_jsh_fn = jax.jit(shard_map(batched_fn, MESH, self.in_specs, self.out_specs))
+            batched_fn = partial(self._batched_wrapper, instance=instance, vmapd_fn=jax.jit(vmapd_fn))
+            batched_jsh_fn = shard_map(batched_fn, MESH, self.in_specs, self.out_specs)
         else:
             batched_jsh_fn = None
         

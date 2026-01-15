@@ -246,7 +246,7 @@ class Operator(ABC):
             logPsiS = psi(s)
 
         s_p, matEls = self.get_conn_elements(s, psi, **kwargs)
-        logPsiS_p = psi(s_p) 
+        logPsiS_p = psi(s_p)
 
         # Automatically sharded since everything is on device
         def O_loc(ls, lsp, m):
