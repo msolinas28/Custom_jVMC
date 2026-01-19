@@ -12,14 +12,10 @@ def _has_kwargs(fun):
     sig = inspect.signature(fun)
     return any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values())
 
-def _mul_prefactor(a, b):
-    if callable(a) and callable(b):
-        return lambda **kw: a(**kw) * b(**kw)
+def _make_callable(a):
     if callable(a):
-        return lambda **kw: a(**kw) * b
-    if callable(b):
-        return lambda **kw: a * b(**kw)
-    return lambda **kw: a * b
+        return a
+    return lambda **kw: a
 
 class OperatorString(list):
     """
@@ -27,12 +23,12 @@ class OperatorString(list):
     """
     def __init__(self, operators):
         super().__init__(operators)
-        self._scale = lambda **kw: 1
-        self._diagonal = False 
+        self._scale = [1]
+        self._diagonal = False
 
     @property
     def scale(self):
-        return self._scale
+        return lambda kw: jnp.prod(jnp.array([s(**kw) if callable(s) else s for s in self._scale]), dtype=op_dtype)
     
     @property
     def diagonal(self):
@@ -163,7 +159,8 @@ class Operator(ABC):
                                 # Combine the operators from both strings
                                 combined = OperatorString(left_string + right_string)
                                 # Multiply the prefactors
-                                combined._scale = _mul_prefactor(left_string._scale, right_string._scale)
+                                combined._scale.extend(left_string._scale)
+                                combined._scale.extend(right_string._scale)
                                 out.append(combined)
                         
                         strings_stack.append(out)
@@ -172,7 +169,7 @@ class Operator(ABC):
                     lst = strings_stack.pop()
                     # Multiply the scale of each operator string
                     for s in lst:
-                        s._scale = _mul_prefactor(s._scale, node.scalar)
+                        s._scale.append(node.scalar)
                     strings_stack.append(lst)
 
                 else:
@@ -269,9 +266,9 @@ class Operator(ABC):
         s = s.ravel()
         dim = s.shape[0]
         mask = jnp.tril(jnp.ones((dim, dim), dtype=int), -1).T
-        prefactors = jnp.array([p(**kwargs) for p in self.prefactorsC], dtype=op_dtype)
+        sting_ids = jnp.arange(len(self.prefactorsC))
 
-        def proccess_string(s, prefactor, idx, map, matEls, fermi):
+        def proccess_string(s, id, idx, map, matEls, fermi):
             def apply_operator(c, x):
                 carry_sample, carry_matEl = c
                 idx, map, matEl, fermi = x
@@ -282,11 +279,12 @@ class Operator(ABC):
 
                 return (carry_sample_new, carry_matEl_new), None
             
+            prefactor = jax.lax.switch(id, self.prefactorsC, kwargs)
             (s_p, matEl), _ = jax.lax.scan(apply_operator, (s, prefactor), (idx, map, matEls, fermi))
 
             return s_p.reshape(sampleShape), matEl
         
-        return jax.vmap(proccess_string, in_axes=(None,) + (0,) * 5)(s, prefactors, self.idxC, self.mapC, self.matElsC, self.fermionicC)
+        return jax.vmap(proccess_string, in_axes=(None,) + (0,) * 5)(s, sting_ids, self.idxC, self.mapC, self.matElsC, self.fermionicC)
 
 class IdentityOperator(Operator):
     def __init__(self, ldim, idx):
