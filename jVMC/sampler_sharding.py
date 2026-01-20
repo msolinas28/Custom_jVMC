@@ -414,7 +414,7 @@ class MCSampler(AbstractMCSampler):
     def _init_state(self):
         initializer = lambda key, shape, dtype: jax.random.bernoulli(key, 0.5, shape).astype(dtype)
         
-        return self._init_state_general(initializer, jnp.int4)
+        return self._init_state_general(initializer, jnp.int32)
     
 class MCSamplerCont(AbstractMCSampler):
     def __init__(self, net: NQS, key=None, updateProposer=None | AbstractProposer, numChains=32, numSamples=128, 

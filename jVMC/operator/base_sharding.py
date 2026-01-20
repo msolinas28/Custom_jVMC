@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import jax.numpy as jnp
 import inspect
 import jax
+from functools import partial
 
 from jVMC.vqs import NQS
 from jVMC.sharding_config import ShardedMethod, DEVICE_SPEC
@@ -11,11 +12,6 @@ op_dtype = jnp.complex128
 def _has_kwargs(fun):
     sig = inspect.signature(fun)
     return any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values())
-
-def _make_callable(a):
-    if callable(a):
-        return a
-    return lambda **kw: a
 
 class OperatorString(list):
     """
@@ -231,10 +227,11 @@ class Operator(ABC):
         self.mapC = jnp.array(mapC, dtype=jnp.int32)
         self.matElsC = jnp.array(matElsC)
         self.fermionicC = jnp.array(fermionicC, dtype=jnp.int32)
-        self.diagC = jnp.array(diagonal, dtype=jnp.int32)
+        self.diagC = jnp.array(diagonal, dtype=jnp.bool_)
+        self.non_diagC = ~self.diagC
         self.prefactorsC = prefactors
         self._is_compiled = True
-    
+
     def get_O_loc(self, s, psi: NQS, **kwargs):
         if 'logPsiS' in kwargs.keys():
             logPsiS = kwargs['logPsiS']
@@ -242,14 +239,16 @@ class Operator(ABC):
         else:
             logPsiS = psi(s)
 
-        s_p, matEls = self.get_conn_elements(s, psi, **kwargs)
-        logPsiS_p = psi(s_p)
+        s_p_non_diag, matEls, matEls_diag = self.get_conn_elements(s, psi, **kwargs)
+        logPsiS_p = psi(s_p_non_diag)
 
         # Automatically sharded since everything is on device
-        def O_loc(ls, lsp, m):
-            return jnp.sum(jnp.exp(lsp - ls[:,None]) * m, axis=1)
-
-        return jax.jit(O_loc)(logPsiS, logPsiS_p, matEls) # TODO: Find a way to batch this 
+        return self._get_O_loc(logPsiS, logPsiS_p, matEls, matEls_diag) 
+    
+    # TODO: Find a way to batch this and make it compatible with single samples
+    @partial(jax.jit, static_argnums=(0,))
+    def _get_O_loc(self, logPsiS, logPsiS_p, matEls, matEls_diag):
+        return jnp.sum(jnp.exp(logPsiS_p - logPsiS[:, None]) * matEls, axis=1) + matEls_diag
 
     def get_conn_elements(self, s, psi: NQS, **kwargs):
         if not self._is_compiled:
@@ -257,7 +256,7 @@ class Operator(ABC):
 
         return self._get_conn_elements_(s, psi=psi, **kwargs)
 
-    @ShardedMethod(out_specs=(DEVICE_SPEC, DEVICE_SPEC), attr_source='psi')
+    @ShardedMethod(out_specs=(DEVICE_SPEC,) * 3, attr_source='psi')
     def _get_conn_elements_(self, s, **kwargs):
         return  lambda p, x, kw: self._get_conn_elements(x, kw)
 
@@ -284,7 +283,13 @@ class Operator(ABC):
 
             return s_p.reshape(sampleShape), matEl
         
-        return jax.vmap(proccess_string, in_axes=(None,) + (0,) * 5)(s, sting_ids, self.idxC, self.mapC, self.matElsC, self.fermionicC)
+        s_p, matEls = jax.vmap(proccess_string, in_axes=(None,) + (0,) * 5)(s, sting_ids, self.idxC, self.mapC, self.matElsC, self.fermionicC)
+        
+        s_p_non_diag = s_p[self.non_diagC, :]
+        mat_els_non_diag = matEls[self.non_diagC]
+        mat_els_diag = jnp.sum(matEls[self.diagC])
+
+        return s_p_non_diag, mat_els_non_diag, mat_els_diag
 
 class IdentityOperator(Operator):
     def __init__(self, ldim, idx):
@@ -296,7 +301,43 @@ class IdentityOperator(Operator):
     
     @property
     def map(self):
-        return jnp.arange(self.ldim, dtype=jnp.int16)
+        return jnp.arange(self.ldim, dtype=jnp.int32)
+    
+class SigmaX(Operator):
+    def __init__(self, idx, fermionic=False):
+        super().__init__(2, idx, False, fermionic)
+
+    @property
+    def mat_els(self):
+        return jnp.ones(self.ldim, dtype=op_dtype)
+    
+    @property
+    def map(self):
+        return jnp.array([1, 0], dtype=jnp.int32)
+
+class SigmaY(Operator):
+    def __init__(self, idx, fermionic=False):
+        super().__init__(2, idx, False, fermionic)
+
+    @property
+    def mat_els(self):
+        return jnp.array([-1j, 1j], dtype=op_dtype)
+    
+    @property
+    def map(self):
+        return jnp.array([1, 0], dtype=jnp.int32)
+    
+class SigmaZ(Operator):
+    def __init__(self, idx, fermionic=False):
+        super().__init__(2, idx, True, fermionic)
+
+    @property
+    def mat_els(self):
+        return jnp.array([1, -1], dtype=op_dtype)
+    
+    @property
+    def map(self):
+        return jnp.arange(self.ldim, dtype=jnp.int32)
 
 class CompositeOperator(Operator):
     def __init__(self, O_1: Operator, O_2: Operator, label: str):
