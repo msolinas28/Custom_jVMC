@@ -129,13 +129,13 @@ class Operator(ABC):
         mat_els_diag : Scalar equal to the sum of all diagonal matrix elements.
         """
         pass
-
-    @classmethod
-    def _create_composite(cls, O_1, O_2, label):
-        """Factory method to create CompositeOperator - override in subclasses"""
-        raise NotImplementedError("Subclasses must implement _create_composite")
     
     @classmethod
+    @abstractmethod
+    def _create_composite(cls, O_1, O_2, label):
+        pass
+
+    @classmethod
+    @abstractmethod
     def _create_scaled(cls, O, scalar):
-        """Factory method to create ScaledOperator - override in subclasses"""
-        raise NotImplementedError("Subclasses must implement _create_scaled")
+        pass

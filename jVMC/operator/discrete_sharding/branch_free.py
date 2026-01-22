@@ -2,7 +2,7 @@ from abc import abstractmethod
 import jax.numpy as jnp
 import inspect
 import jax
-from jVMC.operator.discrete_sharding.base_sharding import Operator as BaseOperator
+from jVMC.operator.discrete_sharding.base import Operator as BaseOperator
 
 op_dtype = jnp.complex128
 

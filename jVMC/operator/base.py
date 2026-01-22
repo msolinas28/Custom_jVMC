@@ -157,7 +157,8 @@ class Operator(metaclass=abc.ABCMeta):
         self.matEl = self._set_zero_to_zero_pmapd(self.matEl, idx[..., :jnp.max(self.numNonzero)], self.numNonzero)
         self.sp = self._array_idx_pmapd(self.sp, idx[..., :jnp.max(self.numNonzero)])
 
-        return self._flatten_pmapd(self.sp), self.matEl
+        # return self._flatten_pmapd(self.sp), self.matEl
+        return self.sp, self.matEl
 
     def _get_O_loc(self, matEl, logPsiS, logPsiSP):
 
