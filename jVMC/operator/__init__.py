@@ -3,3 +3,4 @@ from jVMC.operator.branch_free import *
 from jVMC.operator.povm import *
 from . import continuous
 from . import continuous_sharding
+from . import discrete_sharding
