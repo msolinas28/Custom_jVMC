@@ -193,13 +193,14 @@ class Operator(BaseOperator):
 
             return s_p.reshape(sampleShape), matEl
         
-        s_p, matEls = jax.vmap(proccess_string, in_axes=(None,) + (0,) * 5)(s, sting_ids, self.idxC, self.mapC, self.matElsC, self.fermionicC)
+        s_p, mat_els = jax.vmap(proccess_string, in_axes=(None,) + (0,) * 5)(s, sting_ids, self.idxC, self.mapC, self.matElsC, self.fermionicC)
         
-        s_p_non_diag = s_p[self.non_diagC, :]
-        mat_els_non_diag = matEls[self.non_diagC]
-        mat_els_diag = jnp.sum(matEls[self.diagC])
+        mat_els_diag = jnp.sum(mat_els[self.diagC])
+        # s_p_non_diag = s_p[self.non_diagC, :]
+        # mat_els_non_diag = matEls[self.non_diagC]
+        mat_els = mat_els.at[self.diagC].set(0)
 
-        return s_p_non_diag, mat_els_non_diag, mat_els_diag
+        return s_p, mat_els, mat_els_diag
     
     @classmethod
     def _create_composite(cls, O_1, O_2, label):

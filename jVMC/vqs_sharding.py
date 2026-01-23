@@ -255,6 +255,11 @@ class NQS:
         :meta public:
         """ 
         return lambda p, x, kw: self.apply_fun(p, x)
+    
+    def get_log_connected(self, s):
+        def get_log_connected(p, x, kw):
+            mat_els = 
+            jax.lax.cond(kw[mat_els] == 0, lambda: 0, lambda: f(sample))
 
     @ShardedMethod()
     def gradients(self, s):
