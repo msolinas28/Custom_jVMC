@@ -5,6 +5,7 @@ from functools import partial
 
 from jVMC.vqs import NQS
 from jVMC.sharding_config import ShardedMethod, DEVICE_SPEC
+from jVMC.sharding_config import ShardedMethod_exp
 
 op_dtype = jnp.complex128
 
@@ -81,8 +82,11 @@ class Operator(ABC):
         return self._get_O_loc(logPsiS, logPsiS_p, matEls, matEls_diag) 
     
     # TODO: Find a way to batch this and make it compatible with single samples
-    @partial(jax.jit, static_argnums=(0,))
-    def _get_O_loc(self, logPsiS, logPsiS_p, matEls, matEls_diag):
+    # @partial(jax.jit, static_argnums=(0,))
+    # def _get_O_loc(self, logPsiS, logPsiS_p, matEls, matEls_diag):
+    #     return jnp.sum(jnp.exp(logPsiS_p - logPsiS[:, None]) * matEls, axis=1) + matEls_diag
+    @ShardedMethod_exp(use_vmap=False)
+    def _get_O_loc(self, logPsiS, logPsiS_p, matEls, matEls_diag, *, batch_size):
         return jnp.sum(jnp.exp(logPsiS_p - logPsiS[:, None]) * matEls, axis=1) + matEls_diag
     
     def get_conn_elements(self, s, psi: NQS, **kwargs):
