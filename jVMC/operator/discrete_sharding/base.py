@@ -69,17 +69,13 @@ class Operator(ABC):
             raise NotImplemented
         
     def get_O_loc(self, s, psi: NQS, **kwargs):
-        if 'logPsiS' in kwargs.keys():
-            logPsiS = kwargs['logPsiS']
-            kwargs.pop('logPsiS')
-        else:
-            logPsiS = psi(s)
-
-        s_p_non_diag, matEls, matEls_diag = self.get_conn_elements(s, psi, **kwargs)
+        logPsiS = kwargs.pop('logPsiS') if 'logPsiS' in kwargs.keys() else psi(s)
+        batch_size = psi.batchSize or s.shape[0]
+    
+        s_p_non_diag, matEls, matEls_diag = self.get_conn_elements(s, batch_size, **kwargs)
         logPsiS_p = psi(s_p_non_diag)
 
-        # Automatically sharded since everything is on device
-        return self._get_O_loc(logPsiS, logPsiS_p, matEls, matEls_diag) 
+        return self._get_O_loc(logPsiS, logPsiS_p, matEls, matEls_diag, batch_size=batch_size) 
     
     # TODO: Find a way to batch this and make it compatible with single samples
     # @partial(jax.jit, static_argnums=(0,))
@@ -89,15 +85,25 @@ class Operator(ABC):
     def _get_O_loc(self, logPsiS, logPsiS_p, matEls, matEls_diag, *, batch_size):
         return jnp.sum(jnp.exp(logPsiS_p - logPsiS[:, None]) * matEls, axis=1) + matEls_diag
     
-    def get_conn_elements(self, s, psi: NQS, **kwargs):
+    # def get_conn_elements(self, s, psi: NQS, **kwargs):
+    #     if not self._is_compiled:
+    #         self._compile()
+
+    #     return self._get_conn_elements_sh(s, psi=psi, **kwargs)
+    
+    # @ShardedMethod(out_specs=(DEVICE_SPEC,) * 3, attr_source='psi')
+    # def _get_conn_elements_sh(self, s, **kwargs):
+    #     return  lambda p, x, kw: self._get_conn_elements(x, kw)
+
+    def get_conn_elements(self, s, batch_size, **kwargs): # TODO: fix once it works
         if not self._is_compiled:
             self._compile()
 
-        return self._get_conn_elements_(s, psi=psi, **kwargs)
+        return self._get_conn_elements_sh(s, batch_size=batch_size, **kwargs)
     
-    @ShardedMethod(out_specs=(DEVICE_SPEC,) * 3, attr_source='psi')
-    def _get_conn_elements_(self, s, **kwargs):
-        return  lambda p, x, kw: self._get_conn_elements(x, kw)
+    @ShardedMethod_exp(out_specs=(DEVICE_SPEC,) * 3)
+    def _get_conn_elements_sh(self, s, *, batch_size, **kwargs):
+        return  self._get_conn_elements(s, kwargs)
         
     @abstractmethod
     def _compile(self):

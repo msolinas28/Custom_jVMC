@@ -158,10 +158,11 @@ class ShardedMethod:
         jsh_fn = jax.jit(shard_map(vmapd_fn, MESH, self.in_specs, self.out_specs))
         
         if self.use_batch:
-            # batched_fn = partial(self._batched_wrapper, instance=instance, vmapd_fn=vmapd_fn)
-            # batched_jsh_fn = jax.jit(shard_map(batched_fn, MESH, self.in_specs, self.out_specs))
-            batched_fn = partial(self._batched_wrapper, instance=instance, vmapd_fn=jax.jit(vmapd_fn))
-            batched_jsh_fn = shard_map(batched_fn, MESH, self.in_specs, self.out_specs)
+            batched_fn = partial(self._batched_wrapper, instance=instance, vmapd_fn=vmapd_fn)
+            batched_jsh_fn = jax.jit(shard_map(batched_fn, MESH, self.in_specs, self.out_specs))
+
+            # batched_fn = partial(self._batched_wrapper, instance=instance, vmapd_fn=jax.jit(vmapd_fn))
+            # batched_jsh_fn = shard_map(batched_fn, MESH, self.in_specs, self.out_specs)
         else:
             batched_jsh_fn = None
         
@@ -261,7 +262,7 @@ class ShardedMethod_exp:
     """Decorator to automatically create sharded versions of methods."""
     def __init__(
             self,
-            static_argnums = None,
+            static_argnums=None,
             use_vmap=True, vmap_in_axes=None, # If None, default to (0,) * num_args
             in_specs=None, # If None, default to (DEVICE_SPEC,) * num_args
             out_specs=DEVICE_SPEC
@@ -279,23 +280,24 @@ class ShardedMethod_exp:
                 instance._sharded_cache = {}
 
             method_name = method.__name__
+
             if method_name not in instance._sharded_cache:
                 if self.in_specs is None:
-                    self.in_specs = (DEVICE_SPEC,) * len(args) + (REPLICATED_SPEC,) * (len(kwargs) - 1)
+                    self.in_specs = (DEVICE_SPEC,) * len(args)
                 else:
-                    if len(self.in_specs) != (len(args) + len(kwargs) - 1):
+                    if len(self.in_specs) != len(args):
                         raise ValueError(f"in_specs length ({len(self.in_specs)}) must match "
-                                         f"number of args ({len(args)}) + kwargs ({len(kwargs) - 1})")
+                                         f"number of args ({len(args)})")
                 
                 if self.vmap_in_axes is None:
-                    self.vmap_in_axes = (0,) * len(args) + (None,) * (len(kwargs) - 1)
+                    self.vmap_in_axes = (0,) * len(args)
                 else:
-                    if len(self.vmap_in_axes) !=(len(args) + len(kwargs) - 1):
+                    if len(self.vmap_in_axes) != len(args):
                         raise ValueError(f"vmap_in_axes length ({len(self.vmap_in_axes)}) must match "
-                                         f"number of args ({len(args)}) + kwargs ({len(kwargs) - 1})")
+                                         f"number of args ({len(args)})")
                     
                 self._batch_size = kwargs['batch_size']
-                base_fn = partial(method, instance, batch_size=self._batch_size)
+                base_fn = lambda kw, *a: method(instance, *a, batch_size=self._batch_size, **kw)
                 instance._sharded_cache[method_name] = self._create_sharded_versions(base_fn)
             
             cache = instance._sharded_cache[method_name]
@@ -308,10 +310,10 @@ class ShardedMethod_exp:
         
         base_fn has signature: (**kwargs) -> result
         """
-        vmapd_fn = jax.vmap(base_fn, in_axes=self.vmap_in_axes) if self.use_vmap else base_fn
+        vmapd_fn = jax.vmap(base_fn, in_axes=(None,) + self.vmap_in_axes) if self.use_vmap else base_fn
         jitd_fn = jax.jit(vmapd_fn, static_argnums=self.static_argnums)
         batched_fn = partial(self._batched_wrapper, jitd_fn=jitd_fn)
-        batched_sh_fn = shard_map(batched_fn, MESH, self.in_specs, self.out_specs)
+        batched_sh_fn = shard_map(batched_fn, MESH, (REPLICATED_SPEC,) + self.in_specs, self.out_specs)
         
         return {
             'single': base_fn,
@@ -333,7 +335,7 @@ class ShardedMethod_exp:
         
         # Case: fewer samples than devices -> fall back to vmap
         if num_samples < num_devices:
-            return cache['batched'](*args, **filtered_kwargs)
+            return cache['batched'](filtered_kwargs, *args)
     
         # Case: not divisible by num_devices -> pad
         original_size = num_samples
@@ -342,7 +344,7 @@ class ShardedMethod_exp:
             args = tuple(jnp.concatenate([a, jnp.repeat(a[-1:], pad_size, axis=0)], axis=0) for a in args) # you can't parallelize this since As might have different shapes
             num_samples = args[0].shape[0]
         
-        result = cache['batched_sh'](*args, **filtered_kwargs)
+        result = cache['batched_sh'](filtered_kwargs, *args)
         
         # Trim padding
         if original_size != num_samples:
@@ -350,20 +352,22 @@ class ShardedMethod_exp:
         
         return result
     
-    def _batched_wrapper(self, *args, jitd_fn, **kwargs):
+    def _batched_wrapper(self, kwargs, *args, jitd_fn):
         """Wrapper for batched computation."""
+        num_samples = args[0].shape[0]
         batched_args = tuple(create_batches(a, self._batch_size) for a in args)
         num_batches = batched_args[0].shape[0]
         
         def scan_fun(c, batch_idx):
+            print("batch_idx ", batch_idx)
             batch_args = tuple(ba[batch_idx] for ba in batched_args)
-            batch_result = jitd_fn(*batch_args, **kwargs)
+            batch_result = jitd_fn(kwargs, *batch_args)
             return c, batch_result
-            
+ 
         _, result = jax.lax.scan(scan_fun, None, jnp.arange(num_batches))
 
         def reshape_and_trim(x):
             x = x.reshape((-1,) + x.shape[2:])
-            return x[:args[0].shape[0]]
+            return x[:num_samples]
 
         return jax.tree_util.tree_map(reshape_and_trim, result)

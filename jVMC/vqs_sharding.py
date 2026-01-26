@@ -15,7 +15,7 @@ import warnings
 import jVMC
 from jVMC.util.key_gen import generate_seed
 from jVMC.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
-from jVMC.sharding_config import distribute, broadcast_split_key, ShardedMethod
+from jVMC.sharding_config import distribute, broadcast_split_key, ShardedMethod, ShardedMethod_exp
 
 def flat_gradient(fun, params, arg):
     gr = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
@@ -255,6 +255,13 @@ class NQS:
         :meta public:
         """ 
         return lambda p, x, kw: self.apply_fun(p, x)
+    
+    def call_new(self, s):
+        return self._call_new(s, parameters=self.parameters, batch_size=self.batchSize or s.shape[0])
+
+    @ShardedMethod_exp()
+    def _call_new(self, s, *, parameters, batch_size):
+        return self.apply_fun(parameters, s)
     
     # def get_log_connected(self, s):
     #     def get_log_connected(p, x, kw):
