@@ -166,11 +166,11 @@ class Operator(BaseOperator):
         self.matElsC = jnp.array(matElsC)
         self.fermionicC = jnp.array(fermionicC, dtype=jnp.int32)
         self.diagC = jnp.array(diagonal, dtype=jnp.bool_)
-        self.non_diagC = ~self.diagC
         self.prefactorsC = prefactors
         self._is_compiled = True
 
     def _get_conn_elements(self, s, kwargs):
+        print("get_conn")
         sampleShape = s.shape
         s = s.ravel()
         dim = s.shape[0]
@@ -196,8 +196,6 @@ class Operator(BaseOperator):
         s_p, mat_els = jax.vmap(proccess_string, in_axes=(None,) + (0,) * 5)(s, sting_ids, self.idxC, self.mapC, self.matElsC, self.fermionicC)
         
         mat_els_diag = jnp.sum(mat_els[self.diagC])
-        # s_p_non_diag = s_p[self.non_diagC, :]
-        # mat_els_non_diag = matEls[self.non_diagC]
         mat_els = mat_els.at[self.diagC].set(0)
 
         return s_p, mat_els, mat_els_diag

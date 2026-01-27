@@ -216,6 +216,7 @@ class NQS:
             raise Exception("Network uses different parameter data types. This is not supported.")
         if dtypes[0] == np.single or dtypes[0] == np.double:
             self._realParams = True
+        self._dtype = dtypes[0]
 
         # check Cauchy-Riemann condition to test for holomorphicity
         def make_flat(t):
@@ -263,10 +264,13 @@ class NQS:
     def _call_new(self, s, *, parameters, batch_size):
         return self.apply_fun(parameters, s)
     
-    # def get_log_connected(self, s):
-    #     def get_log_connected(p, x, kw):
-    #         mat_els = 
-    #         jax.lax.cond(kw[mat_els] == 0, lambda: 0, lambda: f(sample))
+    @ShardedMethod_exp()
+    def _act_on_non_zero(self, s_p, mat_els, *, parameters, batch_size):
+        return jax.lax.cond(
+            jnp.abs(mat_els) < 1e-6,
+            lambda: jnp.asarray(0, dtype=self._dtype), 
+            lambda: self.apply_fun(parameters, s_p)
+        )
 
     @ShardedMethod()
     def gradients(self, s):
