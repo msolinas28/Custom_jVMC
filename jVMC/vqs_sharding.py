@@ -258,7 +258,7 @@ class NQS:
         return lambda p, x, kw: self.apply_fun(p, x)
     
     def call_new(self, s):
-        return self._call_new(s, parameters=self.parameters, batch_size=self.batchSize or s.shape[0])
+        return self._call_new(s, parameters=self.parameters, batch_size=self.batchSize)
 
     @ShardedMethod_exp()
     def _call_new(self, s, *, parameters, batch_size):

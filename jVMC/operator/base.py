@@ -187,9 +187,7 @@ class Operator(metaclass=abc.ABCMeta):
             return self.get_O_loc_batched(samples, psi, logPsiS, self.ElocBatchSize, *args)
         else:
             sampleOffdConfigs, _ = self.get_s_primes(samples, *args)
-            print(sampleOffdConfigs.shape)
             logPsiSP = psi(sampleOffdConfigs)
-            print(logPsiSP.shape)
             if not psi.logarithmic:
                 logPsiSP = jnp.log(logPsiSP)
             return self.get_O_loc_unbatched(logPsiS, logPsiSP)

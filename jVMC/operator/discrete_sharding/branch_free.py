@@ -170,7 +170,6 @@ class Operator(BaseOperator):
         self._is_compiled = True
 
     def _get_conn_elements(self, s, kwargs):
-        print("get_conn")
         sampleShape = s.shape
         s = s.ravel()
         dim = s.shape[0]
