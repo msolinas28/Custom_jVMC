@@ -67,21 +67,20 @@ class Operator(ABC):
         
     def get_O_loc(self, s, psi: NQS, **kwargs):
         logPsiS = kwargs.pop('logPsiS') if 'logPsiS' in kwargs.keys() else psi(s)
-        batch_size = psi.batchSize or s.shape[0]
-    
-        s_p_non_diag, matEls, matEls_diag = self.get_conn_elements(s, batch_size, **kwargs)
+
+        s_p, matEls = self.get_conn_elements(s, psi.batchSize, **kwargs)
         logPsiS_p = psi._act_on_non_zero(
-            s_p_non_diag.reshape((-1,) + psi.sampleShape),
+            s_p.reshape((-1,) + psi.sampleShape),
             matEls.flatten(),
             parameters=psi.parameters,
-            batch_size=batch_size
+            batch_size=psi.batchSize
         ).reshape(matEls.shape)
 
-        return self._get_O_loc(logPsiS, logPsiS_p, matEls, matEls_diag, batch_size=batch_size) 
+        return self._get_O_loc(logPsiS, logPsiS_p, matEls, batch_size=psi.batchSize) 
     
     @sharded(use_vmap=False)
-    def _get_O_loc(self, logPsiS, logPsiS_p, matEls, matEls_diag, *, batch_size):
-        return jnp.sum(jnp.exp(logPsiS_p - logPsiS[:, None]) * matEls, axis=1) + matEls_diag
+    def _get_O_loc(self, logPsiS, logPsiS_p, matEls, *, batch_size):
+        return jnp.sum(jnp.exp(logPsiS_p - logPsiS[:, None]) * matEls, axis=1)
 
     def get_conn_elements(self, s, batch_size, **kwargs):
         if not self._is_compiled:
@@ -89,7 +88,7 @@ class Operator(ABC):
 
         return self._get_conn_elements_sh(s, batch_size=batch_size, **kwargs)
     
-    @sharded(out_specs=(DEVICE_SPEC,) * 3)
+    @sharded(out_specs=(DEVICE_SPEC, DEVICE_SPEC))
     def _get_conn_elements_sh(self, s, *, batch_size, **kwargs):
         return  self._get_conn_elements(s, kwargs)
         

@@ -93,8 +93,9 @@ class NQS:
             * ``avgFun``: Reduction operation for the symmetrization.
         """
 
-    def __init__(self, net: nn.Module, sampleShape, batchSize: int, logarithmic=True, 
-                 seed: None | int = None, orbit=None, avgFun=jVMC.nets.sym_wrapper.avgFun_Coefficients_Exp):
+    def __init__(self, net: nn.Module, sampleShape, batchSize: int | None = None, batchSize_per_device: int | None = None, 
+                 logarithmic=True, seed: None | int = None, orbit=None, 
+                 avgFun=jVMC.nets.sym_wrapper.avgFun_Coefficients_Exp):
         if isinstance(net, collections.abc.Iterable):
             for n in net:
                 if not isinstance(n, nn.Module):
@@ -116,8 +117,13 @@ class NQS:
         else:
             self._sampleShape = (sampleShape,)
         
-        if batchSize % MESH.size != 0:
-            raise ValueError(f"The batch size ({batchSize}) has to be divisible by the number of devices ({MESH.size})")
+        num_devices = MESH.size
+        if (batchSize is None) == (batchSize_per_device is None):
+            raise ValueError("Exactly one of 'batchSize' or 'batchSize_per_device' must be specified")
+        if batchSize is None:
+            batchSize = batchSize_per_device * num_devices
+        elif batchSize % num_devices != 0:
+            raise ValueError(f"The batch size ({batchSize}) has to be divisible by the number of devices ({num_devices})")
         self._batchSize = batchSize
 
         self._logarithmic = logarithmic
