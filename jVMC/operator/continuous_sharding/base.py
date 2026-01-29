@@ -1,10 +1,11 @@
 import jax.numpy as jnp
 from abc import ABC, abstractmethod
 import inspect
+from functools import partial
 
 from jVMC.geometry_sharding import AbstractGeometry
 from jVMC.vqs_sharding import NQS
-from jVMC.sharding_config import ShardedMethod
+from jVMC.sharding_config import sharded
 
 def _has_kwargs(fun):
     sig = inspect.signature(fun)
@@ -70,7 +71,7 @@ class Operator(ABC):
         else:
             raise NotImplemented
 
-    def _flatten_tree(self):
+    def _flatten_tree(self, apply_fun):
         instructions = []
         stack = [(self, False)]  # (node, visited)
 
@@ -93,9 +94,11 @@ class Operator(ABC):
                     instructions.append(("LEAF", node))
 
         self._instructions = instructions
+        self._evaluate = partial(self._evaluate_flat, apply_fun=apply_fun)
         self._is_flattened = True
 
-    def _evaluate_flat(self, s, parameters, kwargs, apply_fun):
+    @sharded(static_kwarg_names=('apply_fun',))
+    def _evaluate_flat(self, s, *, batch_size, parameters, apply_fun, **kwargs):
         stack = []
 
         for op, arg in self._instructions:
@@ -117,14 +120,9 @@ class Operator(ABC):
 
     def get_O_loc(self, s, psi: NQS, **kwargs):
         if not self._is_flattened:
-            self._flatten_tree()
+            self._flatten_tree(psi.apply_fun)
             
-        return self._O_loc(s, psi=psi, **kwargs) 
-        
-    @ShardedMethod(attr_source='psi')
-    def _O_loc(self, s, **kwargs):
-        apply_fun = kwargs['psi'].apply_fun # This has to be here since inside the lambda psi is no longer in kwargs
-        return lambda p, x, kw: self._evaluate_flat(x, p, kw, apply_fun=apply_fun)
+        return self._evaluate_flat(s, batch_size=psi.batchSize, parameters=psi.parameters, apply_fun=psi.apply_fun, **kwargs)
         
     @abstractmethod
     def _get_O_loc(self, s, apply_fun, parameters, kwargs):

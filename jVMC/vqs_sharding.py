@@ -15,7 +15,7 @@ import warnings
 import jVMC
 from jVMC.util.key_gen import generate_seed
 from jVMC.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
-from jVMC.sharding_config import distribute, broadcast_split_key, ShardedMethod, ShardedMethod_exp
+from jVMC.sharding_config import distribute, broadcast_split_key, sharded
 
 def flat_gradient(fun, params, arg):
     gr = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
@@ -93,7 +93,7 @@ class NQS:
             * ``avgFun``: Reduction operation for the symmetrization.
         """
 
-    def __init__(self, net: nn.Module, sampleShape, logarithmic=True, batchSize: None | int = None, 
+    def __init__(self, net: nn.Module, sampleShape, batchSize: int, logarithmic=True, 
                  seed: None | int = None, orbit=None, avgFun=jVMC.nets.sym_wrapper.avgFun_Coefficients_Exp):
         if isinstance(net, collections.abc.Iterable):
             for n in net:
@@ -116,7 +116,10 @@ class NQS:
         else:
             self._sampleShape = (sampleShape,)
         
+        if batchSize % MESH.size != 0:
+            raise ValueError(f"The batch size ({batchSize}) has to be divisible by the number of devices ({MESH.size})")
         self._batchSize = batchSize
+
         self._logarithmic = logarithmic
         
         self.init_net(seed)
@@ -240,7 +243,6 @@ class NQS:
         self._netTreeDef = jax.tree_util.tree_structure(self.parameters["params"])
         self._numParameters = jnp.sum(jnp.array([p.size for p in tree_flatten(self.parameters["params"])[0]]))
     
-    @ShardedMethod()
     def __call__(self, s):
         """
         Evaluate variational wave function.
@@ -255,16 +257,13 @@ class NQS:
         
         :meta public:
         """ 
-        return lambda p, x, kw: self.apply_fun(p, x)
+        return self._apply_fun_sh(s, parameters=self.parameters, batch_size=self.batchSize)
     
-    def call_new(self, s):
-        return self._call_new(s, parameters=self.parameters, batch_size=self.batchSize)
-
-    @ShardedMethod_exp()
-    def _call_new(self, s, *, parameters, batch_size):
+    @sharded()
+    def _apply_fun_sh(self, s, *, parameters, batch_size):
         return self.apply_fun(parameters, s)
     
-    @ShardedMethod_exp()
+    @sharded()
     def _act_on_non_zero(self, s_p, mat_els, *, parameters, batch_size):
         return jax.lax.cond(
             jnp.abs(mat_els) < 1e-6,
@@ -272,7 +271,6 @@ class NQS:
             lambda: self.apply_fun(parameters, s_p)
         )
 
-    @ShardedMethod()
     def gradients(self, s):
         """
         Compute gradients of logarithmic wave function.
@@ -287,21 +285,22 @@ class NQS:
             with respect to each variational parameter :math:`\\theta_k` for each \
             input configuration :math:`s`.
         """
-        return lambda p, x, kw: self.flat_gradient_function(self.net.apply, p, x)
+        return self._gradients_sh(s, parameters=self.parameters, batch_size=self.batchSize)
+    
+    @sharded()
+    def _gradients_sh(self, s, *, parameters, batch_size):
+        return self.flat_gradient_function(self.apply_fun, parameters, s)
     
     def gradients_dict(self, s):
-        result = self._gradients_dict(s)
+        result = self._gradients_dict_sh(s, parameters=self.parameters, batch_size=self.batchSize)
 
         if self.holomorphic:
-            if s.shape == self.sampleShape:
-                return self._append_gradients_dict_single(result, result)
-            else:
-                return self._append_gradients_dict_jsh(result, result)
+            return self._append_gradients_dict_jsh(result, result)
         return result
     
-    @ShardedMethod()
-    def _gradients_dict(self, s):
-        return lambda p, x, kw: self.dict_gradient_function(self.net.apply, p, x)
+    @sharded()
+    def _gradients_dict_sh(self, s, *, parameters, batch_size):
+        return self.dict_gradient_function(self.net.apply, parameters, s)
 
     def grad_dict_to_vec_map(self):
         PTreeShape = []
@@ -340,7 +339,7 @@ class NQS:
             if parameters is not None:
                 params = parameters
 
-            numSamples = distribute(numSamples, 'samples') # TODO: after this check if batchsize divides numSaples per device
+            numSamples = distribute(numSamples, 'samples')
             if key is None:
                 key = jax.random.PRNGKey(generate_seed())
             elif len(key.shape) > 1:
