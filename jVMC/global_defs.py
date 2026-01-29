@@ -1,9 +1,13 @@
 import numpy as np
+import jax.numpy as jnp
 
 # Complex floating point
 tCpx = np.complex128
 # Real floating point
 tReal = np.float64
+
+dtype_cont_samples = jnp.float64
+dtype_samples = jnp.int32
 
 from mpi4py import MPI
 import jax

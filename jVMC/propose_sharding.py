@@ -6,12 +6,13 @@ from functools import partial
 
 from jVMC.geometry_sharding import AbstractGeometry
 from jVMC.util.key_gen import format_key
-from jVMC.sharding_config import DEVICE_SPEC, REPLICATED_SPEC
+from jVMC.sharding_config import DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
+from jVMC.global_defs import dtype_cont_samples, dtype_samples
 
-def shard_array_across_chains(arr, numChains):
+def shard_array_across_chains(arr, numChains, dtype):
     arr_atleast_1d = jnp.atleast_1d(arr)
-    sharded_arr = jnp.stack([arr_atleast_1d] * numChains, axis=0)
-    return sharded_arr.reshape((numChains,) + arr_atleast_1d.shape)
+    sharded_arr = jnp.stack([arr_atleast_1d] * numChains, axis=0, dtype=dtype)
+    return jax.device_put(sharded_arr.reshape((numChains,) + arr_atleast_1d.shape), DEVICE_SHARDING)
 
 class AbstractProposer(ABC):
     def __init__(self, use_custom_thermalization=False):
@@ -196,7 +197,7 @@ class RWM(AbstractProposeCont):
                     f"'sigma' must have the same dimension as 'geometry.n_dim' "
                     f"(expected {self.geometry.n_dim}, got {sigma.size})."
                 )
-        sigma = shard_array_across_chains(jnp.asarray(sigma), numChains)
+        sigma = shard_array_across_chains(jnp.asarray(sigma), numChains, dtype=dtype_cont_samples)
 
         self._arg = {"sigma": sigma}
     
@@ -277,7 +278,7 @@ class MALA(AbstractProposeCont):
             raise ValueError('"tau" can not be negative.')
         else:
             tau = self._tau
-        tau = shard_array_across_chains(jnp.asarray(tau), numChains)
+        tau = shard_array_across_chains(jnp.asarray(tau), numChains, dtype=dtype_cont_samples)
 
         self._arg = {"params": vqs.parameters, "tau": tau}
     

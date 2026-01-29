@@ -12,6 +12,7 @@ from jVMC.vqs_sharding import NQS
 from jVMC.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
 from jVMC.sharding_config import distribute, broadcast_split_key
 from jVMC.propose_sharding import AbstractProposer
+from jVMC.global_defs import dtype_cont_samples, dtype_samples
 
 class AbstractMCSampler(ABC):
     """
@@ -162,7 +163,7 @@ class AbstractMCSampler(ABC):
 
         def _log_prob_fun(s, mu, p):
             # vmap is over parallel MC chains
-            return jax.vmap(lambda x: mu * jnp.real(self.sampler_net(p, x)))(s)
+            return jax.vmap(lambda x: mu * self.sampler_net(p, x))(s)
         self._log_prob_fun_jsh = jax.jit(
             shard_map(
                 _log_prob_fun,
@@ -290,7 +291,6 @@ class AbstractMCSampler(ABC):
         if not self._is_state_initialized:
             self._init_state()
         self.updateProposer.update_arg(self.net)
-
         self.logProb = self._log_prob_fun_jsh(self.states, self.mu, self.net.parameters)
         self.numProposed = jax.device_put(jnp.zeros((self.numChains,), dtype=np.int64), DEVICE_SHARDING)
         self.numAccepted = jax.device_put(jnp.zeros((self.numChains,), dtype=np.int64), DEVICE_SHARDING)
@@ -414,7 +414,7 @@ class MCSampler(AbstractMCSampler):
     def _init_state(self):
         initializer = lambda key, shape, dtype: jax.random.bernoulli(key, 0.5, shape).astype(dtype)
         
-        return self._init_state_general(initializer, jnp.int32)
+        return self._init_state_general(initializer, dtype_samples)
     
 class MCSamplerCont(AbstractMCSampler):
     def __init__(self, net: NQS, key=None, updateProposer=None | AbstractProposer, numChains=32, numSamples=128, 
@@ -425,7 +425,7 @@ class MCSamplerCont(AbstractMCSampler):
                          thermalizationSweeps, sweepSteps, initState, mu, logProbFactor)
         
     def _init_state(self):
-        return self._init_state_general(self.updateProposer.geometry.uniform_populate, jnp.float64)
+        return self._init_state_general(self.updateProposer.geometry.uniform_populate, dtype_cont_samples)
 
 class ExactSampler:
     """
