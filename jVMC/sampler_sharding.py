@@ -12,7 +12,7 @@ from jVMC.vqs_sharding import NQS
 from jVMC.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
 from jVMC.sharding_config import distribute, broadcast_split_key
 from jVMC.propose_sharding import AbstractProposer
-from jVMC.global_defs import dtype_cont_samples, dtype_samples
+from jVMC.global_defs import DT_SAMPLES, DT_SAMPLES_CONT
 
 class AbstractMCSampler(ABC):
     """
@@ -414,7 +414,7 @@ class MCSampler(AbstractMCSampler):
     def _init_state(self):
         initializer = lambda key, shape, dtype: jax.random.bernoulli(key, 0.5, shape).astype(dtype)
         
-        return self._init_state_general(initializer, dtype_samples)
+        return self._init_state_general(initializer, DT_SAMPLES)
     
 class MCSamplerCont(AbstractMCSampler):
     def __init__(self, net: NQS, key=None, updateProposer=None | AbstractProposer, numChains=32, numSamples=128, 
@@ -425,7 +425,7 @@ class MCSamplerCont(AbstractMCSampler):
                          thermalizationSweeps, sweepSteps, initState, mu, logProbFactor)
         
     def _init_state(self):
-        return self._init_state_general(self.updateProposer.geometry.uniform_populate, dtype_cont_samples)
+        return self._init_state_general(self.updateProposer.geometry.uniform_populate, DT_SAMPLES_CONT)
 
 class ExactSampler:
     """

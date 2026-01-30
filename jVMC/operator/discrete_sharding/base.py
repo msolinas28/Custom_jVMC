@@ -1,10 +1,9 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
 import jax.numpy as jnp
 
 from jVMC.vqs import NQS
 from jVMC.sharding_config import sharded, DEVICE_SPEC
-
-op_dtype = jnp.complex128
 
 class Operator(ABC):
     def __init__(self, ldim):
@@ -16,7 +15,7 @@ class Operator(ABC):
     def ldim(self):
         return self._ldim
     
-    def __add__(self, other):
+    def __add__(self, other) -> Operator:
         if isinstance(other, (int, float, complex)):
             # TODO: Since I don't know the total dim of the Hilbert space this is not doable
             raise NotImplementedError 
@@ -25,17 +24,17 @@ class Operator(ABC):
         else:
             raise NotImplemented
         
-    def __radd__(self, other):
+    def __radd__(self, other) -> Operator:
         if isinstance(other, (int, float, complex)):
             # TODO: Same as previous todo
             raise NotImplementedError
         else:
             raise NotImplemented
         
-    def __neg__(self):
+    def __neg__(self) -> Operator:
         return self._create_scaled(self, -1)
     
-    def __sub__(self, other):
+    def __sub__(self, other) -> Operator:
         if isinstance(other, (int, float, complex)):
             # TODO: Same as previous todo
             raise NotImplementedError
@@ -44,14 +43,14 @@ class Operator(ABC):
         else:
             raise NotImplemented
         
-    def __rsub__(self, other):
+    def __rsub__(self, other) -> Operator:
         if isinstance(other, (int, float, complex)):
             # TODO: Same as previous todo
             raise NotImplementedError
         else:
             raise NotImplemented
         
-    def __mul__(self, other):
+    def __mul__(self, other) -> Operator:
         if isinstance(other, (int, float, complex)) or callable(other):
             return self._create_scaled(self, other)
         elif isinstance(other, Operator):
@@ -59,7 +58,7 @@ class Operator(ABC):
         else:
             raise NotImplemented
         
-    def __rmul__(self, other):
+    def __rmul__(self, other) -> Operator:
         if isinstance(other, (int, float, complex)) or callable(other):
             return self._create_scaled(self, other)
         else:

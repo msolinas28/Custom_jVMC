@@ -2,9 +2,9 @@ from abc import abstractmethod
 import jax.numpy as jnp
 import inspect
 import jax
-from jVMC.operator.discrete_sharding.base import Operator as BaseOperator
 
-op_dtype = jnp.complex128
+from jVMC.operator.discrete_sharding.base import Operator as BaseOperator
+from jVMC.global_defs import DT_OPERATORS_CPX
 
 def _has_kwargs(fun):
     sig = inspect.signature(fun)
@@ -21,7 +21,7 @@ class OperatorString(list):
 
     @property
     def scale(self):
-        return lambda kw: jnp.prod(jnp.array([s(**kw) if callable(s) else s for s in self._scale]), dtype=op_dtype)
+        return lambda kw: jnp.prod(jnp.array([s(**kw) if callable(s) else s for s in self._scale]), dtype=DT_OPERATORS_CPX)
     
     @property
     def diagonal(self):
@@ -198,7 +198,7 @@ class Operator(BaseOperator):
         mat_els_diag = jnp.sum(mat_els[self.diagC])
         mat_els = mat_els.at[self.diagC].set(0).at[self.first_diag_idx].set(mat_els_diag)
 
-        return s_p, mat_els
+        return s_p, mat_els 
     
     @classmethod
     def _create_composite(cls, O_1, O_2, label):
@@ -249,7 +249,7 @@ class IdentityOperator(Operator):
 
     @property
     def mat_els(self):
-        return jnp.ones(self.ldim, dtype=op_dtype)
+        return jnp.ones(self.ldim, dtype=DT_OPERATORS_CPX)
     
     @property
     def map(self):
@@ -261,7 +261,7 @@ class _Creation(Operator):
 
     @property
     def mat_els(self):
-        return jnp.array([1, 0], dtype=op_dtype)
+        return jnp.array([1, 0], dtype=DT_OPERATORS_CPX)
     
     @property
     def map(self):
@@ -273,7 +273,7 @@ class _Annihilation(Operator):
 
     @property
     def mat_els(self):
-        return jnp.array([0, 1], dtype=op_dtype)
+        return jnp.array([0, 1], dtype=DT_OPERATORS_CPX)
     
     @property
     def map(self):
@@ -285,7 +285,7 @@ class SigmaX(Operator):
 
     @property
     def mat_els(self):
-        return jnp.ones(self.ldim, dtype=op_dtype)
+        return jnp.ones(self.ldim, dtype=DT_OPERATORS_CPX)
     
     @property
     def map(self):
@@ -297,7 +297,7 @@ class SigmaY(Operator):
 
     @property
     def mat_els(self):
-        return jnp.array([-1j, 1j], dtype=op_dtype)
+        return jnp.array([-1j, 1j], dtype=DT_OPERATORS_CPX)
     
     @property
     def map(self):
@@ -309,7 +309,7 @@ class SigmaZ(Operator):
 
     @property
     def mat_els(self):
-        return jnp.array([1, -1], dtype=op_dtype)
+        return jnp.array([1, -1], dtype=DT_OPERATORS_CPX)
     
     @property
     def map(self):
@@ -329,7 +329,7 @@ class Number(Operator):
     
     @property
     def mat_els(self):
-        return jnp.array([0, 1], dtype=op_dtype)
+        return jnp.array([0, 1], dtype=DT_OPERATORS_CPX)
     
     @property
     def map(self):

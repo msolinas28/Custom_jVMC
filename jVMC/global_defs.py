@@ -6,8 +6,10 @@ tCpx = np.complex128
 # Real floating point
 tReal = np.float64
 
-dtype_cont_samples = jnp.float64
-dtype_samples = jnp.int32
+DT_SAMPLES_CONT = jnp.float64
+DT_SAMPLES = jnp.int32
+DT_OPERATORS_REAL = jnp.float64
+DT_OPERATORS_CPX = jnp.complex128  
 
 from mpi4py import MPI
 import jax
