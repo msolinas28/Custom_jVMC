@@ -7,6 +7,7 @@ from . import vqs_sharding
 from . import sampler
 from . import sampler_sharding
 from . import stats
+from . import stats_sharding
 from . import geometry
 from . import geometry_sharding
 from . import propose
