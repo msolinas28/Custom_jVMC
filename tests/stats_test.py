@@ -3,11 +3,11 @@ import unittest
 import jax
 import jax.numpy as jnp
 
-import jVMC
-from jVMC.stats import SampledObs
-import jVMC.operator as op
-from jVMC.global_defs import device_count
-import jVMC.mpi_wrapper as mpi
+import jVMC_exp
+from jVMC_exp.stats import SampledObs
+import jVMC_exp.operator as op
+from jVMC_exp.global_defs import device_count
+import jVMC_exp.mpi_wrapper as mpi
 
 
 class TestStats(unittest.TestCase):
@@ -42,17 +42,17 @@ class TestStats(unittest.TestCase):
 
         L = 4
         
-        for rbm in [jVMC.nets.CpxRBM(numHidden=1, bias=False), jVMC.nets.RBM(numHidden=1, bias=False)]:
+        for rbm in [jVMC_exp.nets.CpxRBM(numHidden=1, bias=False), jVMC_exp.nets.RBM(numHidden=1, bias=False)]:
 
             # Set up variational wave function
-            orbit = jVMC.util.symmetries.get_orbit_1D(L, "translation", "reflection")
-            net = jVMC.nets.sym_wrapper.SymNet(net=rbm, orbit=orbit)
-            psi = jVMC.vqs.NQS(net)
+            orbit = jVMC_exp.util.symmetries.get_orbit_1D(L, "translation", "reflection")
+            net = jVMC_exp.nets.sym_wrapper.SymNet(net=rbm, orbit=orbit)
+            psi = jVMC_exp.vqs.NQS(net)
 
             # Set up MCMC sampler
             # mcSampler = jVMC.sampler.MCSampler(psi, (L,), jax.random.PRNGKey(0), updateProposer=jVMC.sampler.propose_spin_flip, sweepSteps=L+1, numChains=777)
 
-            exactSampler = jVMC.sampler.ExactSampler(psi, (L,))
+            exactSampler = jVMC_exp.sampler.ExactSampler(psi, (L,))
 
             p0 = psi.parameters
 

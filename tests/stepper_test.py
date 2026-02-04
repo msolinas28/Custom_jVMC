@@ -1,6 +1,6 @@
 import unittest
 
-import jVMC.util.stepper as st
+import jVMC_exp.util.stepper as st
 
 import jax
 import jax.random as random

@@ -65,7 +65,7 @@ acting on lattice site :math:`l=1`. The corresponding dictionary is::
     Sx = {
             'idx': 1,
             'map': jax.numpy.array([1,0],dtype=np.int32),
-            'matEl': jax.numpy.array([1.,1.],dtype=jVMC.global_defs.tReal),
+            'matEl': jax.numpy.array([1.,1.],dtype=jVMC.global_defs.DT_PARAMS_REAL),
             'diag': False
          }
 

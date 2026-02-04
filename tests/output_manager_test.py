@@ -4,9 +4,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import jVMC
-from jVMC.util.output_manager import OutputManager
-import jVMC.mpi_wrapper as mpi
+import jVMC_exp
+from jVMC_exp.util.output_manager import OutputManager
+import jVMC_exp.mpi_wrapper as mpi
 import h5py
 import os
 

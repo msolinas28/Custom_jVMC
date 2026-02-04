@@ -2,13 +2,13 @@ import unittest
 
 import jax.numpy as jnp
 
-import jVMC
-import jVMC.nets as nets
-from jVMC.vqs import NQS
-import jVMC.operator as op
-import jVMC.sampler as sampler
+import jVMC_exp
+import jVMC_exp.nets as nets
+from jVMC_exp.vqs import NQS
+import jVMC_exp.operator as op
+import jVMC_exp.sampler as sampler
 
-from jVMC.util import measure, ground_state_search
+from jVMC_exp.util import measure, ground_state_search
 
 
 class TestGsSearch(unittest.TestCase):
@@ -33,7 +33,7 @@ class TestGsSearch(unittest.TestCase):
             # Set up exact sampler
             exactSampler = sampler.ExactSampler(psi, L)
 
-            tdvpEquation = jVMC.util.MinSR(exactSampler, pinvTol=1e-6, diagonalShift=0.)
+            tdvpEquation = jVMC_exp.util.MinSR(exactSampler, pinvTol=1e-6, diagonalShift=0.)
 
             # Perform ground state search to get initial state
             ground_state_search(psi, hamiltonianGS, tdvpEquation, exactSampler, numSteps=200, stepSize=1e-2)

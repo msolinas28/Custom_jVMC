@@ -1,7 +1,7 @@
 import unittest
 
-import jVMC
-import jVMC.operator as op
+import jVMC_exp
+import jVMC_exp.operator as op
 import jax
 import jax.numpy as jnp
 
@@ -19,7 +19,7 @@ class TestPOVM(unittest.TestCase):
 
         sample_shape = (L,)
 
-        self.psi = jVMC.util.util.init_net({"batch_size": 200, "net1":
+        self.psi = jVMC_exp.util.util.init_net({"batch_size": 200, "net1":
                                             {"type": "RNN",
                                              "translation": {"use": True, "factor": 1},
                                              "parameters": {"inputDim": 4,
@@ -31,7 +31,7 @@ class TestPOVM(unittest.TestCase):
         system_data = {"dim": "1D", "L": L}
         self.povm = op.POVM(system_data)
 
-        prob_dist = jVMC.operator.povm.get_1_particle_distributions("y_up", self.povm)
+        prob_dist = jVMC_exp.operator.povm.get_1_particle_distributions("y_up", self.povm)
         prob_dist /= prob_dist[0]
         biases = jnp.log(prob_dist[1:])
         params = copy_dict(self.psi._param_unflatten(self.psi.get_parameters()))
@@ -42,20 +42,20 @@ class TestPOVM(unittest.TestCase):
                                   for p in jax.tree_util.tree_flatten(params)[0]])
         self.psi.set_parameters(params)
 
-        self.sampler = jVMC.sampler.ExactSampler(self.psi, (L,), lDim=4, logProbFactor=1)
+        self.sampler = jVMC_exp.sampler.ExactSampler(self.psi, (L,), lDim=4, logProbFactor=1)
 
-        self.tdvpEquation = jVMC.util.tdvp.TDVP(self.sampler, rhsPrefactor=-1.,
+        self.tdvpEquation = jVMC_exp.util.tdvp.TDVP(self.sampler, rhsPrefactor=-1.,
                                                 pinvTol=0.0, pinvCutoff=1e-6, diagonalShift=0, makeReal='real', crossValidation=False)
 
         #self.stepper = jVMC.util.stepper.Euler(timeStep=dt)  # ODE integrator
-        self.stepper = jVMC.util.stepper.Heun(timeStep=dt)  # ODE integrator
+        self.stepper = jVMC_exp.util.stepper.Heun(timeStep=dt)  # ODE integrator
 
     def test_matrix_to_povm(self):
-        unity = jnp.eye(2, dtype=jVMC.global_defs.tCpx)
-        zero_matrix = jnp.zeros((2, 2), dtype=jVMC.global_defs.tCpx)
+        unity = jnp.eye(2, dtype=jVMC_exp.global_defs.DT_PARAMS_CPX)
+        zero_matrix = jnp.zeros((2, 2), dtype=jVMC_exp.global_defs.DT_PARAMS_CPX)
 
         system_data = {"dim": "1D", "L": 2}
-        povm = jVMC.operator.POVM(system_data)
+        povm = jVMC_exp.operator.POVM(system_data)
 
         self.assertTrue(jnp.isclose(op.matrix_to_povm(unity, povm.M, povm.T_inv, mode='observable'),
                                     jnp.ones(4)).all())
@@ -78,11 +78,11 @@ class TestPOVM(unittest.TestCase):
         self.assertRaises(ValueError, op.matrix_to_povm, zero_matrix, povm.M, povm.T_inv, mode='wrong_mode')
 
     def test_adding_operator(self):
-        unity = jnp.eye(2, dtype=jVMC.global_defs.tCpx)
-        zero_matrix = jnp.zeros((2, 2), dtype=jVMC.global_defs.tCpx)
+        unity = jnp.eye(2, dtype=jVMC_exp.global_defs.DT_PARAMS_CPX)
+        zero_matrix = jnp.zeros((2, 2), dtype=jVMC_exp.global_defs.DT_PARAMS_CPX)
 
         system_data = {"dim": "1D", "L": 2}
-        povm = jVMC.operator.POVM(system_data)
+        povm = jVMC_exp.operator.POVM(system_data)
 
         unity_povm = op.matrix_to_povm(unity, povm.M, povm.T_inv, mode='unitary')
         zeros_povm = op.matrix_to_povm(zero_matrix, povm.M, povm.T_inv, mode='dissipative')
@@ -121,7 +121,7 @@ class TestPOVM(unittest.TestCase):
         t=0.
         while t<Tmax:
 
-            result = jVMC.operator.povm.measure_povm(Lindbladian.povm, self.sampler)
+            result = jVMC_exp.operator.povm.measure_povm(Lindbladian.povm, self.sampler)
             for dim in ["X", "Y", "Z"]:
                 res[dim].append(result[dim]["mean"])
             times.append(t)
@@ -177,7 +177,7 @@ class TestPOVM(unittest.TestCase):
         t=0.
         while t<Tmax:
 
-            result = jVMC.operator.povm.measure_povm(Lindbladian.povm, self.sampler)
+            result = jVMC_exp.operator.povm.measure_povm(Lindbladian.povm, self.sampler)
             for dim in ["X", "Y", "Z"]:
                 res[dim].append(result[dim]["mean"])
             times.append(t)
@@ -233,7 +233,7 @@ class TestPOVM(unittest.TestCase):
         t=0.
         while t<Tmax:
 
-            result = jVMC.operator.povm.measure_povm(Lindbladian.povm, self.sampler)
+            result = jVMC_exp.operator.povm.measure_povm(Lindbladian.povm, self.sampler)
             for dim in ["X", "Y", "Z"]:
                 res[dim].append(result[dim]["mean"])
             times.append(t)
@@ -274,7 +274,7 @@ class TestPOVM(unittest.TestCase):
         Lindbladian.add({"name": "imag_Z", "strength": 4., "sites": (1, )})
 
         def measure_energy(confs, probs):
-            return jnp.sum(jVMC.mpi_wrapper.global_mean(self.povm.observables["Z"][confs], probs))
+            return jnp.sum(jVMC_exp.mpi_wrapper.global_mean(self.povm.observables["Z"][confs], probs))
 
         for i in range(40):
             dp, _ = self.stepper.step(0, self.tdvpEquation, self.psi.get_parameters(), hamiltonian=Lindbladian,

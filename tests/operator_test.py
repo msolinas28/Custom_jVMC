@@ -8,12 +8,12 @@ import jax.numpy as jnp
 
 import numpy as np
 
-import jVMC
-import jVMC.operator as op
-import jVMC.sampler
-import jVMC.nets as nets
-from jVMC.vqs import NQS
-import jVMC.global_defs as global_defs
+import jVMC_exp
+import jVMC_exp.operator as op
+import jVMC_exp.sampler
+import jVMC_exp.nets as nets
+from jVMC_exp.vqs import NQS
+import jVMC_exp.global_defs as global_defs
 
 import flax.linen as nn
 class Target(nn.Module):
@@ -121,7 +121,7 @@ class TestOperator(unittest.TestCase):
         rbm = nets.CpxRBM(numHidden=2, bias=False)
         psi = NQS(rbm)
 
-        mcSampler = jVMC.sampler.MCSampler(psi, (L,), random.PRNGKey(0), updateProposer=jVMC.sampler.propose_spin_flip, numChains=1)
+        mcSampler = jVMC_exp.sampler.MCSampler(psi, (L,), random.PRNGKey(0), updateProposer=jVMC_exp.sampler.propose_spin_flip, numChains=1)
 
         numSamples = 100
         s, logPsi, _ = mcSampler.sample(numSamples=numSamples)
@@ -149,7 +149,7 @@ class TestOperator(unittest.TestCase):
         rbm = nets.CpxRBM(numHidden=2, bias=False)
         psi = NQS(rbm)
 
-        mcSampler = jVMC.sampler.MCSampler(psi, (L,), random.PRNGKey(0), updateProposer=jVMC.sampler.propose_spin_flip,
+        mcSampler = jVMC_exp.sampler.MCSampler(psi, (L,), random.PRNGKey(0), updateProposer=jVMC_exp.sampler.propose_spin_flip,
                                            numChains=1)
 
         numSamples = 100
@@ -177,7 +177,7 @@ class TestOperator(unittest.TestCase):
         rbm = nets.CpxRBM(numHidden=2, bias=True)
         psi = NQS(rbm)
 
-        sampler = jVMC.sampler.ExactSampler(psi, (L,))
+        sampler = jVMC_exp.sampler.ExactSampler(psi, (L,))
 
         def commutator(i,j):
             Comm = op.BranchFreeOperator()
@@ -191,7 +191,7 @@ class TestOperator(unittest.TestCase):
                             "same_site": [commutator(0,0),commutator(1,1)], 
                             "distinct_site": [commutator(0,1),commutator(1,0)]
                             }
-        out_dict = jVMC.util.util.measure(observalbes_dict, psi, sampler)
+        out_dict = jVMC_exp.util.util.measure(observalbes_dict, psi, sampler)
 
         self.assertTrue(
             jnp.allclose(
@@ -245,11 +245,11 @@ class TestOperator(unittest.TestCase):
         chi = NQS(chi_model)
         chi(jnp.array(jnp.ones((1, 1, flavourL))))
         chi.set_parameters(b)
-        chiSampler = jVMC.sampler.ExactSampler(chi, (flavourL,))
+        chiSampler = jVMC_exp.sampler.ExactSampler(chi, (flavourL,))
         s, logPsi, p = chiSampler.sample()
         sPrime, _ = hamiltonian.get_s_primes(s)
         Oloc = hamiltonian.get_O_loc(s, chi, logPsi)
-        Omean = jVMC.mpi_wrapper.global_mean(Oloc,p)
+        Omean = jVMC_exp.mpi_wrapper.global_mean(Oloc,p)
 
         self.assertTrue(jnp.allclose(Omean, -9.95314531))
         

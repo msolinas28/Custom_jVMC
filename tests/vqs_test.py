@@ -1,10 +1,10 @@
 import unittest
 
-import jVMC
-import jVMC.nets as nets
-from jVMC.vqs import NQS
+import jVMC_exp
+import jVMC_exp.nets as nets
+from jVMC_exp.vqs import NQS
 
-import jVMC.global_defs as global_defs
+import jVMC_exp.global_defs as global_defs
 
 import jax
 import jax.numpy as jnp
@@ -12,7 +12,7 @@ import numpy as np
 from math import isclose
 
 import flax.linen as nn
-import jVMC.nets.activation_functions as act_funs
+import jVMC_exp.nets.activation_functions as act_funs
 
 
 def get_shape(shape):
@@ -35,9 +35,9 @@ class CpxRBM_nonHolomorphic(nn.Module):
     def __call__(self, s):
 
         layer = nn.Dense(self.numHidden, use_bias=self.bias,
-                         **jVMC.nets.initializers.init_fn_args(kernel_init=jVMC.nets.initializers.cplx_init,
+                         **jVMC_exp.nets.initializers.init_fn_args(kernel_init=jVMC_exp.nets.initializers.cplx_init,
                                         bias_init=jax.nn.initializers.zeros,
-                                        dtype=global_defs.tCpx)
+                                        dtype=global_defs.DT_PARAMS_CPX)
                          )
 
         out = layer(2 * s.ravel() - 1)
@@ -61,7 +61,7 @@ class Simple_nonHolomorphic(nn.Module):
     @nn.compact
     def __call__(self, s):
 
-        z = self.param('z', jVMC.nets.initializers.cplx_init, (1,), global_defs.tCpx)
+        z = self.param('z', jVMC_exp.nets.initializers.cplx_init, (1,), global_defs.DT_PARAMS_CPX)
     
         return jnp.sum(jnp.conj(z))
 
@@ -72,7 +72,7 @@ class MatrixMultiplication_NonHolomorphic(nn.Module):
 
     @nn.compact
     def __call__(self, s):
-        layer1 = nn.Dense(1, use_bias=False, **jVMC.nets.initializers.init_fn_args(dtype=global_defs.tCpx))
+        layer1 = nn.Dense(1, use_bias=False, **jVMC_exp.nets.initializers.init_fn_args(dtype=global_defs.DT_PARAMS_CPX))
         out = layer1(2 * s.ravel() - 1)
         if not self.holo:
             out = out + 1e-1 * jnp.real(out)
@@ -88,7 +88,7 @@ class TestGradients(unittest.TestCase):
         for k in range(10):
             L = 3
             rbm = nets.CpxRBM(numHidden=2**k, bias=True)
-            orbit = jVMC.util.symmetries.get_orbit_1D(L)
+            orbit = jVMC_exp.util.symmetries.get_orbit_1D(L)
             net = nets.sym_wrapper.SymNet(net=rbm, orbit=orbit)
             s = jnp.zeros(get_shape((4, 3)), dtype=np.int32)
             psiC = NQS(net)
@@ -107,7 +107,7 @@ class TestGradients(unittest.TestCase):
             L = 3
             rbm = nets.CpxRBM(numHidden=2, bias=True)
 
-            orbit = jVMC.util.symmetries.get_orbit_1D(L)
+            orbit = jVMC_exp.util.symmetries.get_orbit_1D(L)
             net = nets.sym_wrapper.SymNet(net=rbm, orbit=orbit)
             psiC = NQS(net)
 
@@ -120,7 +120,7 @@ class TestGradients(unittest.TestCase):
             delta = 1e-6
             params = psiC.get_parameters()
             for j in range(G.shape[-1]):
-                u = jnp.zeros(G.shape[-1], dtype=global_defs.tReal).at[j].set(1)
+                u = jnp.zeros(G.shape[-1], dtype=global_defs.DT_PARAMS_REAL).at[j].set(1)
                 psiC.update_parameters(delta * u)
                 psi1 = psiC(s)
                 psiC.set_parameters(params)
@@ -152,7 +152,7 @@ class TestGradients(unittest.TestCase):
             delta = 1e-5
             params = psi.get_parameters()
             for j in range(G.shape[-1]):
-                u = jnp.zeros(G.shape[-1], dtype=jVMC.global_defs.tReal).at[j].set(1)
+                u = jnp.zeros(G.shape[-1], dtype=jVMC_exp.global_defs.DT_PARAMS_REAL).at[j].set(1)
                 psi.update_parameters(delta * u)
                 psi1 = psi(s)
                 psi.set_parameters(params)
@@ -184,7 +184,7 @@ class TestGradients(unittest.TestCase):
             delta = 1e-5
             params = psi.get_parameters()
             for j in range(G.shape[-1]):
-                u = jnp.zeros(G.shape[-1], dtype=jVMC.global_defs.tReal).at[j].set(1)
+                u = jnp.zeros(G.shape[-1], dtype=jVMC_exp.global_defs.DT_PARAMS_REAL).at[j].set(1)
                 psi.update_parameters(delta * u)
                 psi1 = psi(s)
                 psi.set_parameters(params)
@@ -216,7 +216,7 @@ class TestGradients(unittest.TestCase):
             delta=1e-5
             params = psi.get_parameters()
             for j in range(G.shape[-1]):
-                u = jnp.zeros(G.shape[-1], dtype=jVMC.global_defs.tCpx).at[j].set(1)
+                u = jnp.zeros(G.shape[-1], dtype=jVMC_exp.global_defs.DT_PARAMS_CPX).at[j].set(1)
                 psi.update_parameters(delta * u)
                 psi1 = psi(s)
                 psi.set_parameters(params)
@@ -243,7 +243,7 @@ class TestGradients(unittest.TestCase):
             delta=1e-5
             params = psi.get_parameters()
             for j in range(G.shape[-1]):
-                u = jnp.zeros(G.shape[-1], dtype=jVMC.global_defs.tCpx).at[j].set(1)
+                u = jnp.zeros(G.shape[-1], dtype=jVMC_exp.global_defs.DT_PARAMS_CPX).at[j].set(1)
                 psi.update_parameters(delta * u)
                 psi1 = psi(s)
                 psi.set_parameters(params)
@@ -277,8 +277,8 @@ class TestGradients(unittest.TestCase):
 
             global_defs.set_pmap_devices(ds)
 
-            net = jVMC.nets.CpxRBM(numHidden=8, bias=False)
-            psi = jVMC.vqs.NQS(net, seed=1234)  # Variational wave function
+            net = jVMC_exp.nets.CpxRBM(numHidden=8, bias=False)
+            psi = jVMC_exp.vqs.NQS(net, seed=1234)  # Variational wave function
 
             s = jnp.zeros((len(ds),3,4))
             psi(s)
