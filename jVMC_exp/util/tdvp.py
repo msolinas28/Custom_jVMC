@@ -84,7 +84,7 @@ class TDVP:
         self._rhs_trans_fn = lambda x: self.makeReal((-rhsPrefactor) * x)
 
     def _get_tdvp_error(self, update):
-        return jnp.abs(1. + jnp.real(update.dot(self.S0.dot(update)) - 2. * jnp.real(update.dot(self.F0))) / self.energy.var)
+        return jnp.abs(1. + jnp.real(update.dot(self.S0.dot(update)) - 2. * jnp.real(update.dot(self.F0))) / (self.energy.var + 1e-10))
 
     @property
     def residuals(self):
@@ -135,7 +135,7 @@ class TDVP:
         rho = self._covar_grad_eloc.transform(self._rhs_trans_fn, jnp.transpose(self.V))
         self._rho_var = rho.var.ravel()
 
-        return jnp.sqrt(jnp.abs(rho._num_samples * (jnp.conj(self.VtF) * self.VtF) / self._rho_var)).ravel()
+        return jnp.sqrt(jnp.abs(rho._num_samples * (jnp.conj(self.VtF) * self.VtF) / (self._rho_var + 1e-10))).ravel()
 
     def solve(self, Eloc: SampledObs, gradients: SampledObs):
         # Get TDVP equation from MC data

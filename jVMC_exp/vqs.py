@@ -14,7 +14,7 @@ import warnings
 from jVMC_exp.nets.sym_wrapper import avgFun_Coefficients_Exp, SymNet
 from jVMC_exp.nets.two_nets_wrapper import TwoNets
 from jVMC_exp.util.key_gen import generate_seed
-from jVMC_exp.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
+from jVMC_exp.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING, REPLICATED_SHARDING
 from jVMC_exp.sharding_config import distribute, broadcast_split_key, sharded
 
 def flat_gradient(fun, params, arg):
@@ -94,8 +94,7 @@ class NQS:
         """
 
     def __init__(self, net: nn.Module, sampleShape, batchSize: int | None = None, batchSize_per_device: int | None = None, 
-                 logarithmic=True, seed: None | int = None, orbit=None, 
-                 avgFun=avgFun_Coefficients_Exp):
+                 logarithmic=True, seed: None | int = None, orbit=None, avgFun=avgFun_Coefficients_Exp):
         if isinstance(net, collections.abc.Iterable):
             for n in net:
                 if not isinstance(n, nn.Module):
@@ -228,7 +227,7 @@ class NQS:
         dummy_sample = jnp.ones(self.sampleShape)
         if seed == None:
             seed = generate_seed()
-        self._parameters = self.net.init(jax.random.PRNGKey(seed), dummy_sample)
+        self._parameters = jax.device_put(self.net.init(jax.random.PRNGKey(seed), dummy_sample), REPLICATED_SHARDING)
         self._realParams = False
         self._holomorphic = False
         

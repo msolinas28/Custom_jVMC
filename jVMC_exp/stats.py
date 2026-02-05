@@ -84,7 +84,7 @@ class SampledObs():
         self._observations = jax.device_put(observations, DEVICE_SHARDING)
 
     def __repr__(self):
-        return f"SampledObs(n_samples={self._num_samples}, n_features={self._num_obs})"
+        return self.__str__()
     
     def __str__(self):
         if self._num_obs == 1:

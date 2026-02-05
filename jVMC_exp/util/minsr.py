@@ -24,6 +24,7 @@ class MinSR:
         self.diagonalShift = diagonalShift
         self.diagonalizeOnDevice = diagonalizeOnDevice
         self.metaData = None
+        self.Eloc0 = None
 
     @property
     def energy(self) -> SampledObs:
@@ -39,8 +40,8 @@ class MinSR:
             T_inv = jnp.linalg.pinv(T, rtol=self.pinvTol, hermitian=True)
             return - gradients._normalized_obs.conj().T @ T_inv @ Eloc._normalized_obs
     
-        gradients_all = jnp.concatenate([jnp.real(gradients._normalized_obs), jnp.imag(gradients._normalized_obs)], axis=0)
-        Eloc_all = jnp.concatenate([jnp.real(Eloc._normalized_obs), jnp.imag(Eloc._normalized_obs)], axis=0)
+        gradients_all = jnp.concatenate([jnp.real(gradients._normalized_obs), jnp.imag(gradients._normalized_obs)])
+        Eloc_all = jnp.concatenate([jnp.real(Eloc._normalized_obs), jnp.imag(Eloc._normalized_obs)]).squeeze()
 
         T = gradients_all @ gradients_all.T
         T = T + self.diagonalShift * jnp.eye(T.shape[-1])
