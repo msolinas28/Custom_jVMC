@@ -121,9 +121,9 @@ def measure(
 
         Oloc = SampledObs(op.get_O_loc(samples, psi, logPsiS=logPsiS, **kwargs), p)
         result[name] = {}
-        result[name]["mean"] = jnp.real(Oloc.mean.item())
-        result[name]["variance"] = jnp.real(Oloc.var.item())
-        result[name]["MC_error"] = jnp.real(Oloc.error_of_mean.item())
+        result[name]["mean"] = jnp.real(Oloc.mean).item()
+        result[name]["variance"] = jnp.real(Oloc.var).item()
+        result[name]["MC_error"] = jnp.real(Oloc.error_of_mean).item()
 
     return result
 

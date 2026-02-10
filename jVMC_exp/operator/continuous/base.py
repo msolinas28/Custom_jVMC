@@ -66,6 +66,14 @@ class Operator(AbstractOperator):
         else:
             raise NotImplemented
         
+    def __truediv__(self, other):
+        if isinstance(other, (int, float, complex)):
+            if other == 0:
+                raise ZeroDivisionError("Division of Operator by zero.")
+            return ScaledOperator(self, 1 / other)
+        else:
+            return NotImplemented
+        
     def __rmul__(self, other):
         if isinstance(other, (int, float, complex)) or callable(other):
             return ScaledOperator(self, other)

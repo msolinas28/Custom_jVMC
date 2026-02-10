@@ -317,7 +317,7 @@ class NQS:
     
     @sharded()
     def _gradients_dict_sh(self, s, *, parameters, batch_size):
-        return self.dict_gradient_function(self.net.apply, parameters, s)
+        return self.dict_gradient_function(self.apply_fun, parameters, s)
 
     def grad_dict_to_vec_map(self):
         PTreeShape = []

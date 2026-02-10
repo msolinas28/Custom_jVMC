@@ -65,6 +65,14 @@ class Operator(AbstractOperator):
         else:
             raise NotImplemented
         
+    def __truediv__(self, other) -> Operator:
+        if isinstance(other, (int, float, complex)):
+            if other == 0:
+                raise ZeroDivisionError("Division of Operator by zero.")
+            return self._create_scaled(self, 1 / other)
+        else:
+            return NotImplemented
+        
     def get_O_loc(self, s, psi: NQS, *, logPsiS=None, **kwargs):
         logPsiS = psi(s) if logPsiS is None else logPsiS
 

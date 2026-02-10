@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as random
 import numpy as np
-from functools import partial
+from functools import partial, cached_property
 from jax.experimental.shard_map import shard_map
 from abc import ABC, abstractmethod
 
@@ -477,7 +477,7 @@ class ExactSampler:
     def logProbFactor(self):
         return self._logProbFactor
     
-    @property
+    @cached_property
     def basis(self):
         adjusted_dof = distribute(self.num_states)
         int_repr = jax.device_put(jnp.arange(adjusted_dof), DEVICE_SHARDING)
