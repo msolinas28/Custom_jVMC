@@ -32,4 +32,4 @@ class CoulombInteraction(Operator):
             self._interaction_charge = 1
 
     def _get_O_loc(self, s, apply_fun, parameters, kwargs):
-        return jnp.sum(self._interaction_charge / self.geometry.get_distance(s))
+        return jnp.sum(self._interaction_charge / self.geometry.get_absolute_distance(s))

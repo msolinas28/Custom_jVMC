@@ -43,6 +43,16 @@ class AbstractGeometry(ABC):
     def extent(self):
         return self._extent
     
+    def get_absolute_distance(self, x):
+        """
+        Given a configuration x, returns a vector with shape (n_particles * (n_particles - 1) / 2,)
+        with all pairwise distances between particles, using Minimum Image Convention.
+        """
+        diff = self.get_distance(x)
+        sqrd_dist = jnp.sum(diff**2, axis=-1)
+
+        return jnp.sqrt(sqrd_dist[jnp.triu_indices(self.n_particles, 1)])
+    
     @abstractmethod
     def domain(self):
         """
@@ -67,7 +77,8 @@ class AbstractGeometry(ABC):
     @abstractmethod
     def get_distance(self, x):
         """
-        Given a configuration x, returns a vector with all pairwise distances between particles
+        Given a configuration x, returns a matrix with shape (n_particles, n_particles, n_dim)
+        with all pairwise distances between particles, using Minimum Image Convention.
         """
 
 class HyperRectangle(AbstractGeometry):
@@ -97,7 +108,5 @@ class HyperRectangle(AbstractGeometry):
         diff = x[:, None, :] - x[None, :, :]
         extent = jnp.array(self.extent)
         PBC = jnp.array(self.PBC, dtype=bool)
-        diff = diff - PBC * extent * jnp.round(diff / extent)
-        sqdist = jnp.sum(diff**2, axis=-1)
 
-        return jnp.sqrt(sqdist[jnp.triu_indices(x.shape[0], 1)])
+        return diff - PBC * extent * jnp.round(diff / extent)

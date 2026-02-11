@@ -11,7 +11,7 @@ from jVMC_exp.util.key_gen import format_key
 from jVMC_exp.vqs import NQS
 from jVMC_exp.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
 from jVMC_exp.sharding_config import distribute, broadcast_split_key
-from jVMC_exp.propose import AbstractProposer
+from jVMC_exp.propose import AbstractProposer, AbstractProposeCont
 from jVMC_exp.global_defs import DT_SAMPLES, DT_SAMPLES_CONT
 
 class AbstractMCSampler(ABC):
@@ -50,7 +50,7 @@ class AbstractMCSampler(ABC):
         ``mu`` parameter must be set to 1.0, to sample the unchanged POVM distribution.
     """
 
-    def __init__(self, net: NQS, key=None, updateProposer=None | AbstractProposer, numChains=32, numSamples=128, 
+    def __init__(self, net: NQS, updateProposer: None | AbstractProposer, key=None, numChains=32, numSamples=128, 
                  thermalizationSweeps=10, sweepSteps=None, initState=None, mu=2, logProbFactor=0.5):
         self._net = net
         if (not net.is_generator) and (not isinstance(updateProposer, AbstractProposer)):
@@ -417,7 +417,7 @@ class MCSampler(AbstractMCSampler):
         return self._init_state_general(initializer, DT_SAMPLES)
     
 class MCSamplerCont(AbstractMCSampler):
-    def __init__(self, net: NQS, key=None, updateProposer=None | AbstractProposer, numChains=32, numSamples=128, 
+    def __init__(self, net: NQS, updateProposer:None | AbstractProposeCont, key=None, numChains=32, numSamples=128, 
                  thermalizationSweeps=10, sweepSteps=None, initState=None, mu=2, logProbFactor=0.5):
         if sweepSteps is None:
             sweepSteps = updateProposer.geometry.n_particles
