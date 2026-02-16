@@ -4,6 +4,7 @@ from jVMC_exp.stats import SampledObs
 from jVMC_exp.vqs import NQS
 from jVMC_exp.sampler import AbstractMCSampler
 from jVMC_exp.util.output_manager import OutputManager
+from jVMC_exp.operator.base import AbstractOperator
 
 class MinSR:
     """ 
@@ -36,10 +37,10 @@ class MinSR:
         Efficient only if number of samples :math:`\\ll` number of parameters.
         """
         if holomorphic:
-            T = gradients.tangent_kernel()
+            T = gradients.tangent_kernel
             T_inv = jnp.linalg.pinv(T, rtol=self.pinvTol, hermitian=True)
-            return - gradients._normalized_obs.conj().T @ T_inv @ Eloc._normalized_obs
-    
+            return - gradients._normalized_obs.conj().T @ T_inv @ Eloc._normalized_obs.squeeze()
+
         gradients_all = jnp.concatenate([jnp.real(gradients._normalized_obs), jnp.imag(gradients._normalized_obs)])
         Eloc_all = jnp.concatenate([jnp.real(Eloc._normalized_obs), jnp.imag(Eloc._normalized_obs)]).squeeze()
 
@@ -49,7 +50,7 @@ class MinSR:
 
         return - gradients_all.T @ T_inv @ Eloc_all
 
-    def __call__(self, netParameters, t, *, psi: NQS, hamiltonian,
+    def __call__(self, netParameters, t, *, psi: NQS, hamiltonian: AbstractOperator,
                  numSamples=None, outp: None | OutputManager = None, intStep=None):
         """ 
         For given network parameters computes an update step using the MinSR method.

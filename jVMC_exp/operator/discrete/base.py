@@ -27,6 +27,8 @@ class Operator(AbstractOperator):
         
     def __radd__(self, other) -> Operator:
         if isinstance(other, (int, float, complex)):
+            if other == 0:
+                return self
             # TODO: Same as previous todo
             raise NotImplementedError
         else:

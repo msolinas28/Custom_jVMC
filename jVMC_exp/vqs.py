@@ -9,7 +9,7 @@ import numpy as np
 import flax.linen as nn
 import collections
 from math import isclose
-import warnings
+from typing import Tuple
 
 from jVMC_exp.nets.sym_wrapper import avgFun_Coefficients_Exp, SymNet
 from jVMC_exp.nets.two_nets_wrapper import TwoNets
@@ -93,12 +93,13 @@ class NQS:
             * ``avgFun``: Reduction operation for the symmetrization.
         """
 
-    def __init__(self, net: nn.Module, sampleShape, batchSize: int | None = None, batchSize_per_device: int | None = None, 
+    def __init__(self, net: nn.Module | Tuple[nn.Module, nn.Module], sampleShape, batchSize: int | None = None, batchSize_per_device: int | None = None, 
                  logarithmic=True, seed: None | int = None, orbit=None, avgFun=avgFun_Coefficients_Exp):
         if isinstance(net, collections.abc.Iterable):
-            for n in net:
-                if not isinstance(n, nn.Module):
-                    raise ValueError("The argument 'net' has to be an instance of flax.nn.Module.")
+            if len(net) != 2:
+                raise ValueError(f"If a tuple is passed for 'net', this must have len 2. Got {len(net)}.") 
+            if not isinstance(net[0], nn.Module) or not isinstance(net[1], nn.Module):
+                raise ValueError("The argument 'net' has to be an instance of flax.nn.Module.")
             net = TwoNets(net)
         else:
             if not isinstance(net, nn.Module):
@@ -129,11 +130,11 @@ class NQS:
         
         self.init_net(seed)
         if self.logarithmic:
-            # self.apply_fun = self.net.apply
-            def test(parameters, s):
-                print('ciao')
-                return self.net.apply(parameters, s)
-            self.apply_fun = test
+            self.apply_fun = self.net.apply
+            # def test(parameters, s):
+            #     print('ciao')
+            #     return self.net.apply(parameters, s)
+            # self.apply_fun = test
         else:
             def apply_fun(parameters, s, method=None):
                 return jnp.log(self.net.apply(parameters, s, method))
@@ -142,8 +143,7 @@ class NQS:
         self._append_gradients_dict_single = lambda x, y: tree_map(lambda a, b: jnp.concatenate((a, 1.j * b)), x, y)
         self._append_gradients_dict = lambda x, y: tree_map(lambda a, b: jnp.concatenate((a[:, :], 1.j * b[:, :]), axis=1), x, y)
         self._append_gradients_dict_jsh = jax.jit(shard_map(self._append_gradients_dict, MESH, (DEVICE_SPEC, DEVICE_SPEC), DEVICE_SPEC))
-        
-        self._sharded_cache = {}
+        self._sample_jsh = {}
 
     @property
     def parameters(self):
@@ -389,29 +389,10 @@ class NQS:
         Args:
             * ``deltaP``: Values to be added to variational parameters.
         """
-        self.parameters = jax.tree_util.tree_map(jax.lax.add, self.params, self._param_unflatten(deltaP))
+        if isinstance(deltaP, dict) and 'params' in deltaP.keys():
+            deltaP = deltaP['params']
 
-    def set_parameters(self, P):
-        """
-        Set variational parameters.
-        
-        Sets new values of all variational parameters.
-        
-        Args:
-            * ``P``: New values of variational parameters.
-        """
-        warnings.warn(
-            "set_parameters() is deprecated and will be removed in a future release; "
-            "assign to `self.parameters` or 'self.params' directly instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
-        # Update model parameters
-        if isinstance(P, flax.core.frozen_dict.FrozenDict):
-            self.params = P
-        else:
-            self.params = self._param_unflatten(P)    
+        self.parameters = jax.tree_util.tree_map(jax.lax.add, self.params, self._param_unflatten(deltaP)) 
 
     def _param_unflatten(self, P):
         """
