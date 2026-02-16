@@ -104,6 +104,7 @@ class NQS:
         else:
             if not isinstance(net, nn.Module):
                 raise ValueError("The argument 'net' has to be an instance of flax.nn.Module.")
+            
         self._isGenerator = False
         if "sample" in dir(net):
             if callable(net.sample):
