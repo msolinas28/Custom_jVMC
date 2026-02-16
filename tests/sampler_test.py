@@ -18,8 +18,8 @@ def state_to_int(s):
 
 def _test_sampling(net, test_class: unittest.TestCase, mu=2, log_prob_factor=0.5, two_nets=False, test_two_samplers=False):
     L = 4
-    num_samples = 2 ** 17
-    num_chains = 2 ** 15
+    num_samples = 2 ** 18
+    num_chains = 2 ** 16
 
     weights = jnp.array(
         [0.23898957, 0.12614753, 0.19479055, 0.17325271, 0.14619853, 0.21392751,
@@ -59,7 +59,7 @@ def _test_sampling(net, test_class: unittest.TestCase, mu=2, log_prob_factor=0.5
     pmc = pmc / jnp.sum(pmc)
 
     # Compare histogram to exact probabilities
-    print(jnp.max(jnp.abs(pmc - pex[:16])))
+    print(jnp.max(jnp.abs(pmc - pex)))
     test_class.assertTrue(jnp.max(jnp.abs(pmc - pex)) < 2e-3)
 
     if test_two_samplers:
@@ -129,35 +129,35 @@ def _test_autoreg_sampling(net, test_class: unittest.TestCase, L=(4,), mu=2, log
 
 class TestMC(unittest.TestCase):
 
-    def test_MCMC_sampling(self):
+    # def test_MCMC_sampling(self):
+    #     rbm = nets.CpxRBM(numHidden=2, bias=False)
+    #     orbit = jVMC_exp.util.symmetries.get_orbit_1D(4, "translation", "reflection", "spinflip")
+    #     net = SymNet(net=rbm, orbit=orbit)
+        
+    #     _test_sampling(net, self, test_two_samplers=True)
+
+    # def test_MCMC_sampling_with_mu(self):
+    #     rbm = nets.CpxRBM(numHidden=2, bias=False)
+    #     orbit = jVMC_exp.util.symmetries.get_orbit_1D(4)
+    #     net = SymNet(net=rbm, orbit=orbit)
+        
+    #     _test_sampling(net, self, mu=1)
+
+    def test_MCMC_sampling_with_logProbFactor(self):
         rbm = nets.CpxRBM(numHidden=2, bias=False)
-        orbit = jVMC_exp.util.symmetries.get_orbit_1D(4, "translation", "reflection", "spinflip")
+        orbit = jVMC_exp.util.symmetries.get_orbit_1D(4)
         net = SymNet(net=rbm, orbit=orbit)
         
-        _test_sampling(net, self, test_two_samplers=True)
+        _test_sampling(net, self, log_prob_factor=1)
 
-#     def test_MCMC_sampling_with_mu(self):
-#         rbm = nets.CpxRBM(numHidden=2, bias=False)
-#         orbit = jVMC_exp.util.symmetries.get_orbit_1D(4)
-#         net = SymNet(net=rbm, orbit=orbit)
-        
-#         _test_sampling(net, self, mu=1)
+    def test_MCMC_sampling_with_two_nets(self):
+        rbm1 = nets.RBM(numHidden=2, bias=False)
+        rbm2 = nets.RBM(numHidden=2, bias=False)
+        model = jVMC_exp.nets.TwoNets((rbm1, rbm2))
+        orbit = jVMC_exp.util.symmetries.get_orbit_1D(4)
+        net = SymNet(net=model, orbit=orbit)
 
-#     def test_MCMC_sampling_with_logProbFactor(self):
-#         rbm = nets.CpxRBM(numHidden=2, bias=False)
-#         orbit = jVMC_exp.util.symmetries.get_orbit_1D(4)
-#         net = SymNet(net=rbm, orbit=orbit)
-        
-#         _test_sampling(net, self, log_prob_factor=1)
-
-#     def test_MCMC_sampling_with_two_nets(self):
-#         rbm1 = nets.RBM(numHidden=2, bias=False)
-#         rbm2 = nets.RBM(numHidden=2, bias=False)
-#         model = jVMC_exp.nets.TwoNets((rbm1, rbm2))
-#         orbit = jVMC_exp.util.symmetries.get_orbit_1D(4)
-#         net = SymNet(net=model, orbit=orbit)
-
-#         _test_sampling(net, self, two_nets=True)
+        _test_sampling(net, self, two_nets=True)
 
 #     def test_autoregressive_sampling(self):
 #         rnn = nets.RNN1DGeneral(L=4, hiddenSize=5, depth=2)
