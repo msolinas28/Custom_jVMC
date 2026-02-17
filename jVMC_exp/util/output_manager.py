@@ -58,7 +58,7 @@ class OutputManager:
             if isinstance(value, dict):
                 if key not in f[full_group_name]:
                     f.create_group(new_full_group_name)
-                self._write_data_recursive(f, new_full_group_name, value)
+                self._write_timeseries_recursive(f, new_full_group_name, value)
 
             else:
                 value = self.to_array(value)
@@ -152,3 +152,16 @@ class OutputManager:
             x = np.array([x])
 
         return x
+    
+    def _recursive_read(self, f):
+        out = {}
+        for key, item in f.items():
+            if isinstance(item, h5py.Dataset):
+                out[key] = item[()]   # read dataset
+            elif isinstance(item, h5py.Group):
+                out[key] = self._recursive_read(item)
+        return out
+    
+    def to_dict(self):
+        with h5py.File(self._file_name, "r") as f:
+            return self._recursive_read(f)

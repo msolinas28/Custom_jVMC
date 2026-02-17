@@ -13,6 +13,7 @@ import jVMC_exp
 import jVMC_exp.global_defs as global_defs
 from jVMC_exp.nets.initializers import init_fn_args
 from jVMC_exp.util.symmetries import LatticeSymmetry
+from jVMC_exp.global_defs import DT_SAMPLES
 
 from typing import Union
 
@@ -154,20 +155,8 @@ class RNN1DGeneral(nn.Module):
         logProb = self.log_coeffs_to_log_probs(self.outputDense(out))
         logProb = jnp.sum(logProb * x, axis=-1)
         return (newCarry, x), jnp.nan_to_num(logProb, nan=-35)
-
-    def sample(self, batchSize, key):
-        def generate_sample(key):
-            myKeys = jax.random.split(key, self.L)
-            _, sample = self.rnn_cell_sample(
-                (self.zero_carry, jnp.zeros(self.inputDim)),
-                (myKeys)
-            )
-            return sample[1]
-
-        keys = jax.random.split(key, batchSize)
-        return jax.vmap(generate_sample)(keys)
     
-    def sample_new(self, key):
+    def sample(self, key):
         myKeys = jax.random.split(key, self.L)
         _, sample = self.rnn_cell_sample(
             (self.zero_carry, jnp.zeros(self.inputDim)),
@@ -181,7 +170,7 @@ class RNN1DGeneral(nn.Module):
     def rnn_cell_sample(self, carry, x):
         newCarry, out = self.rnnCell(carry[0], carry[1])
         logCoeffs = self.log_coeffs_to_log_probs(self.outputDense(out))
-        sampleOut = jax.random.categorical(x, jnp.real(logCoeffs) / self.logProbFactor)
+        sampleOut = jax.random.categorical(x, jnp.real(logCoeffs) / self.logProbFactor).astype(DT_SAMPLES)
         return (newCarry, jax.nn.one_hot(sampleOut, self.inputDim)), (jnp.nan_to_num(logCoeffs, nan=-35), sampleOut)
 
 

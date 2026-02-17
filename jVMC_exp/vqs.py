@@ -144,7 +144,6 @@ class NQS:
         self._append_gradients_dict_single = lambda x, y: tree_map(lambda a, b: jnp.concatenate((a, 1.j * b)), x, y)
         self._append_gradients_dict = lambda x, y: tree_map(lambda a, b: jnp.concatenate((a[:, :], 1.j * b[:, :]), axis=1), x, y)
         self._append_gradients_dict_jsh = jax.jit(shard_map(self._append_gradients_dict, MESH, (DEVICE_SPEC, DEVICE_SPEC), DEVICE_SPEC))
-        self._sample_jsh = {}
 
     @property
     def parameters(self):
@@ -229,6 +228,7 @@ class NQS:
         if seed == None:
             seed = generate_seed()
         self._parameters = jax.device_put(self.net.init(jax.random.PRNGKey(seed), dummy_sample), REPLICATED_SHARDING)
+        self._out_dtype = self.net.apply(self._parameters, dummy_sample).dtype
         self._realParams = False
         self._holomorphic = False
         
@@ -237,7 +237,7 @@ class NQS:
             raise Exception("Network uses different parameter data types. This is not supported.")
         if dtypes[0] == np.single or dtypes[0] == np.double:
             self._realParams = True
-        self._dtype = dtypes[0]
+        self._param_dtype = dtypes[0]
 
         # check Cauchy-Riemann condition to test for holomorphicity
         def make_flat(t):
@@ -285,7 +285,7 @@ class NQS:
     def _act_on_non_zero(self, s_p, mat_els, *, parameters, batch_size):
         return jax.lax.cond(
             jnp.abs(mat_els) < 1e-6,
-            lambda: jnp.asarray(0, dtype=self._dtype), 
+            lambda: jnp.asarray(0, dtype=self._out_dtype), 
             lambda: self.apply_fun(parameters, s_p)
         )
 
@@ -350,37 +350,8 @@ class NQS:
                 return lambda p, x: jnp.real(self.apply_fun(p, x, method=self.net.eval_real)), self.parameters
         else:
             return lambda p, x: jnp.real(self.apply_fun(p, x)), self.parameters
-
+    
     def sample(self, numSamples, key=None, parameters=None):
-        if self._isGenerator:
-            params = self.parameters
-            if parameters is not None:
-                params = parameters
-
-            numSamples = distribute(numSamples, 'samples')
-            if key is None:
-                key = jax.random.PRNGKey(generate_seed())
-            elif len(key.shape) > 1:
-                key = key[0]
-            keys = jax.device_put(broadcast_split_key(key, numSamples), DEVICE_SHARDING)
-    
-            numSamplesStr = str(numSamples)
-            # check whether _get_samples is already compiled for given number of samples
-            if not numSamplesStr in self._sample_jsh:
-                self._sample_jsh[numSamplesStr] = jax.jit(
-                    shard_map(
-                        lambda p, n, k: self.net.apply(p, n, k, method=self.net.sample), 
-                        mesh=MESH,
-                        in_specs=(REPLICATED_SPEC,) * 2 + (DEVICE_SPEC,),
-                        out_specs=(DEVICE_SPEC,)
-                    )
-                )
-
-            return self._sample_jsh[numSamplesStr](params, numSamples, keys)
-
-        return None
-    
-    def sample_new(self, numSamples, key=None, parameters=None):
         if self._isGenerator:
             params = parameters or self.parameters
             key = format_key(key) 
@@ -394,7 +365,7 @@ class NQS:
     
     @sharded()
     def _sample(self, keys, *, parameters, batch_size):
-        return self.net.apply(parameters, keys, method=self.net.sample_new)
+        return self.net.apply(parameters, keys, method=self.net.sample)
  
     def update_parameters(self, deltaP):
         """

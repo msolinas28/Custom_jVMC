@@ -190,25 +190,18 @@ class RNN2DGeneral(nn.Module):
         logCoeff = self.log_coeffs_to_log_probs(out)
         return newCarry, (newCarry, logCoeff)
 
-    def sample(self, batchSize, key):
-        """sampler
-        """
+    def sample(self, key):
         # Scan directions for zigzag path
         direction = np.ones(self.L, dtype=np.int32)
         direction[1::2] = -1
         direction = jnp.asarray(direction)
 
-        def generate_sample(key):
-            myKeys = jax.random.split(key, self.L)
-            _, sample = self.rnn_cell_V_sample(
-                (self.zero_carry, jnp.zeros((self.L, self.inputDim))),
-                (myKeys, direction)
-            )
-            return sample
-
-        keys = jax.random.split(key, batchSize)
-
-        return jax.vmap(generate_sample)(keys)
+        myKeys = jax.random.split(key, self.L)
+        _, sample = self.rnn_cell_V_sample(
+            (self.zero_carry, jnp.zeros((self.L, self.inputDim))),
+            (myKeys, direction)
+        )
+        return sample
 
     @partial(nn.transforms.scan,
              variable_broadcast='params',

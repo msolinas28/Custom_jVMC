@@ -262,12 +262,7 @@ class AbstractMCSampler(ABC):
         return jax.vmap(lambda o, idx, s: (o[idx].dot(s.ravel()).reshape(s.shape) + 1) // 2, in_axes=(None, 0, 0))(orbit, orbit_indices, samples)
 
     def _get_samples_gen(self):
-        tmpKeys = random.split(self.key, 2 + self.numSamples)
-        self._key = tmpKeys[0]
-        sample_key = tmpKeys[1]
-        orbit_key = tmpKeys[2:]
-        orbit_key = jax.device_put(orbit_key, DEVICE_SHARDING)
-
+        self._key, sample_key, orbit_key = random.split(self.key, 3)
         samples = self.net.sample(self.numSamples, sample_key)
         numSamplesStr = str(self.numSamples)
 
@@ -276,15 +271,15 @@ class AbstractMCSampler(ABC):
                 shard_map(
                     self._randomize_samples,
                     mesh=MESH,
-                    in_specs=(DEVICE_SPEC,) * 2 + (REPLICATED_SPEC,),
-                    out_specs=DEVICE_SHARDING
+                    in_specs=(DEVICE_SPEC,) + (REPLICATED_SPEC,) * 2,
+                    out_specs=DEVICE_SPEC
                 )
             )
 
         if self.orbit is not None:
             samples = self._randomize_samples_jsh[numSamplesStr](samples, orbit_key, self.orbit)
         
-        return samples, self.net(samples), jnp.ones(samples.shape[:2]) / self.numSamples
+        return samples, self.net(samples), jnp.ones(self.numSamples) / self.numSamples
 
     def _get_samples_mcmc(self):
         self._distribute_sampling()
