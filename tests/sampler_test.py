@@ -59,7 +59,6 @@ def _test_sampling(net, test_class: unittest.TestCase, mu=2, log_prob_factor=0.5
     pmc = pmc / jnp.sum(pmc)
 
     # Compare histogram to exact probabilities
-    print(jnp.max(jnp.abs(pmc - pex)))
     test_class.assertTrue(jnp.max(jnp.abs(pmc - pex)) < 2e-3)
 
     if test_two_samplers:

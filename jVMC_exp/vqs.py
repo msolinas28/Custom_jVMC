@@ -13,7 +13,7 @@ from typing import Tuple
 
 from jVMC_exp.nets.sym_wrapper import avgFun_Coefficients_Exp, SymNet
 from jVMC_exp.nets.two_nets_wrapper import TwoNets
-from jVMC_exp.util.key_gen import generate_seed
+from jVMC_exp.util.key_gen import generate_seed, format_key
 from jVMC_exp.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING, REPLICATED_SHARDING
 from jVMC_exp.sharding_config import distribute, broadcast_split_key, sharded
 
@@ -379,6 +379,22 @@ class NQS:
             return self._sample_jsh[numSamplesStr](params, numSamples, keys)
 
         return None
+    
+    def sample_new(self, numSamples, key=None, parameters=None):
+        if self._isGenerator:
+            params = parameters or self.parameters
+            key = format_key(key) 
+            if len(key.shape) > 1:
+                key = key[0]
+            keys = jax.device_put(broadcast_split_key(key, numSamples), DEVICE_SHARDING)
+
+            return self._sample(keys, parameters=params, batch_size=self.batchSize)
+
+        return None
+    
+    @sharded()
+    def _sample(self, keys, *, parameters, batch_size):
+        return self.net.apply(parameters, keys, method=self.net.sample_new)
  
     def update_parameters(self, deltaP):
         """

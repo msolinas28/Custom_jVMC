@@ -10,4 +10,4 @@ def format_key(key):
         return jax.random.PRNGKey(int(key))
     
 def generate_seed():
-    return np.random.SeedSequence().entropy % int(1e18)
+    return np.random.SeedSequence().entropy % int(2 ** 32)

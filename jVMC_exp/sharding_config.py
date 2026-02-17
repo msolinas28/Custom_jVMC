@@ -130,7 +130,7 @@ class sharded:
             static_argnums=None,
             static_kwarg_names=(),
             use_vmap=True, vmap_in_axes=None, # If None, default to (0,) * num_args
-            in_specs=None, # If None, default to (DEVICE_SPEC,) * num_args
+            in_specs=None,                    # If None, default to (DEVICE_SPEC,) * num_args
             out_specs=DEVICE_SPEC
     ):
         self.static_argnums = static_argnums

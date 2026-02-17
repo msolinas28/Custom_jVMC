@@ -166,6 +166,14 @@ class RNN1DGeneral(nn.Module):
 
         keys = jax.random.split(key, batchSize)
         return jax.vmap(generate_sample)(keys)
+    
+    def sample_new(self, key):
+        myKeys = jax.random.split(key, self.L)
+        _, sample = self.rnn_cell_sample(
+            (self.zero_carry, jnp.zeros(self.inputDim)),
+            (myKeys)
+        )
+        return sample[1]
 
     @partial(nn.transforms.scan,
              variable_broadcast='params',
