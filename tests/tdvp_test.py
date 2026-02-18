@@ -149,7 +149,7 @@ class TestTimeEvolutionMCSampler(unittest.TestCase):
 
         # Set up exact sampler
         proposer = jVMC_exp.propose.SpinFlip()
-        mc_sampler = sampler.MCSampler(psi, proposer, 0, num_chains, num_samples, mu=1)
+        mc_sampler = sampler.MCSampler(psi, proposer, 123, num_chains, num_samples, mu=1)
 
         # Set up adaptive time stepper
         stepper = jVMCstepper.AdaptiveHeun(timeStep=1e-3, tol=1e-4)
@@ -189,6 +189,7 @@ class TestTimeEvolutionMCSampler(unittest.TestCase):
              1.666147269524912, 1.7664978782554912, 1.8564960156892512, 1.9334113379450693, 1.9951280521882777,
              2.0402054805651546, 2.067904337137255, 2.078178742959828, 2.071635856483114, 2.049466698269522, 2.049466698269522]
         )
+        
         self.assertTrue(np.max(np.abs(netZZ - refZZ[:len(netZZ)])) < 2e-2)
 
 
