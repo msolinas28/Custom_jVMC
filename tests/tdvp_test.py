@@ -93,7 +93,7 @@ class TestTimeEvolution(unittest.TestCase):
             psi.parameters, dt = stepper.step(0, tdvpEquation, psi.parameters_flat, hamiltonian=hamiltonian, psi=psi)
             t += dt
             times.append(t)
-            newMeas = measure({'E': (hamiltonian, {"t": t}), 'ZZ': ZZ}, psi, exactSampler)
+            newMeas = measure({'E': hamiltonian, 'ZZ': ZZ}, psi, exactSampler)
             obs.append([newMeas['E']['mean'], newMeas['ZZ']['mean']])
             pbar.update(float(dt))
 
@@ -104,7 +104,7 @@ class TestTimeEvolution(unittest.TestCase):
         self.assertTrue(np.max(obs[:, 0]) < 1e-3)
 
         # Check observable dynamics
-        zz = interp1d(np.array(times), obs[:, 1, 0])
+        zz = interp1d(np.array(times), obs[:, 1])
         refTimes = np.arange(0, 0.5, 0.05)
         netZZ = zz(refTimes)
         refZZ = np.array(
