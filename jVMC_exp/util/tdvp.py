@@ -251,7 +251,7 @@ class TDVP:
                     S2, F2 = self.get_tdvp_equation(Eloc2, sampleGradients2)
 
                     validation_tdvpErr = self._get_tdvp_error(update_1)
-                    update, solverResidual, _ = self.solve(Eloc, sampleGradients)
+                    update, solverResidual, _ = self.solve(self.Eloc, sampleGradients)
                     validation_residual = (jnp.linalg.norm(S2.dot(update_1) - F2) / jnp.linalg.norm(F2)) / solverResidual
 
                     self.crossValidationFactor_residual = validation_residual
@@ -259,6 +259,6 @@ class TDVP:
                     self.metaData["tdvp_residual_cross_validation_ratio"] = self.crossValidationFactor_residual
                     self.metaData["tdvp_error_cross_validation_ratio"] = self.crossValidationFactor_tdvpErr
 
-                    self.S, _ = self.get_tdvp_equation(Eloc, sampleGradients)
+                    self.S, _ = self.get_tdvp_equation(self.Eloc, sampleGradients)
 
         return update
