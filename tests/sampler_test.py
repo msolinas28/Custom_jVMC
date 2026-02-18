@@ -25,7 +25,7 @@ def _test_sampling(net, test_class: unittest.TestCase, mu=2, log_prob_factor=0.5
             0.19648707, 0.17103704, -0.15457255, 0.10954413, 0.13228065, -0.14935214,
             -0.09963073, 0.17610707, 0.13386381, -0.14836467]
     )
-    weights = jnp.concatenate([weights, weights]) if two_nets else weights
+    weights = weights
 
     # Set up variational wave function
     psi = NQS(net, L, num_samples, seed=1234)
