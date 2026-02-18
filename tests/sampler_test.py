@@ -95,7 +95,7 @@ def _test_autoreg_sampling(net, test_class: unittest.TestCase, L=(4,), mu=2, log
         mu=mu, logProbFactor=log_prob_factor
     )
 
-    psi.update_parameters(psi.parameters_flat)
+    psi.parameters = 2 * psi.parameters_flat
     exact_psi.parameters = psi.parameters
 
     # Compute exact probabilities

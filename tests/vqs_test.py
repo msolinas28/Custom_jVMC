@@ -25,7 +25,7 @@ def _general_test_grad(model, num_samples, L, test_class: unittest.TestCase):
     params = psi.parameters
     for j in range(G.shape[-1]):
         u = jnp.zeros(G.shape[-1], dtype=global_defs.DT_PARAMS_REAL).at[j].set(1)
-        psi.update_parameters(delta * u)
+        psi.parameters = delta * u + psi.parameters_flat
         psi1 = psi(s)
         psi.parameters = params
 

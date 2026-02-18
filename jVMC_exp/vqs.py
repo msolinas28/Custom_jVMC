@@ -152,11 +152,23 @@ class NQS:
     @parameters.setter
     def parameters(self, value):
         if hasattr(value, "shape"):
+            if len(value) != self.numParameters:
+                raise ValueError(
+                    f"The given number of parameters ({len(value)}) "
+                    f"does not match the existing one ({self.numParameters})"
+                )
             value = self._param_unflatten(value)
         if 'params' not in value.keys():
             value = {'params': value}
         if isinstance(self.parameters, flax.core.frozen_dict.FrozenDict):
             value = freeze(value)
+        if jax.tree_util.tree_structure(value) != jax.tree_util.tree_structure(self.parameters):
+            raise ValueError(
+                "Parameter tree structure mismatch.\n"
+                f"  Expected: {jax.tree_util.tree_structure(self.parameters)}\n"
+                f"  Received: {jax.tree_util.tree_structure(value)}"
+            )
+
         self._parameters = value
 
     @property
@@ -367,21 +379,6 @@ class NQS:
     def _sample(self, keys, *, parameters, batch_size):
         return self.net.apply(parameters, keys, method=self.net.sample)
  
-    def update_parameters(self, deltaP):
-        """
-        Update variational parameters.
-        
-        Sets new values of all variational parameters by adding given values.
-        If parameters are not initialized, parameters are set to ``deltaP``.
-        
-        Args:
-            * ``deltaP``: Values to be added to variational parameters.
-        """
-        if isinstance(deltaP, dict) and 'params' in deltaP.keys():
-            deltaP = deltaP['params']
-
-        self.parameters = jax.tree_util.tree_map(jax.lax.add, self.params, self._param_unflatten(deltaP)) 
-
     def _param_unflatten(self, P):
         """
         Reshape parameter array update according to net tree structure
