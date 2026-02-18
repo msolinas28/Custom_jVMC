@@ -152,10 +152,10 @@ class NQS:
     @parameters.setter
     def parameters(self, value):
         if hasattr(value, "shape"):
-            if len(value) != self.numParameters:
+            if len(value) != len(self.parameters_flat):
                 raise ValueError(
                     f"The given number of parameters ({len(value)}) "
-                    f"does not match the existing one ({self.numParameters})"
+                    f"does not match the existing one ({len(self.parameters_flat)})"
                 )
             value = self._param_unflatten(value)
         if 'params' not in value.keys():
