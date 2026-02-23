@@ -8,5 +8,6 @@ from . import sampler
 from . import stats
 from . import geometry
 from . import propose
+from . import optimizer
 
 from .version import __version__
