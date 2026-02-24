@@ -191,7 +191,7 @@ class AbstractOptimizer(ABC):
 class Evolution(AbstractOptimizer):
     def __init__(
             self, sampler, psi, stepper, imag_time: bool, rhsPrefactor,
-            output_manager = None, use_cross_valiadation = False, diagonalizeOnDevice=True,
+            output_manager=None, use_cross_valiadation=False, diagonalizeOnDevice=True,
             snrTol=2, pinvTol=1e-14, pinvCutoff=1e-8, diagonalShift=1e-3
         ):
         self.snrTol = snrTol
