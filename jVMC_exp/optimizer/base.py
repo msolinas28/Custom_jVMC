@@ -77,7 +77,7 @@ class AbstractOptimizer(ABC):
             if waitFor is not None:
                 waitFor.block_until_ready()
             if self.output_manager is not None:
-                self.output_manager(name)
+                self.output_manager.stop_timing(name)
 
         # Get sample
         start_timing("sampling")
@@ -120,17 +120,25 @@ class AbstractOptimizer(ABC):
         ):
         
         output_manager = self.output_manager or OutputManager("_tmp.h5")
-        observables = observables or {}
-        observables['energy'] = hamiltonian
+        measures = {}
 
         pbar = tqdm.tqdm(range(steps))
         for n in pbar:
             self.psi.parameters, _ = self.step(hamiltonian)
-            output_manager.write_observables(n, **measure(observables, self.psi, self.sampler))
+            
+            energy = dict(
+                mean = jnp.real(self.energy.mean).item(),
+                variance = jnp.real(self.energy.var).item(),
+                MC_error = jnp.real(self.energy.error_of_mean).item()
+            )
+            if observables is not None:
+                measures = measure(observables, self.psi, self.sampler)
+            output_manager.write_observables(n, energy=energy, **measures)
 
             pbar.set_postfix(E=f"{self.energy}")
   
         results = output_manager.to_dict()
+        output_manager.print_timings()
         if self.output_manager is None:
             os.remove("_tmp.h5")
 
@@ -143,15 +151,21 @@ class AbstractOptimizer(ABC):
             observables: Dict[str, ObservableEntry] | None = None
         ):
         output_manager = self.output_manager or OutputManager("_tmp.h5")
-        observables = observables or {}
-        observables['energy'] = hamiltonian
+        measures = {}
 
         pbar = tqdm.tqdm(total=t_max)
         t = 0
         while t < t_max:
             self.psi.parameters, dt = self.step(hamiltonian)
             t += dt
-            output_manager.write_observables(t, **measure(observables, self.psi, self.sampler))
+            energy = dict(
+                mean = jnp.real(self.energy.mean).item(),
+                variance = jnp.real(self.energy.var).item(),
+                MC_error = jnp.real(self.energy.error_of_mean).item()
+            )
+            if observables is not None:
+                measures = measure(observables, self.psi, self.sampler)
+            output_manager.write_observables(t, energy=energy, **measures)
 
             pbar.update(float(dt))
 
@@ -159,6 +173,7 @@ class AbstractOptimizer(ABC):
             # pbar.set_postfix(E=f"{self.energy}")
 
         results = output_manager.to_dict()
+        output_manager.print_timings()
         if self.output_manager is None:
             os.remove("_tmp.h5")
 
