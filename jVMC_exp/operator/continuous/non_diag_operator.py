@@ -4,6 +4,13 @@ import jax
 from jVMC_exp.operator.continuous.base import Operator
 from jVMC_exp.geometry import AbstractGeometry
 
+def grad_real_to_cpx(f, x):
+    grad_re = jax.grad(lambda t: jnp.real(f(t)))(x)
+    grad_im = jax.grad(lambda t: jnp.imag(f(t)))(x)
+    
+    return grad_re + 1j * grad_im
+
+
 def laplacian(grad_f):
     def lap(x):
         basis_vectors = jnp.eye(len(x))
@@ -38,7 +45,7 @@ class TotalKineticOperator(Operator):
     
     def _get_O_loc(self, s, apply_fun, parameters, kwargs):
         log_psi = lambda x: apply_fun(parameters, x)
-        grad_log_psi = jax.grad(log_psi) 
+        grad_log_psi = lambda x: grad_real_to_cpx(log_psi, x) 
         lap_log_psi = laplacian(grad_log_psi)(s)
         grad_log_psi = grad_log_psi(s)
         laplacian_psi = jnp.real(lap_log_psi + grad_log_psi * grad_log_psi.conj())

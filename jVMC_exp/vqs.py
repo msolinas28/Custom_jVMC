@@ -17,7 +17,19 @@ from jVMC_exp.util.key_gen import generate_seed, format_key
 from jVMC_exp.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING, REPLICATED_SHARDING
 from jVMC_exp.sharding_config import distribute, broadcast_split_key, sharded
 
+def flat_gradient_real(fun, params, arg):
+    """
+    Grad for fun: Real -> Real
+    """
+    g = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
+    g = tree_flatten(tree_map(lambda x: x.ravel(), g))[0]
+
+    return jnp.concatenate(g)
+
 def flat_gradient(fun, params, arg):
+    """
+    Grad for fun: Real -> Complex 
+    """
     gr = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
     gr = tree_flatten(tree_map(lambda x: x.ravel(), gr))[0]
     gi = grad(lambda p, y: jnp.imag(fun(p, y)))(params, arg)["params"]
@@ -25,7 +37,10 @@ def flat_gradient(fun, params, arg):
 
     return jnp.concatenate(gr) + 1.j * jnp.concatenate(gi)
 
-def flat_gradient_cpx_nonholo(fun, params, arg):
+def flat_gradient_nonholo(fun, params, arg):
+    """
+    Grad for fun: Complex -> Complex (not holomorphic) 
+    """
     gr = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
     gr = tree_flatten(tree_map(lambda x: [jnp.real(x.ravel()), -jnp.imag(x.ravel())], gr))[0]
     gi = grad(lambda p, y: jnp.imag(fun(p, y)))(params, arg)["params"]
@@ -33,15 +48,12 @@ def flat_gradient_cpx_nonholo(fun, params, arg):
 
     return jnp.concatenate(gr) + 1.j * jnp.concatenate(gi)
 
-def flat_gradient_real(fun, params, arg):
-    g = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
-    g = tree_flatten(tree_map(lambda x: x.ravel(), g))[0]
-
-    return jnp.concatenate(g)
-
 def flat_gradient_holo(fun, params, arg):
+    """
+    Grad for fun: Complex -> Complex (holomorphic) 
+    """
     g = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]
-    g = tree_flatten(tree_map(lambda x: [x.ravel(), 1.j*x.ravel()], g))[0]
+    g = tree_flatten(tree_map(lambda x: [x.ravel(), 1.j * x.ravel()], g))[0]
 
     return jnp.concatenate(g)
 
@@ -266,7 +278,7 @@ class NQS:
                 self._flat_gradient_function = flat_gradient
                 self._dict_gradient_function = dict_gradient
             else:
-                self._flat_gradient_function = flat_gradient_cpx_nonholo
+                self._flat_gradient_function = flat_gradient_nonholo
                 self._dict_gradient_function = dict_gradient_real
 
         self._paramShapes = [(p.size, p.shape) for p in tree_flatten(self.parameters["params"])[0]]

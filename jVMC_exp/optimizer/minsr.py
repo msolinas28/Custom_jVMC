@@ -25,12 +25,12 @@ class MinSR(AbstractOptimizer):
 
         super().__init__(sampler, psi, stepper, output_manager, use_cross_valiadation=False)
 
-    def solve(self, Eloc: SampledObs, gradients: SampledObs, holomorphic):
+    def solve(self, Eloc: SampledObs, gradients: SampledObs):
         """
         Uses the techique proposed in arXiv:2302.01941 to compute the updates.
         Efficient only if number of samples :math:`\\ll` number of parameters.
         """
-        if holomorphic:
+        if self.psi.holomorphic:
             T = gradients.tangent_kernel
             T_inv = jnp.linalg.pinv(T, rtol=self.pinvTol, hermitian=True)
             return - gradients._normalized_obs.conj().T @ T_inv @ Eloc._normalized_obs.squeeze()

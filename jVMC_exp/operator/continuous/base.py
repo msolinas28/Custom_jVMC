@@ -103,7 +103,6 @@ class Operator(AbstractOperator):
                     instructions.append(("LEAF", node))
 
         self._instructions = instructions
-        self._evaluate = partial(self._evaluate_flat, apply_fun=apply_fun)
         self._is_flattened = True
 
     @sharded(static_kwarg_names=('apply_fun',))
