@@ -74,9 +74,9 @@ class AbstractOptimizer(ABC):
                 self.output_manager.start_timing(name)
 
         def stop_timing(name, waitFor=None):
-            if waitFor is not None:
-                waitFor.block_until_ready()
             if self.output_manager is not None:
+                if waitFor is not None:
+                    waitFor.block_until_ready()
                 self.output_manager.stop_timing(name)
 
         # Get sample

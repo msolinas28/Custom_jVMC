@@ -48,6 +48,6 @@ class TotalKineticOperator(Operator):
         grad_log_psi = lambda x: grad_real_to_cpx(log_psi, x) 
         lap_log_psi = laplacian(grad_log_psi)(s)
         grad_log_psi = grad_log_psi(s)
-        laplacian_psi = jnp.real(lap_log_psi + grad_log_psi * grad_log_psi.conj())
+        laplacian_psi = lap_log_psi + grad_log_psi ** 2
 
         return - 0.5 * jnp.sum(laplacian_psi * self._inverse_mass)
