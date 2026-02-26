@@ -415,7 +415,7 @@ class MCSamplerCont(AbstractMCSampler):
     def __init__(self, net: NQS, updateProposer:None | AbstractProposeCont, key=None, numChains=32, numSamples=128, 
                  thermalizationSweeps=10, sweepSteps=None, initState=None, mu=2, logProbFactor=0.5):
         if sweepSteps is None:
-            sweepSteps = updateProposer.geometry.n_particles
+            sweepSteps = updateProposer.geometry.n_particles * updateProposer.geometry.n_dim
         super().__init__(net, updateProposer, key , numChains, numSamples, 
                          thermalizationSweeps, sweepSteps, initState, mu, logProbFactor)
         
