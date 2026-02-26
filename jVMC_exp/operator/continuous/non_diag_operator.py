@@ -50,4 +50,4 @@ class TotalKineticOperator(Operator):
         grad_log_psi = grad_log_psi(s)
         laplacian_psi = lap_log_psi + grad_log_psi ** 2
 
-        return - 0.5 * jnp.sum(laplacian_psi * self._inverse_mass)
+        return - 0.5 * jnp.sum(laplacian_psi * self._inverse_mass).real
