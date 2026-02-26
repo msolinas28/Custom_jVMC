@@ -88,7 +88,7 @@ class SampledObs():
     
     def __str__(self):
         if self._num_obs == 1:
-            return f"{self.mean.item():.4f} ± {self.error_of_mean.item():.4f} (Var = {self.var.item():.4f})"
+            return f"{self.mean.item():.4e} ± {self.error_of_mean.item():.4e} (Var = {self.var.item():.4e})"
         else:
             return f"SampledObs with {self._num_obs} features"
 

@@ -5,6 +5,7 @@ import numpy as np
 from functools import partial, cached_property
 from jax.experimental.shard_map import shard_map
 from abc import ABC, abstractmethod
+from typing import Tuple
 
 from jVMC_exp.nets.sym_wrapper import SymNet
 from jVMC_exp.util.key_gen import format_key
@@ -12,6 +13,8 @@ from jVMC_exp.vqs import NQS
 from jVMC_exp.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING
 from jVMC_exp.sharding_config import distribute, broadcast_split_key
 from jVMC_exp.propose import AbstractProposer, AbstractProposeCont
+from jVMC_exp.operator.base import AbstractOperator
+from jVMC_exp.stats import SampledObs
 from jVMC_exp.global_defs import DT_SAMPLES, DT_SAMPLES_CONT
 
 class AbstractMCSampler(ABC):
@@ -86,6 +89,9 @@ class AbstractMCSampler(ABC):
         self.numChains = numChains
 
         self.sampler_net, _ = self.net.get_sampler_net()
+        self._samples = None
+        self._logPsi = None
+        self._weights = None
 
     @property
     def thermalizationSweeps(self):
@@ -137,6 +143,63 @@ class AbstractMCSampler(ABC):
     def net(self):
         return self._net
     
+    @property
+    def samples(self):
+        return self._samples
+    
+    @property
+    def logPsi(self):
+        return self._logPsi
+    
+    @property
+    def weights(self):
+        return self._weights
+    
+    def __call__(
+            self, 
+            observable: AbstractOperator, 
+            num_samples: int | None=None,
+            resample: bool = False,
+            **obs_kwargs 
+    ) -> SampledObs:
+        """
+        Evaluate an observable using Monte Carlo samples of the current variational state.
+
+        This method draws (or reuses) samples from the underlying sampler and computes
+        the local estimator of the given observable. Resampling is triggered if no
+        samples are currently stored, if the requested number of samples differs from
+        the stored one, or if `resample=True`.
+
+        Parameters
+        ----------
+        observable : AbstractOperator
+
+        num_samples : int or None, optional
+            Number of Monte Carlo samples to draw. If None, the previously used
+            number of samples is reused.
+
+        resample : bool, optional
+            If True, forces resampling even if cached samples are available.
+
+        **obs_kwargs
+            Additional keyword arguments forwarded to
+            `observable.get_O_loc(...)`.
+
+        Returns
+        -------
+        SampledObs
+        """
+        needs_resample = (
+            self.samples is None
+            or (num_samples is not None and num_samples != self.numSamples)
+            or resample
+        )
+        if needs_resample:
+            self._samples, self._logPsi, self._weights = self.sample(num_samples)
+        raw_data = observable.get_O_loc(self.samples, self.net, logPsiS=self.logPsi, **obs_kwargs)
+
+        return SampledObs(raw_data, self.weights)
+  
     def reset(self, key=None):
         self.key = key
 
@@ -250,6 +313,10 @@ class AbstractMCSampler(ABC):
             self.numSamples = samples_tmp
         if parameters is not None:
             self.net.parameters = parameters_tmp
+
+        self._samples = configs
+        self._logPsi = logPsi
+        self._weights = p
 
         return configs, logPsi, p 
 
