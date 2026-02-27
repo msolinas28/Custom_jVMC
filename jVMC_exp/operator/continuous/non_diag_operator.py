@@ -10,7 +10,6 @@ def grad_real_to_cpx(f, x):
     
     return grad_re + 1j * grad_im
 
-
 def laplacian(grad_f):
     def lap(x):
         basis_vectors = jnp.eye(len(x))

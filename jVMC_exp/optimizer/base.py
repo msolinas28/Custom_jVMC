@@ -12,7 +12,7 @@ from jVMC_exp.vqs import NQS
 from jVMC_exp.sampler import AbstractMCSampler, ExactSampler
 from jVMC_exp.util.output_manager import OutputManager
 from jVMC_exp.operator.base import AbstractOperator
-from jVMC_exp.optimizer.stepper import AbstractStepper
+from jVMC_exp.optimizer.stepper import AbstractStepper, Euler
 from jVMC_exp.util import ObservableEntry, measure
 
 def _eigh_numpy(S):
@@ -118,12 +118,16 @@ class AbstractOptimizer(ABC):
             hamiltonian: AbstractOperator,
             observables: Dict[str, ObservableEntry] | None = None
         ):
-        
+        if not isinstance(self._stepper, Euler):
+            raise ValueError("For ground state search the stepper can only be " \
+                            f"an instance of jVMC.stepper.Euler, got {self._stepper}")
+
         output_manager = self.output_manager or OutputManager("_tmp.h5")
         measures = {}
 
         pbar = tqdm.tqdm(range(steps))
         for n in pbar:
+            self._stepper.update_dt(n)
             self.psi.parameters, _ = self.step(hamiltonian)
             
             energy = dict(

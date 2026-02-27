@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 from abc import ABC, abstractmethod
+from typing import Callable
 
 class AbstractStepper(ABC):
     @abstractmethod
@@ -11,8 +12,17 @@ class Euler:
     This class implements Euler integration
     '''
 
-    def __init__(self, timeStep=1e-3):
-        self.dt = timeStep
+    def __init__(self, timeStep: float | Callable=1e-3):
+        self._scheduler = None
+        if isinstance(timeStep, Callable):
+            self._scheduler = timeStep
+            self.dt = timeStep(0)
+        else:
+            self.dt = timeStep
+
+    def update_dt(self, step: int):
+        if self._scheduler is not None:
+            self.dt = self._scheduler(step)
 
     def step(self, t, f, yInitial, **rhsArgs):
         """ This function performs an integration time step.
