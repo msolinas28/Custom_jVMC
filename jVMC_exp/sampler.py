@@ -145,6 +145,9 @@ class AbstractMCSampler(ABC):
     
     @property
     def samples(self):
+        if self._samples is None:
+            self.sample()
+
         return self._samples
     
     @property
