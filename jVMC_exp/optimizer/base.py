@@ -118,15 +118,15 @@ class AbstractOptimizer(ABC):
             hamiltonian: AbstractOperator,
             observables: Dict[str, ObservableEntry] | None = None
         ):
-        if not isinstance(self._stepper, Euler):
-            raise ValueError("For ground state search the stepper can only be " \
-                            f"an instance of jVMC.stepper.Euler, got {self._stepper}")
+        if not hasattr(self._stepper, "update_dt"):
+            raise ValueError("For ground state search the stepper must " \
+                            f"implement a mehod called 'update_dt'")
 
         output_manager = self.output_manager or OutputManager("_tmp.h5")
         measures = {}
 
         pbar = tqdm.tqdm(range(steps))
-        for n in pbar:
+        for n in pbar: 
             self._stepper.update_dt(n)
             self.psi.parameters, _ = self.step(hamiltonian)
             
@@ -209,7 +209,7 @@ class AbstractOptimizer(ABC):
 
 class Evolution(AbstractOptimizer):
     def __init__(
-            self, sampler, psi, stepper, imag_time: bool, rhsPrefactor,
+            self, sampler, psi, stepper, imag_time: bool, make_real: bool,
             output_manager=None, use_cross_valiadation=False, diagonalizeOnDevice=True,
             snrTol=2, pinvTol=1e-14, pinvCutoff=1e-8, diagonalShift=1e-3
         ):
@@ -217,10 +217,10 @@ class Evolution(AbstractOptimizer):
         self.pinvTol = pinvTol
         self.pinvCutoff = pinvCutoff
         self.diagonalShift = diagonalShift
-        self.rhsPrefactor = rhsPrefactor
+        self.rhsPrefactor = 1 if imag_time else 1j
         self.diagonalizeOnDevice = diagonalizeOnDevice
-        self._lhs_trans_fn = real_fn if imag_time else imag_fn
-        self._rhs_trans_fn = lambda x: self._lhs_trans_fn((- rhsPrefactor) * x)
+        self._lhs_trans_fn = real_fn if make_real else imag_fn
+        self._rhs_trans_fn = lambda x: self._lhs_trans_fn((- self.rhsPrefactor) * x)
 
         super().__init__(sampler, psi, stepper, output_manager, use_cross_valiadation)
 

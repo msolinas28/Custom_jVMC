@@ -7,7 +7,7 @@ class SR(Evolution):
             snrTol=2, pinvTol=1e-14, pinvCutoff=1e-8, diagonalShift=0.001
         ):
         super().__init__(
-            sampler, psi, stepper, True, 1, 
+            sampler, psi, stepper, True, True, 
             output_manager, use_cross_valiadation, diagonalizeOnDevice, 
             snrTol, pinvTol, pinvCutoff, diagonalShift
         )

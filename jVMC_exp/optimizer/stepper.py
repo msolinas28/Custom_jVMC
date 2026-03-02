@@ -7,7 +7,7 @@ class AbstractStepper(ABC):
     def step(self, t, f, yInitial, **kwargs):
         pass
 
-class Euler:
+class Euler(AbstractStepper):
     ''' 
     This class implements Euler integration
     '''
@@ -55,7 +55,7 @@ class Euler:
 # end class Euler
 
 
-class Heun:
+class Heun(AbstractStepper):
     """ This class implements an adaptive second order consistent integration scheme.
 
     Initializer arguments:
@@ -108,7 +108,7 @@ class Heun:
 # end class Heun
 
 
-class AdaptiveHeun:
+class AdaptiveHeun(AbstractStepper):
     """ This class implements an adaptive second order consistent integration scheme.
 
     Initializer arguments:
