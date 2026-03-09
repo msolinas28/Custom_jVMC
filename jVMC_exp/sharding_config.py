@@ -1,10 +1,9 @@
 import jax
 import jax.numpy as jnp
-from jax.sharding import Mesh, NamedSharding
+from jax.sharding import Mesh, NamedSharding, AxisType
 from jax.experimental import mesh_utils, multihost_utils
 from jax.sharding import PartitionSpec as P
 from functools import partial, wraps
-from jax.experimental.shard_map import shard_map
 import os
 
 USE_DISTRIBUTED = os.environ.get('JVMC_USE_DISTRIBUTED', 'false').lower() == 'true'
@@ -181,7 +180,15 @@ class sharded:
         Create all versions of the method.
         """
         vmapd_fn = jax.vmap(base_fn, in_axes=(None,) + self.vmap_in_axes) if self.use_vmap else base_fn
-        jsh_fn = jax.jit(shard_map(vmapd_fn, MESH, (REPLICATED_SPEC,) + self.in_specs, self.out_specs), static_argnums=self.static_argnums)
+        jsh_fn = jax.jit(
+            jax.shard_map(
+                vmapd_fn, 
+                mesh=MESH, 
+                in_specs=(REPLICATED_SPEC,) + self.in_specs, 
+                out_specs=self.out_specs
+            ),
+            static_argnums=self.static_argnums
+        )
         batched_fn = partial(self._batched_wrapper, jsh_fn=jsh_fn)
         
         return {'single': base_fn, "vmapd": vmapd_fn, 'batched': batched_fn}

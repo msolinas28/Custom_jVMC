@@ -3,7 +3,6 @@ import jax.numpy as jnp
 import jax.random as random
 import numpy as np
 from functools import partial, cached_property
-from jax.experimental.shard_map import shard_map
 from abc import ABC, abstractmethod
 from typing import Tuple
 
@@ -231,7 +230,7 @@ class AbstractMCSampler(ABC):
             # vmap is over parallel MC chains
             return jax.vmap(lambda x: mu * self.sampler_net(p, x))(s)
         self._log_prob_fun_jsh = jax.jit(
-            shard_map(
+            jax.shard_map(
                 _log_prob_fun,
                 mesh=MESH,
                 in_specs=(DEVICE_SPEC,) + (REPLICATED_SPEC,) * 2,
@@ -338,7 +337,7 @@ class AbstractMCSampler(ABC):
 
         if numSamplesStr not in self._randomize_samples_jsh:
              self._randomize_samples_jsh[numSamplesStr] = jax.jit(
-                shard_map(
+                jax.shard_map(
                     self._randomize_samples,
                     mesh=MESH,
                     in_specs=(DEVICE_SPEC,) + (REPLICATED_SPEC,) * 2,
@@ -375,7 +374,7 @@ class AbstractMCSampler(ABC):
                         )
 
             self._get_samples_jsh[numSamplesStr] = jax.jit(
-                shard_map(
+                jax.shard_map(
                     get_samples,
                     mesh=MESH,
                     in_specs=(REPLICATED_SPEC,) + (DEVICE_SPEC,) * 5 + (self.updateProposer.arg_in_specs,),
@@ -514,9 +513,9 @@ class ExactSampler:
         self._lastNorm = 0.
 
         self.get_probabilities = jax.jit(
-            shard_map(
+            jax.shard_map(
                 lambda logPsi, lastNorm : jnp.exp(jnp.real(logPsi - lastNorm) / self.logProbFactor),
-                MESH,
+                mesh=MESH,
                 in_specs=(DEVICE_SPEC, REPLICATED_SPEC),
                 out_specs=DEVICE_SPEC
             )
@@ -562,7 +561,7 @@ class ExactSampler:
             return basis
 
         return jax.jit(
-            shard_map(partial(get_basis, n_sites=self.num_sites), MESH, in_specs=DEVICE_SPEC, out_specs=DEVICE_SPEC)
+            jax.shard_map(partial(get_basis, n_sites=self.num_sites), mesh=MESH, in_specs=DEVICE_SPEC, out_specs=DEVICE_SPEC)
         )(int_repr)[:self.num_states]
     
     def sample(self, parameters=None, numSamples=None):

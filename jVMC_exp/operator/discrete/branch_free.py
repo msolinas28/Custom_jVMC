@@ -5,6 +5,7 @@ import jax
 
 from jVMC_exp.operator.discrete.base import Operator as BaseOperator
 from jVMC_exp.global_defs import DT_OPERATORS_CPX
+from jVMC_exp.sharding_config import MESH
 
 def _has_kwargs(fun):
     sig = inspect.signature(fun)
@@ -189,6 +190,7 @@ class Operator(BaseOperator):
                 return (carry_sample_new, carry_matEl_new), None
             
             prefactor = jax.lax.switch(id, self.prefactorsC, kwargs)
+            prefactor = jax.lax.pcast(prefactor, MESH.axis_names, to='varying')
             (s_p, matEl), _ = jax.lax.scan(apply_operator, (s, prefactor), (idx, map, matEls, fermi))
 
             return s_p.reshape(sampleShape), matEl

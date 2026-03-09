@@ -14,10 +14,9 @@ license = { text = "MIT License" }
 keywords = ["Neural quantum states", "Variational Monte Carlo"]
 dependencies = ["numpy>=2", 
                 "openfermion", 
-                "jax>=0.4.12,<=0.7.2", 
-                "jaxlib>=0.4.12,<=0.7.2", 
-                "flax>=0.7.0", 
-                "mpi4py", 
+                "jax>=0.4.12,<=0.9.1", 
+                "jaxlib>=0.4.12,<=0.9.1", 
+                "flax>=0.7.0",
                 "h5py", 
                 "PyYAML", 
                 "matplotlib", 

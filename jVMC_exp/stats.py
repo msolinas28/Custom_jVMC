@@ -42,7 +42,7 @@ def _get_covar_var(centered_data_1, centered_data_2, weights):
 
     return covar_sqrd - jnp.abs(covar) ** 2
 
-@partial(jax.jit, static_argnums=(1,))
+@jax.jit(static_argnums=(1,))
 def _apply_and_project(data, apply_fn, projection):
     return jnp.matmul(projection, apply_fn(data)) 
 
