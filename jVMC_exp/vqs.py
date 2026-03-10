@@ -311,8 +311,8 @@ class NQS:
     def _act_on_non_zero(self, s_p, mat_els, *, parameters, batch_size):
         return jax.lax.cond(
             jnp.abs(mat_els) < 1e-8,
-            lambda: jax.lax.pcast(jnp.asarray(0, dtype=self._out_dtype), (), to='varying'),
-            lambda: jax.lax.pcast(self.apply_fun(parameters, s_p), (), to='varying')
+            lambda: jnp.asarray(0, dtype=self._out_dtype),
+            lambda: self.apply_fun(parameters, s_p)
         )
 
     def gradients(self, s):
