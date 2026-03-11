@@ -79,12 +79,7 @@ class Operator(AbstractOperator):
         logPsiS = psi(s) if logPsiS is None else logPsiS
 
         s_p, matEls = self.get_conn_elements(s, psi.batchSize, **kwargs)
-        logPsiS_p = psi._act_on_non_zero(
-            s_p.reshape((-1,) + psi.sampleShape),
-            matEls.flatten(),
-            parameters=psi.parameters,
-            batch_size=psi.batchSize
-        ).reshape(matEls.shape)
+        logPsiS_p = psi(s_p.reshape((-1, *psi.sampleShape))).reshape(matEls.shape)
 
         return self._get_O_loc(logPsiS, logPsiS_p, matEls, batch_size=psi.batchSize) 
     

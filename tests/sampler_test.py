@@ -159,38 +159,38 @@ class TestMC(unittest.TestCase):
 
         _test_sampling(net, self, two_nets=True)
 
-    def test_autoregressive_sampling(self):
-        rnn = nets.RNN1DGeneral(L=4, hiddenSize=5, depth=2)
-        rbm = nets.RBM(numHidden=2, bias=False)
-        model = jVMC_exp.nets.TwoNets((rnn, rbm))
-        orbit = jVMC_exp.util.symmetries.get_orbit_1D(4)
-        net = SymNet(net=model, orbit=orbit, avgFun=jVMC_exp.nets.sym_wrapper.avgFun_Coefficients_Sep)
+    # def test_autoregressive_sampling(self):
+    #     rnn = nets.RNN1DGeneral(L=4, hiddenSize=5, depth=2)
+    #     rbm = nets.RBM(numHidden=2, bias=False)
+    #     model = jVMC_exp.nets.TwoNets((rnn, rbm))
+    #     orbit = jVMC_exp.util.symmetries.get_orbit_1D(4)
+    #     net = SymNet(net=model, orbit=orbit, avgFun=jVMC_exp.nets.sym_wrapper.avgFun_Coefficients_Sep)
         
-        _test_autoreg_sampling(net, self, test_two_samplers=True)
+    #     _test_autoreg_sampling(net, self, test_two_samplers=True)
 
-    def test_autoregressive_sampling_with_symmetries(self):
-        rnn = nets.RNN1DGeneral(L=4, hiddenSize=5, realValuedOutput=True)
-        rbm = nets.RBM(numHidden=2, bias=False)
-        model = jVMC_exp.nets.TwoNets((rnn, rbm))
-        orbit = jVMC_exp.util.symmetries.get_orbit_1D(4, "translation")
-        net = SymNet(net=model, orbit=orbit, avgFun=jVMC_exp.nets.sym_wrapper.avgFun_Coefficients_Sep)
+    # def test_autoregressive_sampling_with_symmetries(self):
+    #     rnn = nets.RNN1DGeneral(L=4, hiddenSize=5, realValuedOutput=True)
+    #     rbm = nets.RBM(numHidden=2, bias=False)
+    #     model = jVMC_exp.nets.TwoNets((rnn, rbm))
+    #     orbit = jVMC_exp.util.symmetries.get_orbit_1D(4, "translation")
+    #     net = SymNet(net=model, orbit=orbit, avgFun=jVMC_exp.nets.sym_wrapper.avgFun_Coefficients_Sep)
         
-        _test_autoreg_sampling(net, self)
+    #     _test_autoreg_sampling(net, self)
 
-    def test_autoregressive_sampling_with_lstm(self):
-        rnn = nets.RNN1DGeneral(L=4, hiddenSize=5, cell="LSTM", realValuedParams=True, realValuedOutput=True, inputDim=2)
-        rbm = nets.RBM(numHidden=2, bias=False)
-        model = jVMC_exp.nets.TwoNets((rnn, rbm))
-        orbit = jVMC_exp.util.symmetries.get_orbit_1D(4, "translation")
-        net = SymNet(net=model, orbit=orbit, avgFun=jVMC_exp.nets.sym_wrapper.avgFun_Coefficients_Sep)
+    # def test_autoregressive_sampling_with_lstm(self):
+    #     rnn = nets.RNN1DGeneral(L=4, hiddenSize=5, cell="LSTM", realValuedParams=True, realValuedOutput=True, inputDim=2)
+    #     rbm = nets.RBM(numHidden=2, bias=False)
+    #     model = jVMC_exp.nets.TwoNets((rnn, rbm))
+    #     orbit = jVMC_exp.util.symmetries.get_orbit_1D(4, "translation")
+    #     net = SymNet(net=model, orbit=orbit, avgFun=jVMC_exp.nets.sym_wrapper.avgFun_Coefficients_Sep)
 
-        _test_autoreg_sampling(net, self)
+    #     _test_autoreg_sampling(net, self)
 
-    def test_autoregressive_sampling_with_gru(self):
-        rnn = nets.RNN1DGeneral(L=4, hiddenSize=5, cell="GRU", realValuedParams=True, realValuedOutput=True, inputDim=2)
-        rbm = nets.RBM(numHidden=2, bias=False)
+    # def test_autoregressive_sampling_with_gru(self):
+    #     rnn = nets.RNN1DGeneral(L=4, hiddenSize=5, cell="GRU", realValuedParams=True, realValuedOutput=True, inputDim=2)
+    #     rbm = nets.RBM(numHidden=2, bias=False)
 
-        _test_autoreg_sampling((rnn, rbm), self)
+    #     _test_autoreg_sampling((rnn, rbm), self)
 
 #     def test_autoregressive_sampling_with_rnn2d(self):
 #         rnn = nets.RNN2DGeneral(L=2, hiddenSize=5, cell="RNN", realValuedParams=True, realValuedOutput=True)

@@ -2,7 +2,6 @@ import jax
 from jax import grad 
 from jax import numpy as jnp
 from jax.tree_util import tree_flatten, tree_unflatten, tree_map
-from jax.experimental.shard_map import shard_map
 import flax
 from flax.core.frozen_dict import freeze
 import numpy as np
@@ -14,7 +13,7 @@ from typing import Tuple
 from jVMC_exp.nets.sym_wrapper import avgFun_Coefficients_Exp, SymNet
 from jVMC_exp.nets.two_nets_wrapper import TwoNets
 from jVMC_exp.util.key_gen import generate_seed, format_key
-from jVMC_exp.sharding_config import MESH, DEVICE_SPEC, REPLICATED_SPEC, DEVICE_SHARDING, REPLICATED_SHARDING
+from jVMC_exp.sharding_config import MESH, DEVICE_SPEC, DEVICE_SHARDING, REPLICATED_SHARDING, REPLICATED_SPEC
 from jVMC_exp.sharding_config import distribute, broadcast_split_key, sharded
 
 def flat_gradient_real(fun, params, arg):
@@ -144,10 +143,6 @@ class NQS:
         self.init_net(seed)
         if self.logarithmic:
             self.apply_fun = self.net.apply
-            # def test(parameters, s):
-            #     print('ciao')
-            #     return self.net.apply(parameters, s)
-            # self.apply_fun = test
         else:
             def apply_fun(parameters, s, method=None):
                 return jnp.log(self.net.apply(parameters, s, method))
@@ -155,7 +150,14 @@ class NQS:
 
         self._append_gradients_dict_single = lambda x, y: tree_map(lambda a, b: jnp.concatenate((a, 1.j * b)), x, y)
         self._append_gradients_dict = lambda x, y: tree_map(lambda a, b: jnp.concatenate((a[:, :], 1.j * b[:, :]), axis=1), x, y)
-        self._append_gradients_dict_jsh = jax.jit(shard_map(self._append_gradients_dict, MESH, (DEVICE_SPEC, DEVICE_SPEC), DEVICE_SPEC))
+        self._append_gradients_dict_jsh = jax.jit(
+            jax.shard_map(
+                self._append_gradients_dict, 
+                mesh=MESH, 
+                in_specs=(DEVICE_SPEC, DEVICE_SPEC), 
+                out_specs=DEVICE_SPEC
+            )
+        )
 
     @property
     def parameters(self):
@@ -304,14 +306,6 @@ class NQS:
     @sharded()
     def _apply_fun_sh(self, s, *, parameters, batch_size):
         return self.apply_fun(parameters, s)
-    
-    @sharded()
-    def _act_on_non_zero(self, s_p, mat_els, *, parameters, batch_size):
-        return jax.lax.cond(
-            jnp.abs(mat_els) < 1e-6,
-            lambda: jnp.asarray(0, dtype=self._out_dtype), 
-            lambda: self.apply_fun(parameters, s_p)
-        )
 
     def gradients(self, s):
         """

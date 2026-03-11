@@ -1,10 +1,9 @@
 import jax
 import jax.numpy as jnp
-from jax.sharding import Mesh, NamedSharding
+from jax.sharding import Mesh, NamedSharding, AxisType
 from jax.experimental import mesh_utils, multihost_utils
 from jax.sharding import PartitionSpec as P
 from functools import partial, wraps
-from jax.experimental.shard_map import shard_map
 import os
 
 USE_DISTRIBUTED = os.environ.get('JVMC_USE_DISTRIBUTED', 'false').lower() == 'true'
@@ -26,6 +25,9 @@ DEVICE_SHARDING = NamedSharding(MESH, P("devices"))
 REPLICATED_SHARDING = NamedSharding(MESH, P())
 DEVICE_SPEC = P("devices")
 REPLICATED_SPEC = P()
+
+def is_on_device(args, target_sharding=DEVICE_SHARDING):
+    return any(jax.tree_util.tree_map(lambda x: x.sharding == target_sharding, args))
 
 def distribute(global_size: int, label: str | None=None):
     """
@@ -181,7 +183,15 @@ class sharded:
         Create all versions of the method.
         """
         vmapd_fn = jax.vmap(base_fn, in_axes=(None,) + self.vmap_in_axes) if self.use_vmap else base_fn
-        jsh_fn = jax.jit(shard_map(vmapd_fn, MESH, (REPLICATED_SPEC,) + self.in_specs, self.out_specs), static_argnums=self.static_argnums)
+        jsh_fn = jax.jit(
+            jax.shard_map(
+                vmapd_fn, 
+                mesh=MESH, 
+                in_specs=(REPLICATED_SPEC,) + self.in_specs, 
+                out_specs=self.out_specs
+            ),
+            static_argnums=self.static_argnums
+        )
         batched_fn = partial(self._batched_wrapper, jsh_fn=jsh_fn)
         
         return {'single': base_fn, "vmapd": vmapd_fn, 'batched': batched_fn}
@@ -190,6 +200,10 @@ class sharded:
         """Wrapper for batched computation - assumes batch_size is divisible by number of devices."""
         num_samples = args[0].shape[0]
         append = (-num_samples) % batch_size
+        total_sumples = num_samples + append
+
+        if (total_sumples > batch_size) and is_on_device(args):
+            args = tuple(jax.device_put(a, REPLICATED_SHARDING) for a in args)
        
         batched_args = tuple(
             jnp.pad(a, [(0, append),] + [(0, 0)] * (len(a.shape) - 1)).reshape((-1, batch_size) + a.shape[1:]) 
