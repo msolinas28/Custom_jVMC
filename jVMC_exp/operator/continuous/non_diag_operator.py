@@ -12,11 +12,8 @@ def grad_real_to_cpx(f, x):
 
 def laplacian(grad_f):
     def lap(x):
-        basis_vectors = jnp.eye(len(x))
-        def hessian_diag_element(v):
-            return jnp.dot(jax.jvp(grad_f, (x,), (v,))[1], v)
-        # Vectorize across dimensions of grad_f
-        return jax.vmap(hessian_diag_element)(basis_vectors)
+        jac = jax.jacfwd(grad_f)(x)
+        return jnp.diag(jac)
     return lap
 
 class TotalKineticOperator(Operator):
