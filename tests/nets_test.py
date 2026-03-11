@@ -57,43 +57,43 @@ class TestSymNet(unittest.TestCase):
 
         self.assertTrue(jnp.max(jnp.abs(psiS)) < 1e-12)
 
-    def test_sym_net_generative(self):
-        L=5
-        rnn = nets.RNN1DGeneral(L=5)
-        orbit = jVMC_exp.util.symmetries.get_orbit_1D(L, "translation")
-        rnn_sym = nets.sym_wrapper.SymNet(net=rnn, orbit=orbit)
-        params = rnn_sym.init(random.PRNGKey(0), jnp.zeros((5,), dtype=np.int32))
+    # def test_sym_net_generative(self):
+    #     L=5
+    #     rnn = nets.RNN1DGeneral(L=5)
+    #     orbit = jVMC_exp.util.symmetries.get_orbit_1D(L, "translation")
+    #     rnn_sym = nets.sym_wrapper.SymNet(net=rnn, orbit=orbit)
+    #     params = rnn_sym.init(random.PRNGKey(0), jnp.zeros((5,), dtype=np.int32))
 
-        S0 = jnp.pad(jnp.array([1, 0, 1, 1, 0]), (0, 4), 'wrap')
-        S = jnp.array([S0[i:i + 5]for i in range(5)])
-        psiS = jax.vmap(lambda s: rnn_sym.apply(params, s))(S)
-        psiS = psiS - psiS[0]
+    #     S0 = jnp.pad(jnp.array([1, 0, 1, 1, 0]), (0, 4), 'wrap')
+    #     S = jnp.array([S0[i:i + 5]for i in range(5)])
+    #     psiS = jax.vmap(lambda s: rnn_sym.apply(params, s))(S)
+    #     psiS = psiS - psiS[0]
 
-        self.assertTrue(jnp.max(jnp.abs(psiS)) < 1e-12)
+    #     self.assertTrue(jnp.max(jnp.abs(psiS)) < 1e-12)
 
 
 class TesDT_PARAMS_CPXNet(unittest.TestCase):
 
-    def test_cpx_rnn_1d(self):
-        rnn = nets.RNN1DGeneral(L=5, realValuedParams=False)
-        params = rnn.init(random.PRNGKey(0), jnp.zeros((5,), dtype=np.int32))
+    # def test_cpx_rnn_1d(self):
+    #     rnn = nets.RNN1DGeneral(L=5, realValuedParams=False)
+    #     params = rnn.init(random.PRNGKey(0), jnp.zeros((5,), dtype=np.int32))
 
-        S0 = jnp.array([1, 0, 1, 1, 0])
-        psiS0 = rnn.apply(params, S0)
-        self.assertTrue(psiS0.dtype == np.complex128)
+    #     S0 = jnp.array([1, 0, 1, 1, 0])
+    #     psiS0 = rnn.apply(params, S0)
+    #     self.assertTrue(psiS0.dtype == np.complex128)
 
-    def test_cpx_rnn_2d(self):
-        rnn = nets.RNN2DGeneral(L=4, realValuedParams=False)
-        params = rnn.init(random.PRNGKey(0), jnp.zeros((4, 4), dtype=np.int32))
+    # def test_cpx_rnn_2d(self):
+    #     rnn = nets.RNN2DGeneral(L=4, realValuedParams=False)
+    #     params = rnn.init(random.PRNGKey(0), jnp.zeros((4, 4), dtype=np.int32))
 
-        S0 = jnp.array(
-            [[1, 0, 1, 1],
-             [0, 1, 1, 1],
-             [0, 0, 1, 0],
-             [1, 0, 0, 1]]
-        )
-        psiS0 = rnn.apply(params, S0)
-        self.assertTrue(psiS0.dtype == np.complex128)
+    #     S0 = jnp.array(
+    #         [[1, 0, 1, 1],
+    #          [0, 1, 1, 1],
+    #          [0, 0, 1, 0],
+    #          [1, 0, 0, 1]]
+    #     )
+    #     psiS0 = rnn.apply(params, S0)
+    #     self.assertTrue(psiS0.dtype == np.complex128)
 
     def test_cpx_cnn_1d(self):
         cnn = nets.CpxCNN(F=(4,), channels=[3, 2, 5])

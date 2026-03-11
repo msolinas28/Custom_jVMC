@@ -167,6 +167,7 @@ class Operator(BaseOperator):
         self.matElsC = jnp.array(matElsC)
         self.fermionicC = jnp.array(fermionicC, dtype=jnp.int32)
         self.diagC = jnp.array(diagonal, dtype=jnp.bool_)
+        self.nondiagC = ~self.diagC
         self.first_diag_idx = jnp.where(self.diagC)[0][0] if jnp.any(self.diagC) else jnp.zeros((len(self.diagC)), dtype=jnp.bool_)
         self.prefactorsC = prefactors
         self._is_compiled = True
@@ -198,9 +199,13 @@ class Operator(BaseOperator):
         s_p, mat_els = jax.vmap(proccess_string, in_axes=(None,) + (0,) * 5)(s, sting_ids, self.idxC, self.mapC, self.matElsC, self.fermionicC)
         
         mat_els_diag = jnp.sum(mat_els[self.diagC])
-        mat_els = mat_els.at[self.diagC].set(0).at[self.first_diag_idx].set(mat_els_diag)
+        s_p_nondiag = s_p[self.nondiagC]
+        mat_els_nondiag = mat_els[self.nondiagC]
 
-        return s_p, mat_els 
+        s_p_out = jnp.concatenate([s.reshape(1, *sampleShape), s_p_nondiag], axis=0)
+        mat_els_out = jnp.concatenate([mat_els_diag[None], mat_els_nondiag], axis=0)
+
+        return s_p_out, mat_els_out
     
     @classmethod
     def _create_composite(cls, O_1, O_2, label):

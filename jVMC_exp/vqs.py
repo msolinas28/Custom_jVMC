@@ -306,14 +306,6 @@ class NQS:
     @sharded()
     def _apply_fun_sh(self, s, *, parameters, batch_size):
         return self.apply_fun(parameters, s)
-    
-    @sharded(out_specs=REPLICATED_SPEC)
-    def _act_on_non_zero(self, s_p, mat_els, *, parameters, batch_size):
-        return jax.lax.cond(
-            jnp.abs(mat_els) < 1e-8,
-            lambda: jnp.asarray(0, dtype=self._out_dtype),
-            lambda: self.apply_fun(parameters, s_p)
-        )
 
     def gradients(self, s):
         """
