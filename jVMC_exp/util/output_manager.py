@@ -21,7 +21,7 @@ class OutputManager:
     def __init__(self, dataFileName, group="/", append=False):
         self._file_name = dataFileName
         self._current_group = "/"
-        self._append = 'w' if append else 'a'
+        self._append = 'a' if append else 'w'
 
         self.set_group(group)
         self._timings = {}
