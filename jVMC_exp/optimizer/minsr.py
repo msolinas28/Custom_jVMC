@@ -16,14 +16,14 @@ class MinSR(AbstractOptimizer):
         * ``diagonalizeOnDevice``: Choose whether to diagonalize :math:`S` on GPU or CPU.
     """
     def __init__(
-            self, sampler, psi, stepper, output_manager=None,
+            self, sampler, psi, stepper,
             pinvTol=1e-14, diagonalShift=1e-3, diagonalizeOnDevice=True
         ):
         self.pinvTol = pinvTol
         self.diagonalShift = diagonalShift
         self.diagonalizeOnDevice = diagonalizeOnDevice
 
-        super().__init__(sampler, psi, stepper, output_manager, use_cross_valiadation=False)
+        super().__init__(sampler, psi, stepper, use_cross_valiadation=False)
 
     def solve(self, Eloc: SampledObs, gradients: SampledObs):
         """

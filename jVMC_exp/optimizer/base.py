@@ -12,7 +12,7 @@ from jVMC_exp.vqs import NQS
 from jVMC_exp.sampler import AbstractMCSampler, ExactSampler
 from jVMC_exp.util.output_manager import OutputManager
 from jVMC_exp.operator.base import AbstractOperator
-from jVMC_exp.optimizer.stepper import AbstractStepper, Euler
+from jVMC_exp.optimizer.stepper import AbstractStepper
 from jVMC_exp.util import ObservableEntry, measure
 
 def _eigh_numpy(S):
@@ -30,19 +30,19 @@ def imag_fn(x):
 class AbstractOptimizer(ABC):
     def __init__(
             self, sampler:AbstractMCSampler, psi: NQS, stepper: AbstractStepper, 
-            output_manager: None | OutputManager=None, use_cross_valiadation: bool=False
+            use_cross_valiadation: bool=False
         ):
         self._sampler = sampler
         self._psi = psi
         self._stepper = stepper
-        self._output_manager = output_manager
         self.use_cross_valiadation = use_cross_valiadation
         self.meta_data = {}
+        self._output_manager = OutputManager()
 
     @property
     def output_manager(self):
         return self._output_manager
-    
+
     @property
     def sampler(self):
         return self._sampler
@@ -68,35 +68,30 @@ class AbstractOptimizer(ABC):
         """
         tmp_parameters = self.psi.parameters
         self.psi.parameters = parameters
-
-        def start_timing(name):
-            if self.output_manager is not None:
-                self.output_manager.start_timing(name)
-
+        
         def stop_timing(name, waitFor=None):
-            if self.output_manager is not None:
-                if waitFor is not None:
-                    waitFor.block_until_ready()
-                self.output_manager.stop_timing(name)
+            if waitFor is not None:
+                waitFor.block_until_ready()
+            self.output_manager.stop_timing(name)
 
         # Get sample
-        start_timing("sampling")
+        self.output_manager.start_timing("sampling")
         sampleConfigs, sampleLogPsi, p = self.sampler.sample(numSamples=numSamples)
         stop_timing("sampling", waitFor=sampleConfigs)
 
         # Evaluate local energy
-        start_timing("compute Eloc")
+        self.output_manager.start_timing("compute Eloc")
         Eloc = hamiltonian.get_O_loc(sampleConfigs, self.psi, LogPsiS=sampleLogPsi, t=t)
         stop_timing("compute Eloc", waitFor=Eloc)
         self.Eloc = SampledObs(Eloc, p)
 
         # Evaluate gradients
-        start_timing("compute gradients")
+        self.output_manager.start_timing("compute gradients")
         sampleGradients = self.psi.gradients(sampleConfigs)
         stop_timing("compute gradients", waitFor=sampleGradients)
         sampleGradients = SampledObs(sampleGradients, p)
 
-        start_timing("solve")
+        self.output_manager.start_timing("solve")
         update = self.solve(self.Eloc, sampleGradients)
         stop_timing("solve")
 
@@ -116,13 +111,11 @@ class AbstractOptimizer(ABC):
             self, 
             steps, 
             hamiltonian: AbstractOperator,
-            observables: Dict[str, ObservableEntry] | None = None
+            observables: Dict[str, ObservableEntry] | None = None,
         ):
         if not hasattr(self._stepper, "update_dt"):
             raise ValueError("For ground state search the stepper must " \
                             f"implement a mehod called 'update_dt'")
-
-        output_manager = self.output_manager or OutputManager("_tmp.h5")
         measures = {}
 
         pbar = tqdm.tqdm(range(steps))
@@ -137,24 +130,20 @@ class AbstractOptimizer(ABC):
             )
             if observables is not None:
                 measures = measure(observables, self.psi, self.sampler)
-            output_manager.write_observables(n, energy=energy, **measures)
+            self.output_manager.write_observables(n, energy=energy, **measures)
 
             pbar.set_postfix(E=f"{self.energy}")
   
-        results = output_manager.to_dict()
-        output_manager.print_timings()
-        if self.output_manager is None:
-            os.remove("_tmp.h5")
-
-        return results['observables']
+        self.output_manager.print_timings()
         
+        return self.output_manager.data["observables"]
+
     def time_evolution(
             self,
             t_max,
             hamiltonian: AbstractOperator,
             observables: Dict[str, ObservableEntry] | None = None
         ):
-        output_manager = self.output_manager or OutputManager("_tmp.h5")
         measures = {}
 
         pbar = tqdm.tqdm(total=t_max)
@@ -169,19 +158,16 @@ class AbstractOptimizer(ABC):
             )
             if observables is not None:
                 measures = measure(observables, self.psi, self.sampler)
-            output_manager.write_observables(t, energy=energy, **measures)
+            self.output_manager.write_observables(t, energy=energy, **measures)
 
             pbar.update(float(dt))
 
             # TODO: Decide what to print
             # pbar.set_postfix(E=f"{self.energy}")
 
-        results = output_manager.to_dict()
-        output_manager.print_timings()
-        if self.output_manager is None:
-            os.remove("_tmp.h5")
-
-        return results['observables']
+        self.output_manager.print_timings()
+        
+        return self.output_manager.data["observables"]
         
     def step(self, hamiltonian: AbstractOperator):
         """
@@ -210,7 +196,7 @@ class AbstractOptimizer(ABC):
 class Evolution(AbstractOptimizer):
     def __init__(
             self, sampler, psi, stepper, imag_time: bool, make_real: bool,
-            output_manager=None, use_cross_valiadation=False, diagonalizeOnDevice=True,
+            use_cross_valiadation=False, diagonalizeOnDevice=True,
             snrTol=2, pinvTol=1e-14, pinvCutoff=1e-8, diagonalShift=1e-3
         ):
         self.snrTol = snrTol
@@ -222,7 +208,7 @@ class Evolution(AbstractOptimizer):
         self._lhs_trans_fn = real_fn if make_real else imag_fn
         self._rhs_trans_fn = lambda x: self._lhs_trans_fn((- self.rhsPrefactor) * x)
 
-        super().__init__(sampler, psi, stepper, output_manager, use_cross_valiadation)
+        super().__init__(sampler, psi, stepper, use_cross_valiadation)
 
     def _get_tdvp_error(self, update):
         return jnp.abs(1. + jnp.real(update.dot(self._S0.dot(update)) - 2. * jnp.real(update.dot(self._F0))) / (self.energy.var + 1e-10))

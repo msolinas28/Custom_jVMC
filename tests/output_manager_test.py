@@ -3,7 +3,7 @@ import numpy as np
 import h5py
 import os
 
-from jVMC_exp.util.output_manager import OutputManager
+from jVMC_exp.util.output_manager_old import OutputManager
 
 class TestOutputManger(unittest.TestCase):
     def test_output(self):

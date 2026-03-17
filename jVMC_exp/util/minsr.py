@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from jVMC_exp.stats import SampledObs
 from jVMC_exp.vqs import NQS
 from jVMC_exp.sampler import AbstractMCSampler
-from jVMC_exp.util.output_manager import OutputManager
+from jVMC_exp.util.output_manager_old import OutputManager
 from jVMC_exp.operator.base import AbstractOperator
 
 class MinSR:

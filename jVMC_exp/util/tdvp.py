@@ -7,7 +7,7 @@ import jVMC_exp
 from jVMC_exp.stats import SampledObs
 from jVMC_exp.vqs import NQS
 from jVMC_exp.sampler import AbstractMCSampler
-from jVMC_exp.util.output_manager import OutputManager
+from jVMC_exp.util.output_manager_old import OutputManager
 
 def _eigh_numpy(S):
     e, V = np.linalg.eigh(np.array(S))

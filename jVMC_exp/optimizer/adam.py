@@ -6,11 +6,11 @@ from jVMC_exp.stats import SampledObs
 
 class Adam(AbstractOptimizer):
     def __init__(
-            self, sampler, psi, output_manager = None,
+            self, sampler, psi,
             learning_rate: float=1e-3, b1: float=0.9, b2: float=0.999, eps: float=1e-8
     ):
         stepper = Euler(1.)
-        super().__init__(sampler, psi, stepper, output_manager, False)
+        super().__init__(sampler, psi, stepper, False)
 
         self._adam = adam(learning_rate, b1, b2, eps)
         self._opt_state = self._adam.init(self.psi.parameters_flat)
