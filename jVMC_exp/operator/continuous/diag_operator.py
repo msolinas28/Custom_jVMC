@@ -33,3 +33,7 @@ class CoulombInteraction(Operator):
 
     def _get_O_loc(self, s, apply_fun, parameters, kwargs):
         return jnp.sum(self._interaction_charge / self.geometry.get_absolute_distance(s))
+    
+class ParticleDensity(Operator):
+    def __init__(self, geometry, grid_points):
+        super().__init__(geometry, True)
