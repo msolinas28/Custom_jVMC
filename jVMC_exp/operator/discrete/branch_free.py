@@ -304,7 +304,7 @@ class SigmaY(Operator):
 
     @property
     def mat_els(self):
-        return jnp.array([-1j, 1j], dtype=DT_OPERATORS_CPX)
+        return jnp.array([1j, -1j], dtype=DT_OPERATORS_CPX)
     
     @property
     def map(self):

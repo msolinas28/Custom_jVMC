@@ -12,7 +12,7 @@ if USE_DISTRIBUTED:
     try:
         jax.distributed.initialize()
         num_processes = jax.process_count()
-        num_devices = jax.device_count() 
+        num_devices = jax.device_count()
         print(f"JAX distributed initialized: {num_processes} processes and {num_devices} devices.")
     except Exception as e:
         print(f"Failed to initialize JAX distributed: {e}")
