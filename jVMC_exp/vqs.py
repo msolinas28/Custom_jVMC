@@ -323,7 +323,7 @@ class NQS:
         """
         return self._gradients_sh(s, parameters=self.parameters, batch_size=self.batchSize)
     
-    @sharded()
+    @sharded(automatic_sharding=True) # TODO: Set flag to False once jax problem is solved
     def _gradients_sh(self, s, *, parameters, batch_size):
         return self.flat_gradient_function(self.apply_fun, parameters, s)
     
@@ -334,7 +334,7 @@ class NQS:
             return self._append_gradients_dict_jsh(result, result)
         return result
     
-    @sharded()
+    @sharded(automatic_sharding=True) # TODO: Set flag to False once jax problem is solved
     def _gradients_dict_sh(self, s, *, parameters, batch_size):
         return self.dict_gradient_function(self.apply_fun, parameters, s)
 
@@ -343,7 +343,7 @@ class NQS:
         start = 0
         P = jnp.arange(2 * self.numParameters)
         for s in self.paramShapes:
-            # Here we need to add the treatment for the complex non-holomorphic case
+            # TODO: Here we need to add the treatment for the complex non-holomorphic case
             if self.holomorphic:
                 PTreeShape.append((P[start:start + 2 * s[0]]))
                 start += 2 * s[0]
