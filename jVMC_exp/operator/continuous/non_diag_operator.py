@@ -1,6 +1,5 @@
 import jax.numpy as jnp
 import jax
-from jax._src.ad_util import SymbolicZero, get_aval
 
 from jVMC_exp.operator.continuous.base import Operator
 from jVMC_exp.geometry import AbstractGeometry
