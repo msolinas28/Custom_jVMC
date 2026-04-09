@@ -56,6 +56,8 @@ class OutputManager:
         self._timings[name]["total"] += elapsed
         self._timings[name]["count"] += 1
 
+        return elapsed
+
     def add_timing(self, name: str, elapsed: float):
         if name not in self._timings:
             self._timings[name] = {"total": 0.0, "last_total": 0.0, "count": 0, "init": 0.0}

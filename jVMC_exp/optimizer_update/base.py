@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-import numpy as np
 from abc import ABC, abstractmethod
 import tqdm
 from typing import Dict
@@ -35,6 +34,7 @@ class AbstractOptimizer(ABC):
         self.meta_data = {}
         self._output_manager = OutputManager()
         self.energy = None
+        self._elapsed = 0
 
     @property
     def output_manager(self):
@@ -65,21 +65,22 @@ class AbstractOptimizer(ABC):
         """
         tmp_parameters = self.psi.parameters
         self.psi.parameters = parameters
+        self._elapsed = 0
         
         def stop_timing(name, waitFor=None):
             if waitFor is not None:
                 waitFor.block_until_ready()
-            self.output_manager.stop_timing(name)
+            return self.output_manager.stop_timing(name)
 
         # Get sample
         self.output_manager.start_timing("sampling")
         sampleConfigs, sampleLogPsi, p = self.sampler.sample(numSamples=numSamples)
-        stop_timing("sampling", waitFor=sampleConfigs)
+        self._elapsed += stop_timing("sampling", waitFor=sampleConfigs)
 
         # Evaluate local energy
         self.output_manager.start_timing("compute Eloc")
         Eloc = hamiltonian.get_O_loc(sampleConfigs, self.psi, LogPsiS=sampleLogPsi, t=t)
-        stop_timing("compute Eloc", waitFor=Eloc)
+        self._elapsed += stop_timing("compute Eloc", waitFor=Eloc)
         self.Eloc = SampledObs(Eloc, p)
 
         # Evaluate gradients
@@ -90,7 +91,7 @@ class AbstractOptimizer(ABC):
 
         self.output_manager.start_timing("solve")
         update = self.solve(self.Eloc, sampleGradients)
-        stop_timing("solve")
+        self._elapsed += stop_timing("solve")
 
         self.psi.parameters = tmp_parameters
 
@@ -100,7 +101,9 @@ class AbstractOptimizer(ABC):
                 self._update_meta_data()
 
                 if self.use_cross_valiadation:
+                    self.output_manager.start_timing("cross_validation")
                     self.cross_validation()
+                    self._elapsed += stop_timing("cross_validation")
 
         return update
     
@@ -109,29 +112,25 @@ class AbstractOptimizer(ABC):
             steps, 
             hamiltonian: AbstractOperator,
             observables: Dict[str, ObservableEntry] | None = None,
+            save_meta_data: bool = False
         ):
         if not hasattr(self._stepper, "update_dt"):
             raise ValueError("For ground state search the stepper must " \
                             f"implement a mehod called 'update_dt'")
-        measures = {}
 
         pbar = tqdm.tqdm(range(steps))
         for n in pbar: 
             self._stepper.update_dt(n)
             self.psi.parameters, _ = self.step(hamiltonian)
             
-            energy = dict(
-                mean = jnp.real(self.energy.mean).item(),
-                variance = jnp.real(self.energy.var).item(),
-                MC_error = jnp.real(self.energy.error_of_mean).item()
-            )
-            if observables is not None:
-                measures = measure(observables, self.psi, self.sampler)
-            self.output_manager.write_observables(n, energy=energy, **measures)
+            self._measure_and_store(n, observables, save_meta_data)
 
             pbar.set_postfix(E=f"{self.energy}")
   
         self.output_manager.print_timings()
+        
+        if save_meta_data:
+            return self.output_manager.data['observables'], self.output_manager.data['metadata']
         
         return self.output_manager.data["observables"]
 
@@ -139,30 +138,40 @@ class AbstractOptimizer(ABC):
             self,
             t_max,
             hamiltonian: AbstractOperator,
-            observables: Dict[str, ObservableEntry] | None = None
+            observables: Dict[str, ObservableEntry] | None = None,
+            save_meta_data: bool = False
         ):
-        measures = {}
 
         pbar = tqdm.tqdm(total=t_max)
         t = 0
+        tot_elapsed = 0
         while t < t_max:
             self.psi.parameters, dt = self.step(hamiltonian)
+
+            dt = float(dt)
+            if t + dt >= t_max:
+                dt = t_max - t
             t += dt
-            energy = dict(
-                mean = jnp.real(self.energy.mean).item(),
-                variance = jnp.real(self.energy.var).item(),
-                MC_error = jnp.real(self.energy.error_of_mean).item()
-            )
-            if observables is not None:
-                measures = measure(observables, self.psi, self.sampler)
-            self.output_manager.write_observables(t, energy=energy, **measures)
+            tot_elapsed += self._elapsed
+            rate = tot_elapsed / t
 
-            pbar.update(float(dt))
+            self.meta_data['dt'] = dt
+            self._measure_and_store(t, observables, save_meta_data)
 
-            # TODO: Decide what to print
-            # pbar.set_postfix(E=f"{self.energy}")
+            pbar.update(1)
+            pbar.set_postfix({
+                "t": f"{t:.4f}/{t_max}",
+                "dt": f"{dt:.2e}",
+                "ETA": f"{(t_max - t) * rate:.1f}s",
+                'Progress': f'{int(t / t_max * 100)}%',
+                'E': f"{self.energy}",
+            })
 
+        pbar.close()
         self.output_manager.print_timings()
+
+        if save_meta_data:
+            return self.output_manager.data['observables'], self.output_manager.data['metadata']
         
         return self.output_manager.data["observables"]
         
@@ -175,8 +184,13 @@ class AbstractOptimizer(ABC):
     @abstractmethod
     def solve(self, Eloc: SampledObs, gradients: SampledObs):
         '''
-        Return the update.
+        Return the update and write self.update and self._additional_info
         '''
+        self.update = None
+        self._additional_info = None
+
+    @abstractmethod
+    def cross_validation(self, Eloc: SampledObs, gradients: SampledObs):
         pass
 
     @abstractmethod
@@ -184,11 +198,22 @@ class AbstractOptimizer(ABC):
         '''
         Update the dictionary self.meta_data
         '''
-        pass
+        self.meta_data = {}
 
-    @abstractmethod
-    def cross_validation(self, Eloc: SampledObs, gradients: SampledObs):
-        pass
+    def _measure_and_store(self, t, observables, save_meta_data):
+        measures = {}
+        energy = dict(
+            mean = jnp.real(self.energy.mean).item(),
+            variance = jnp.real(self.energy.var).item(),
+            MC_error = jnp.real(self.energy.error_of_mean).item()
+        )
+
+        if observables is not None:
+            measures = measure(observables, self.psi, self.sampler)
+        self.output_manager.write_observables(t, energy=energy, **measures)
+
+        if save_meta_data:
+            self.output_manager.write_metadata(t, **self.meta_data)
 
 class Evolution(AbstractOptimizer):
     def __init__(
@@ -262,6 +287,6 @@ class Evolution(AbstractOptimizer):
     
     def _update_meta_data(self):
         self.meta_data = dict(
-            tdvp_error=self._get_tdvp_error(self.update), 
+            tdvp_error=self._get_tdvp_error(self.update).item(), 
             **self._additional_info
         )
