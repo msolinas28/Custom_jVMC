@@ -4,7 +4,7 @@ from jVMC_exp.stats import SampledObs
 from jVMC_exp.optimizer.base import AbstractOptimizer
 
 class MinSR(AbstractOptimizer):
-    """ 
+    """
     This class provides functionality for energy minimization via MinSR.
 
     See `[arXiv:2302.01941] <https://arxiv.org/abs/2302.01941>`_ for details.

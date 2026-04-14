@@ -206,5 +206,3 @@ class SampledObs():
         new_weights = self.weights[sl]
 
         return SampledObs(self.observations[sl], new_weights / jnp.sum(new_weights))
-
-

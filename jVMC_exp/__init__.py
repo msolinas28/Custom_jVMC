@@ -10,6 +10,6 @@ from . import geometry
 from . import propose
 from . import optimizer
 from . import solver
-from . import optimizer_update
+from . import objective_function
 
 from .version import __version__

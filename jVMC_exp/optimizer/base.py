@@ -1,11 +1,8 @@
 import jax
 import jax.numpy as jnp
-import numpy as np
 from abc import ABC, abstractmethod
-import warnings
 import tqdm
 from typing import Dict
-import os
 
 from jVMC_exp.stats import SampledObs
 from jVMC_exp.vqs import NQS
@@ -14,10 +11,8 @@ from jVMC_exp.util.output_manager import OutputManager
 from jVMC_exp.operator.base import AbstractOperator
 from jVMC_exp.optimizer.stepper import AbstractStepper
 from jVMC_exp.util import ObservableEntry, measure
-
-def _eigh_numpy(S):
-    e, V = np.linalg.eigh(np.array(S))
-    return jnp.array(e), jnp.array(V)
+from jVMC_exp.solver.base import AbstractSolver, SolverState
+from jVMC_exp.solver.pinv_snr import PinvSNR
 
 @jax.jit 
 def real_fn(x):
@@ -38,6 +33,8 @@ class AbstractOptimizer(ABC):
         self.use_cross_valiadation = use_cross_valiadation
         self.meta_data = {}
         self._output_manager = OutputManager()
+        self.energy = None
+        self._elapsed = 0
 
     @property
     def output_manager(self):
@@ -68,21 +65,22 @@ class AbstractOptimizer(ABC):
         """
         tmp_parameters = self.psi.parameters
         self.psi.parameters = parameters
+        self._elapsed = 0
         
         def stop_timing(name, waitFor=None):
             if waitFor is not None:
                 waitFor.block_until_ready()
-            self.output_manager.stop_timing(name)
+            return self.output_manager.stop_timing(name)
 
         # Get sample
         self.output_manager.start_timing("sampling")
         sampleConfigs, sampleLogPsi, p = self.sampler.sample(numSamples=numSamples)
-        stop_timing("sampling", waitFor=sampleConfigs)
+        self._elapsed += stop_timing("sampling", waitFor=sampleConfigs)
 
         # Evaluate local energy
         self.output_manager.start_timing("compute Eloc")
         Eloc = hamiltonian.get_O_loc(sampleConfigs, self.psi, LogPsiS=sampleLogPsi, t=t)
-        stop_timing("compute Eloc", waitFor=Eloc)
+        self._elapsed += stop_timing("compute Eloc", waitFor=Eloc)
         self.Eloc = SampledObs(Eloc, p)
 
         # Evaluate gradients
@@ -93,7 +91,7 @@ class AbstractOptimizer(ABC):
 
         self.output_manager.start_timing("solve")
         update = self.solve(self.Eloc, sampleGradients)
-        stop_timing("solve")
+        self._elapsed += stop_timing("solve")
 
         self.psi.parameters = tmp_parameters
 
@@ -103,7 +101,9 @@ class AbstractOptimizer(ABC):
                 self._update_meta_data()
 
                 if self.use_cross_valiadation:
+                    self.output_manager.start_timing("cross_validation")
                     self.cross_validation()
+                    self._elapsed += stop_timing("cross_validation")
 
         return update
     
@@ -112,29 +112,25 @@ class AbstractOptimizer(ABC):
             steps, 
             hamiltonian: AbstractOperator,
             observables: Dict[str, ObservableEntry] | None = None,
+            save_meta_data: bool = False
         ):
         if not hasattr(self._stepper, "update_dt"):
             raise ValueError("For ground state search the stepper must " \
                             f"implement a mehod called 'update_dt'")
-        measures = {}
 
         pbar = tqdm.tqdm(range(steps))
         for n in pbar: 
             self._stepper.update_dt(n)
             self.psi.parameters, _ = self.step(hamiltonian)
             
-            energy = dict(
-                mean = jnp.real(self.energy.mean).item(),
-                variance = jnp.real(self.energy.var).item(),
-                MC_error = jnp.real(self.energy.error_of_mean).item()
-            )
-            if observables is not None:
-                measures = measure(observables, self.psi, self.sampler)
-            self.output_manager.write_observables(n, energy=energy, **measures)
+            self._measure_and_store(n, observables, save_meta_data)
 
             pbar.set_postfix(E=f"{self.energy}")
   
         self.output_manager.print_timings()
+        
+        if save_meta_data:
+            return self.output_manager.data['observables'], self.output_manager.data['metadata']
         
         return self.output_manager.data["observables"]
 
@@ -142,34 +138,41 @@ class AbstractOptimizer(ABC):
             self,
             t_max,
             hamiltonian: AbstractOperator,
-            observables: Dict[str, ObservableEntry] | None = None
+            observables: Dict[str, ObservableEntry] | None = None,
+            save_meta_data: bool = False
         ):
-        measures = {}
 
         pbar = tqdm.tqdm(total=t_max)
         t = 0
         while t < t_max:
             self.psi.parameters, dt = self.step(hamiltonian)
+
+            dt = float(dt)
+            if t + dt >= t_max:
+                dt = t_max - t
             t += dt
-            energy = dict(
-                mean = jnp.real(self.energy.mean).item(),
-                variance = jnp.real(self.energy.var).item(),
-                MC_error = jnp.real(self.energy.error_of_mean).item()
-            )
-            if observables is not None:
-                measures = measure(observables, self.psi, self.sampler)
-            self.output_manager.write_observables(t, energy=energy, **measures)
 
-            pbar.update(float(dt))
+            self.meta_data['dt'] = dt
+            self._measure_and_store(t, observables, save_meta_data)
 
-            # TODO: Decide what to print
-            # pbar.set_postfix(E=f"{self.energy}")
+            pbar.update(1)
+            pbar.set_postfix({
+                "t": f"{t:.4f}/{t_max}",
+                "dt": f"{dt:.2e}",
+                "ETA": f"{(t_max - t) / dt * self._elapsed:.1f}s",
+                'Progress': f'{int(t / t_max * 100)}%',
+                'E': f"{self.energy}",
+            })
 
+        pbar.close()
         self.output_manager.print_timings()
+
+        if save_meta_data:
+            return self.output_manager.data['observables'], self.output_manager.data['metadata']
         
         return self.output_manager.data["observables"]
         
-    def step(self, hamiltonian: AbstractOperator):
+    def step(self, hamiltonian: AbstractOperator): # TODO: might need to add t as an optional arg to feed as first arg of the stepper
         """
         Returns new parameters and new time step (if changed).
         """
@@ -178,8 +181,13 @@ class AbstractOptimizer(ABC):
     @abstractmethod
     def solve(self, Eloc: SampledObs, gradients: SampledObs):
         '''
-        Return the update.
+        Return the update and write self.update and self._additional_info
         '''
+        self.update = None
+        self._additional_info = None
+
+    @abstractmethod
+    def cross_validation(self, Eloc: SampledObs, gradients: SampledObs):
         pass
 
     @abstractmethod
@@ -187,33 +195,52 @@ class AbstractOptimizer(ABC):
         '''
         Update the dictionary self.meta_data
         '''
-        pass
+        self.meta_data = {}
 
-    @abstractmethod
-    def cross_validation(self, Eloc: SampledObs, gradients: SampledObs):
-        pass
+    def _measure_and_store(self, t, observables, save_meta_data):
+        measures = {}
+        energy = dict(
+            mean = jnp.real(self.energy.mean).item(),
+            variance = jnp.real(self.energy.var).item(),
+            MC_error = jnp.real(self.energy.error_of_mean).item()
+        )
+
+        if observables is not None:
+            measures = measure(observables, self.psi, self.sampler)
+        self.output_manager.write_observables(t, energy=energy, **measures)
+
+        if save_meta_data:
+            self.output_manager.write_metadata(t, **self.meta_data)
 
 class Evolution(AbstractOptimizer):
     def __init__(
-            self, sampler, psi, stepper, imag_time: bool, make_real: bool,
-            use_cross_valiadation=False, diagonalizeOnDevice=True,
-            snrTol=2, pinvTol=1e-14, pinvCutoff=1e-8, diagonalShift=1e-3
+            self, sampler, psi, stepper, 
+            imag_time: bool, make_real: bool, use_cross_valiadation: bool=False, 
+            diagonal_shift: float=1e-3, solver: AbstractSolver=PinvSNR()
         ):
-        self.snrTol = snrTol
-        self.pinvTol = pinvTol
-        self.pinvCutoff = pinvCutoff
-        self.diagonalShift = diagonalShift
         self.rhsPrefactor = 1 if imag_time else 1j
-        self.diagonalizeOnDevice = diagonalizeOnDevice
         self._lhs_trans_fn = real_fn if make_real else imag_fn
         self._rhs_trans_fn = lambda x: self._lhs_trans_fn((- self.rhsPrefactor) * x)
+        self.diagonal_shift = diagonal_shift
+        self._solver = solver
+        
+        if solver._needs_dense_matrix:
+            self.get_tdvp_equation = self._get_tdvp_equation_dense
+        else:
+            pass # TODO: Implement this case
 
         super().__init__(sampler, psi, stepper, use_cross_valiadation)
+
+        self._solver_state = SolverState(
+            covar_grad_eloc=lambda: self._covar_grad_eloc,
+            rhs_trans_fn=self._rhs_trans_fn,
+            exact_sampler=isinstance(self.sampler, ExactSampler)
+        )
 
     def _get_tdvp_error(self, update):
         return jnp.abs(1. + jnp.real(update.dot(self._S0.dot(update)) - 2. * jnp.real(update.dot(self._F0))) / (self.energy.var + 1e-10))
     
-    def get_tdvp_equation(self, Eloc: SampledObs, gradients: SampledObs):
+    def _get_tdvp_equation_dense(self, Eloc: SampledObs, gradients: SampledObs):
         '''
         Returns left and right hand side of the TDVP equation
         '''
@@ -224,90 +251,39 @@ class Evolution(AbstractOptimizer):
         self._S0 = gradients.get_covar()
         S = self._lhs_trans_fn(self._S0)
 
-        if self.diagonalShift > 1e-10:
-            S = S + jnp.diag(self.diagonalShift * jnp.diag(S))
+        if self.diagonal_shift > 1e-10:
+            S = S + jnp.diag(self.diagonal_shift * jnp.diag(S))
 
         return S, F
     
-    def _transform_to_eigenbasis(self, S, F):
-        if self.diagonalizeOnDevice:
-            try:
-                self._ev, self._V = jnp.linalg.eigh(S)
-            except ValueError:
-                warnings.warn(
-                    "jax.numpy.linalg.eigh raised an exception. Falling back to " 
-                    "numpy.linalg.eigh for diagonalization.", RuntimeWarning
-                )
-            
-                self._ev, self._V = _eigh_numpy(S)
-        else:
-            self._ev, self._V = _eigh_numpy(S)
-
-        self._VtF = jnp.dot(jnp.transpose(jnp.conj(self._V)), F)
-
-    def _get_snr(self):
-        rho = self._covar_grad_eloc.transform(self._rhs_trans_fn, jnp.transpose(self._V))
-        self._rho_var = rho.var.ravel()
-
-        return jnp.sqrt(jnp.abs(rho._num_samples * (jnp.conj(self._VtF) * self._VtF) / (self._rho_var + 1e-10))).ravel()
-    
     def solve(self, Eloc: SampledObs, gradients: SampledObs):
-        # Get TDVP equation from MC data
-        self._S, F = self.get_tdvp_equation(Eloc, gradients)
+        self.S, F = self.get_tdvp_equation(Eloc, gradients)
         F.block_until_ready()
+        self.update, self._additional_info = self._solver(self.S, F, self._solver_state)
 
-        # Transform TDVP equation to eigenbasis and compute Signal to Noise Ratio
-        self._transform_to_eigenbasis(self._S, F) 
-        self._snr = self._get_snr()
-
-        # Discard eigenvalues below numerical precision
-        self._invEv = jnp.where(jnp.abs(self._ev / self._ev[-1]) > 1e-14, 1. / self._ev, 0.)
-
-        residual = 1.0
-        cutoff = 1e-2
-        F_norm = jnp.linalg.norm(F)
-        while residual > self.pinvTol and cutoff > self.pinvCutoff:
-            cutoff *= 0.8
-            # Set regularizer for singular value cutoff
-            regularizer = 1. / (1. + (max(cutoff, self.pinvCutoff) / jnp.abs(self._ev / self._ev[-1]))**6)
-
-            if not isinstance(self.sampler, ExactSampler):
-                # Construct a soft cutoff based on the SNR
-                regularizer *= 1. / (1. + (self.snrTol / self._snr)**6)
-
-            pinvEv = self._invEv * regularizer
-
-            residual = jnp.linalg.norm((pinvEv * self._ev - jnp.ones_like(pinvEv)) * self._VtF) / F_norm
-            self._residual = residual
-            self._update = jnp.real(jnp.dot(self._V, (pinvEv * self._VtF)))
-            self._pinv_cutoff = max(cutoff, self.pinvCutoff)
-
-        return self._update
+        return self.update
     
     def cross_validation(self, Eloc, gradients):
         Eloc1 = Eloc.get_subset(start=0, step=2)
         sampleGradients1 = gradients.get_subset(start=0, step=2)
         Eloc2 = Eloc.get_subset(start=1, step=2)
         sampleGradients2 = gradients.get_subset(start=1, step=2)
-        update_1, _, _ = self.solve(Eloc1, sampleGradients1)
+        update_1, _ = self.solve(Eloc1, sampleGradients1)
         S2, F2 = self.get_tdvp_equation(Eloc2, sampleGradients2)
 
         validation_tdvpErr = self._get_tdvp_error(update_1)
-        _, solverResidual, _ = self.solve(Eloc, gradients)
-        validation_residual = (jnp.linalg.norm(S2.dot(update_1) - F2) / jnp.linalg.norm(F2)) / solverResidual
+        _, info = self.solve(Eloc, gradients)
+        validation_residual = (jnp.linalg.norm(S2.dot(update_1) - F2) / jnp.linalg.norm(F2)) / info["residual"]
 
-        self.crossValidationFactor_residual = validation_residual
-        self.crossValidationFactor_tdvpErr = validation_tdvpErr / self.meta_data["tdvp_error"]
-        self.meta_data["tdvp_residual_cross_validation_ratio"] = self.crossValidationFactor_residual
-        self.meta_data["tdvp_error_cross_validation_ratio"] = self.crossValidationFactor_tdvpErr
+        crossValidationFactor_residual = validation_residual
+        crossValidationFactor_tdvpErr = validation_tdvpErr / self.meta_data["tdvp_error"]
+        self.meta_data["tdvp_residual_cross_validation_ratio"] = crossValidationFactor_residual
+        self.meta_data["tdvp_error_cross_validation_ratio"] = crossValidationFactor_tdvpErr
 
         self.S, _ = self.get_tdvp_equation(self.Eloc, gradients)
     
     def _update_meta_data(self):
-        self.meta_data = {
-            "tdvp_error": self._get_tdvp_error(self._update),
-            "tdvp_residual": self._residual,
-            "pinv_cutoff": self._pinv_cutoff,
-            "SNR": self._snr, 
-            "spectrum": self._ev,
-        }
+        self.meta_data = dict(
+            tdvp_error=self._get_tdvp_error(self.update).item(), 
+            **self._additional_info
+        )
