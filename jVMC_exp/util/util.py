@@ -78,10 +78,9 @@ def init_net(descr, dims, seed=0):
     return psi
 
 def measure(
-    observables: Dict[str, ObservableEntry], 
-    psi: NQS, 
+    observables: Dict[str, ObservableEntry],
     sampler: AbstractMCSampler, 
-    numSamples: int = None
+    num_samples: int = None
 ):
     ''' 
     Measure expectation values of operators.
@@ -100,16 +99,12 @@ def measure(
                     "energy": hamiltonian,
                     "magnetization": (mag_op, {"direction": "z", "t": 0.1})
                 }
-
-        psi: Variational wave function
         sampler: Monte Carlo sampler  
-        numSamples: Number of samples (optional)
+        num_samples: Number of samples (optional)
 
     Returns:
         Dictionary with "mean", "variance", "MC_error" for each observable.
     '''
-    samples, logPsiS, p = sampler.sample(numSamples=numSamples)
-
     result = {}
     for name, op in observables.items():
         kwargs = {}
@@ -119,7 +114,8 @@ def measure(
             kwargs = op[1]
             op = op[0]
 
-        Oloc = SampledObs(op.get_O_loc(samples, psi, logPsiS=logPsiS, **kwargs), p)
+        Oloc = sampler(op, num_samples=num_samples, **kwargs)
+        
         result[name] = {}
         result[name]["mean"] = jnp.real(Oloc.mean).item()
         result[name]["variance"] = jnp.real(Oloc.var).item()

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Tuple
+from chex import dataclass
 
 from jVMC_exp.stats import SampledObs
 from jVMC_exp.operator.base import AbstractOperator
@@ -7,13 +7,19 @@ from jVMC_exp.sampler import AbstractSampler
 from jVMC_exp.sharding_config import sharded
 from jVMC_exp.util.grads import pick_gradient
 
+@dataclass
+class ObjectiveFunctionOutput():
+    o_loc: SampledObs | None = None
+    grad: SampledObs | None = None
+    grad_log_psi: SampledObs | None = None
+
 class AbstractObjectiveFunction(ABC):
     @abstractmethod
-    def __call__(self, **kwargs) -> SampledObs:
+    def __call__(self, sampler: AbstractSampler, **kwargs) -> SampledObs:
         pass
 
     @abstractmethod
-    def value_and_grad(self, **kwargs) -> Tuple[SampledObs, SampledObs, tuple]:
+    def value_and_grad(self, sampler: AbstractSampler, **kwargs) -> ObjectiveFunctionOutput:
         pass
 
 class Observable(AbstractObjectiveFunction):
@@ -32,7 +38,7 @@ class Observable(AbstractObjectiveFunction):
         grad_log_psi = SampledObs(sampler.net.gradients(sampler.samples), sampler.weights)
         grad_obs = grad_log_psi.get_covar_obs(o_loc)
 
-        return o_loc, grad_obs, grad_log_psi
+        return ObjectiveFunctionOutput(o_loc=o_loc, grad=grad_obs, grad_log_psi=grad_log_psi)
 
 class Estimator(AbstractObjectiveFunction):
     def __init__(self, estimator_fn: callable):
@@ -56,7 +62,7 @@ class Estimator(AbstractObjectiveFunction):
         value = self(sampler)
         grad = self._get_estimator_grad(sampler.samples, parameters=sampler.net.parameters, batch_size=sampler.net.batchSize)
 
-        return value, grad, None
+        return ObjectiveFunctionOutput(o_loc=value, grad=grad)
 
     @sharded(automatic_sharding=True) # TODO: Set flag to False once jax problem is solved
     def _get_estimator_grad(self, samples, *, parameters, batch_size):
@@ -79,7 +85,7 @@ class ParametricObservable(AbstractObjectiveFunction):
         grad_log_psi = SampledObs(sampler.net.gradients(sampler.samples), sampler.weights)
 
         term1 = grad_log_psi.get_covar(o_loc).ravel()
-        _, term2, _ = self._estimator.value_and_grad(sampler)
-        grad = SampledObs(term1 + term2.observations, sampler.weights)
+        estimator_out = self._estimator.value_and_grad(sampler)
+        grad = SampledObs(term1 + estimator_out.grad.observations, sampler.weights)
 
-        return o_loc, grad, grad_log_psi
+        return ObjectiveFunctionOutput(o_loc=o_loc, grad=grad, grad_log_psi=grad_log_psi)

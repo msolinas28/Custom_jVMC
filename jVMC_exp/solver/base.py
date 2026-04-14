@@ -6,7 +6,7 @@ from jVMC_exp.stats import SampledObs
 
 @dataclass
 class SolverState():
-    covar_grad_eloc: Callable[[], SampledObs] | None = None
+    covar_grad_o_loc: Callable[[], SampledObs] | None = None
     rhs_trans_fn: Callable | None = None
     exact_sampler: bool = False
 

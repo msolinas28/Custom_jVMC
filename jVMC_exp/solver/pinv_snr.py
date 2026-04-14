@@ -1,10 +1,9 @@
-from jVMC_exp.solver.base import AbstractSolver
 import jax.numpy as jnp
 import warnings
 import numpy as np
 import jax
 
-from jVMC_exp.solver.base import SolverState
+from jVMC_exp.solver.base import SolverState, AbstractSolver
 
 def _eigh_numpy(S):
     e, V = np.linalg.eigh(np.array(S))
@@ -48,7 +47,7 @@ class PinvSNR(AbstractSolver):
     def __call__(self, S, F, solver_state: SolverState):
         # Transform equation to eigenbasis and compute Signal to Noise Ratio
         self._transform_to_eigenbasis(S, F)
-        rho = solver_state.covar_grad_eloc().transform(solver_state.rhs_trans_fn, jnp.transpose(self.last_eigenvectors))
+        rho = solver_state.covar_grad_o_loc().transform(solver_state.rhs_trans_fn, jnp.transpose(self.last_eigenvectors))
         snr = get_snr(self._VtF, rho.var.ravel(), rho._num_samples)
 
         # Discard eigenvalues below numerical precision
