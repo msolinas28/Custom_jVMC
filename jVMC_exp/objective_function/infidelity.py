@@ -6,7 +6,7 @@ from jVMC_exp.sampler import AbstractSampler
 from jVMC_exp.operator.discrete.base import AbstractOperator
 from jVMC_exp.operator.discrete.branch_free import IdentityOperator
 from jVMC_exp.stats import SampledObs
-from .base import AbstractObjectiveFunction
+from .base import AbstractObjectiveFunction, ObjectiveFunctionOutput
 
 class MovingAverage:
     """Simple moving average used for the adaptive control-variate coefficient."""
@@ -101,7 +101,13 @@ class Infidelity(AbstractObjectiveFunction):
         self._moving_average = MovingAverage(value)
         self._moving_average_width = value
 
-    def __call__(self, sampler: AbstractSampler, sample_ref_state: bool=True, *, control_variate_coeff=None, **kwargs):
+    def __call__(
+            self, sampler: AbstractSampler, 
+            sample_ref_state: bool=True, 
+            *, 
+            control_variate_coeff=None, 
+            **kwargs
+        ) -> SampledObs:
         r"""
         Compute the local infidelity estimator on ``samples``.
 
@@ -135,7 +141,9 @@ class Infidelity(AbstractObjectiveFunction):
         else:
             self._ref_f_loc = _weighted_mean(o_loc, self.reference_sampler.weights)
 
-        o_loc = self.operator.get_O_loc(sampler.samples, self.reference_sampler.net, logPsiS=sampler.logPsi)
+        o_loc = self.operator.get_O_loc(
+            sampler.samples, self.reference_sampler.net, logPsiS=sampler.logPsi
+        )
 
         if self.control_variate is not None:
             self._psi_f_loc, self._psi_f_loc_cv, self._psi_f2_loc_cv, self._psi_f_loc_f2_loc_cv = self._control_variate_fn(o_loc)
@@ -156,14 +164,20 @@ class Infidelity(AbstractObjectiveFunction):
 
         return SampledObs(infidelity_loc - correction, sampler.weights)
     
-    def value_and_grad(self, sampler: AbstractSampler, sample_ref_state: bool=True, **kwargs):
+    def value_and_grad(
+            self, 
+            sampler: AbstractSampler, 
+            sample_ref_state: bool=True, 
+            **kwargs
+        ) -> ObjectiveFunctionOutput:
         value = self(sampler, sample_ref_state=sample_ref_state, **kwargs)
         grad_log_psi = SampledObs(sampler.net.gradients(sampler.samples), sampler.weights)
         f_loc = SampledObs(self._psi_f_loc, sampler.weights)
         grad = jnp.squeeze(- (2.0 * grad_log_psi.get_covar(f_loc) * self._ref_f_loc))
+        grad = SampledObs(grad, sampler.weights)
 
-        return value, SampledObs(grad, sampler.weights), grad_log_psi
-        
+        return ObjectiveFunctionOutput(o_loc=value, grad=grad, grad_log_psi=grad_log_psi)
+    
     def _reset_cached_observables(self):
         self._ref_f_loc = None
         self._ref_f_loc_cv = None
