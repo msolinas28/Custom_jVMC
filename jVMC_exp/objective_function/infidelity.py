@@ -173,8 +173,8 @@ class Infidelity(AbstractObjectiveFunction):
         value = self(sampler, sample_ref_state=sample_ref_state, **kwargs)
         grad_log_psi = SampledObs(sampler.net.gradients(sampler.samples), sampler.weights)
         f_loc = SampledObs(self._psi_f_loc, sampler.weights)
-        grad = jnp.squeeze(- (2.0 * grad_log_psi.get_covar(f_loc) * self._ref_f_loc))
-        grad = SampledObs(grad, sampler.weights)
+        grad = grad_log_psi.get_covar_obs(f_loc)
+        grad._observations *= - 2.0 * self._ref_f_loc
 
         return ObjectiveFunctionOutput(o_loc=value, grad=grad, grad_log_psi=grad_log_psi)
     
