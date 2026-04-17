@@ -104,7 +104,7 @@ class AbstractOptimizer(ABC):
             self,
             steps,
             objective_function: AbstractObjectiveFunction,
-            stepper: AbstractStepper = Euler,
+            stepper: AbstractStepper = Euler(),
             observables: Dict[str, ObservableEntry] | None = None,
             save_meta_data: bool = False,
             **objective_function_kwargs
