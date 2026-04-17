@@ -139,7 +139,6 @@ class AdaptiveHeun(AbstractStepper):
         Returns:
             New value of :math:`y` and time step used :math:`\\Delta t`.
         """
-
         fe = 0.5
 
         dt = self.dt
