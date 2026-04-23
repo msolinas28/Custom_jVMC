@@ -33,6 +33,7 @@ class Operator(BaseOperator):
         self._idx = idx
         self._diag = diag
         self._fermionic = fermionic
+        self._site_ldim = {idx: ldim} if ldim is not None else {}
         super().__init__(ldim)
 
     @property
@@ -121,9 +122,10 @@ class Operator(BaseOperator):
     def _compile(self):
         strings = self._get_list_of_strings()
         max_length = max(len(s) for s in strings)
+        max_ldim = max(self._site_ldim.values())
         
         # Create identity operator for padding
-        IdOp = IdentityOperator(self.ldim, 0)
+        IdOp = IdentityOperator(max_ldim, 0)
         
         idxC = []
         mapC = []
@@ -145,8 +147,8 @@ class Operator(BaseOperator):
                 if k_rev >= 0:
                     op = op_string[k_rev]
                     idx_row.append(op.idx)
-                    map_row.append(op.map)
-                    matels_row.append(op.mat_els)
+                    map_row.append(jnp.pad(op.map, (0, max_ldim - op.ldim)))
+                    matels_row.append(jnp.pad(op.mat_els, (0, max_ldim - op.ldim)))
                     fermionic_row.append(1.0 if op.fermionic else 0.0)
                     d *= op.diag
                 else:
@@ -217,10 +219,13 @@ class Operator(BaseOperator):
     
 class CompositeOperator(Operator):
     def __init__(self, O_1: Operator, O_2: Operator, label: str):
-        if O_1.ldim != O_2.ldim:
-            raise ValueError(f'The {label} is implemented only for operators with the same local dimension')
-        super().__init__(O_1.ldim, None, None, None)
+        for site in O_1._site_ldim.keys():
+            if (site in O_2._site_ldim.keys()) and (O_1._site_ldim[site] != O_2._site_ldim[site]):
+                raise ValueError(f"Can't combine two operators with different local dimensions. "
+                                 f"Got ldim={O_1._site_ldim[site]} and ldim={O_2._site_ldim[site]} at site {site}")
+        super().__init__(None, None, None, None)
 
+        self._site_ldim = {**O_1._site_ldim, **O_2._site_ldim}
         self.O_1 = O_1
         self.O_2 = O_2
         self._label = label
@@ -238,7 +243,8 @@ class ScaledOperator(Operator):
         if callable(scalar) and (not _has_kwargs(scalar)):
             raise ValueError('Any callable that multiplies an operator has to have **kwargs in its argument.')
 
-        super().__init__(O.ldim, None, None, None)
+        super().__init__(None, None, None, None)
+        self._site_ldim = O._site_ldim
         self.scalar = scalar
         self.O = O
 
