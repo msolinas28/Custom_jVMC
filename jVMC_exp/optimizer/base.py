@@ -226,12 +226,8 @@ class Evolution(AbstractOptimizer):
         self._rhs_trans_fn = lambda x: self._lhs_trans_fn((- self.rhsPrefactor) * x)
         self.diagonal_shift = diagonal_shift
         self._solver = solver
-        
-        if solver._needs_dense_matrix:
-            self.get_tdvp_equation = self._get_tdvp_equation_dense
-        else:
-            pass # TODO: Implement this case
-
+        self._get_lhs = self._get_lhs_dense if solver._needs_dense_matrix else self._get_lhs_lazy
+       
         super().__init__(sampler, psi, use_cross_valiadation)
 
         self._solver_state = SolverState(
@@ -239,6 +235,9 @@ class Evolution(AbstractOptimizer):
             rhs_trans_fn=self._rhs_trans_fn,
             exact_sampler=isinstance(self.sampler, ExactSampler)
         )
+
+        self._F0 = None
+        self._S0 = None
 
     @property
     def solver(self):
@@ -249,30 +248,32 @@ class Evolution(AbstractOptimizer):
         return self._solver_state
     
     def get_update(self, objective_function_output: ObjectiveFunctionOutput):
-        self.S, F = self.get_tdvp_equation(
-            objective_function_output.grad,
-            objective_function_output.grad_log_psi
-        )
-        F.block_until_ready()
-        self.update, self._additional_info = self.solver(self.S, F, self.solver_state)
+        grad = objective_function_output.grad
+        grad_log_psi = objective_function_output.grad_log_psi
+        self._covar_grad_o_loc = grad
+
+        S = self._get_lhs(grad_log_psi)
+        F = self._get_rhs(grad)   
+        self.update, self._additional_info = self.solver(S, F, self.solver_state)
 
         return self.update
     
-    # TODO: Test if this actually works
+    # TODO: Test if this actually works (tdvp error has to be handled in a different way)
     def cross_validation(self, objective_function_output: ObjectiveFunctionOutput):
         o_loc_1 = objective_function_output.o_loc.get_subset(start=0, step=2)
         grad_1 = objective_function_output.grad.get_subset(start=0, step=2)
         grad_log_psi_1 = objective_function_output.grad_log_psi.get_subset(start=0, step=2)
-        o_loc_2 = objective_function_output.o_loc.get_subset(start=1, step=2)
         grad_2 = objective_function_output.grad.get_subset(start=1, step=2)
         grad_log_psi_2 = objective_function_output.grad_log_psi.get_subset(start=1, step=2)
 
         update_1 = self.get_update(o_loc_1, grad_1, grad_log_psi_1)
-        S2, F2 = self.get_tdvp_equation(o_loc_2, grad_2, grad_log_psi_2)
+        F2 = self._get_rhs(grad_2)
+        S2 = self._get_lhs(grad_log_psi_2)
 
         validation_tdvp_err = self._get_tdvp_error(update_1)
         _ = self.get_update(objective_function_output)
-        validation_residual = (jnp.linalg.norm(S2.dot(update_1) - F2) / jnp.linalg.norm(F2)) / self._additional_info["residual"]
+        Sv = S2(update_1) if callable(S2) else S2.dot(update_1)
+        validation_residual = (jnp.linalg.norm(Sv - F2) / jnp.linalg.norm(F2)) / self._additional_info["residual"]
 
         crossValidationFactor_residual = validation_residual
         crossValidationFactor_tdvpErr = validation_tdvp_err / self.meta_data["tdvp_error"]
@@ -280,24 +281,49 @@ class Evolution(AbstractOptimizer):
         self.meta_data["tdvp_error_cross_validation_ratio"] = crossValidationFactor_tdvpErr
 
     def _get_tdvp_error(self, update):
-        return jnp.abs(1. + jnp.real(update.dot(self._S0.dot(update)) - 2. * jnp.real(update.dot(self._F0))) / (self.o_loc.var + 1e-10))
-    
-    def _get_tdvp_equation_dense(self, grad: SampledObs, grad_log_psi: SampledObs):
-        '''
-        Returns left and right hand side of the TDVP equation
-        '''
-        self._covar_grad_o_loc = grad
-        self._F0 = - self.rhsPrefactor * grad.mean.ravel()
-        F = self._lhs_trans_fn(self._F0)
+        Sv = self._S0(update) if callable(self._S0) else self._S0.dot(update)
 
+        return jnp.abs(1. + jnp.real(update.dot(Sv) - 2. * jnp.real(update.dot(self._F0))) / (self.o_loc.var + 1e-10))
+    
+    def _get_lhs_dense(self, grad_log_psi: SampledObs):
+        '''
+        Returns left hand side of the TDVP equation
+        '''
         self._S0 = grad_log_psi.get_covar()
         S = self._lhs_trans_fn(self._S0)
 
-        if self.diagonal_shift > 1e-10:
+        if self.diagonal_shift > 1e-15:
             S = S + jnp.diag(self.diagonal_shift * jnp.diag(S))
 
-        return S, F
+        return S
     
+    def _get_lhs_lazy(self, grad_log_psi: SampledObs):
+        '''
+        Returns a function that computes the matrix vector product with the left hand side of the TDVP equation
+        '''
+        O = grad_log_psi._normalized_obs
+
+        def raw_matvec(v):
+            return (O.conj().T @ (O @ v))
+        self._S0 = raw_matvec
+
+        def matvec(v):
+            Sv = self._lhs_trans_fn(raw_matvec(v))
+            if self.diagonal_shift > 1e-15:
+                diag = jnp.sum(jnp.abs(O) ** 2, axis=0)
+                Sv = Sv + self.diagonal_shift * diag * v
+
+            return Sv
+
+        return matvec 
+    
+    def _get_rhs(self, grad: SampledObs):
+        self._F0 = - self.rhsPrefactor * grad.mean.ravel()
+        F = self._lhs_trans_fn(self._F0)
+        F.block_until_ready()
+
+        return F
+
     def _update_meta_data(self):
         self.meta_data = dict(
             tdvp_error=self._get_tdvp_error(self.update).item(), 
