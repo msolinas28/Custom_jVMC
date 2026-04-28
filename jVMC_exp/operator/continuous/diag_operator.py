@@ -45,3 +45,10 @@ class ParticleDensity(Operator):
 
     def _get_O_loc(self, s, apply_fun, parameters, kwargs):
         return self._count_fn(s)
+    
+class Monopole(Operator):
+    def __init__(self, geometry):
+        super().__init__(geometry, True)
+
+    def _get_O_loc(self, s, apply_fun, parameters, kwargs):
+        return jnp.sum(s**2)
