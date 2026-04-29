@@ -88,9 +88,11 @@ def measure(
 
     Args:
         observables: Dictionary with operator names as keys. Values can be:
-            - A single operator
-            - A single (operator, kwargs_dict) tuple  
+            - A single operator or a callable
+            - A single (operator or a callable, kwargs_dict) tuple  
             - A list of operators and/or (operator, kwargs_dict) tuples
+
+            The callable has to return a jVMC.stats.SampledObs
             
             Examples:
             
@@ -115,7 +117,10 @@ def measure(
             kwargs = op[1]
             op = op[0]
 
-        Oloc = sampler(op, num_samples=num_samples, **kwargs)
+        if isinstance(op, AbstractOperator):
+            Oloc = sampler(op, num_samples=num_samples, **kwargs)
+        else:
+            Oloc = op(**kwargs)
         
         result[name] = {}
         result[name]["mean"] = jnp.real(Oloc.mean).item()
