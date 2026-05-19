@@ -182,3 +182,17 @@ class AdaptiveHeun(AbstractStepper):
         self.dt = dt
 
         return yInitial + dy1, realDt
+    
+
+
+
+
+
+class ExplicitRK(ABC):
+    @abstractmethod
+    @property
+    def butcher_tableau(self):
+        pass
+
+    def _rk_step(self, t, f, y_initial, **rhs_kwargs):
+
