@@ -1,3 +1,4 @@
+from functools import cached_property
 import jax.numpy as jnp
 from abc import ABC, abstractmethod
 from typing import Callable
@@ -115,6 +116,12 @@ class AdaptiveHeun(AbstractStepper):
         self.tolerance = tol
         self.maxStep = maxStep
 
+        self._butcher_tableau = (
+            jnp.array([[0, 0], [1, 0]]),
+            jnp.array([0.5, 0.5]),
+            jnp.array([0, 1])
+        )
+
     def step(self, t, f, y, normFunction=jnp.linalg.norm, **rhsArgs):
         """ This function performs an integration time step.
 
@@ -140,27 +147,22 @@ class AdaptiveHeun(AbstractStepper):
             New value of :math:`y` and time step used :math:`\\Delta t`.
         """
         fe = 0.5
-
         dt = self.dt
 
-        yInitial = y.copy()
-
         while fe < 1.:
-            y = yInitial.copy()
             k0 = f(y, t, **rhsArgs, intStep=0)
-            y += dt * k0
-            k1 = f(y, t + dt, **rhsArgs, intStep=1)
-            dy0 = 0.5 * dt * (k0 + k1)
-
-            # now with half step size
-            y -= 0.5 * dt * k0
-            k10 = f(y, t + 0.5 * dt, **rhsArgs, intStep=2)
-            dy1 = 0.25 * dt * (k0 + k10)
-            y = yInitial + dy1
-            k01 = f(y, t + 0.5 * dt, **rhsArgs, intStep=3)
-            y += 0.5 * dt * k01
-            k11 = f(y, t + dt, **rhsArgs, intStep=4)
-            dy1 += 0.25 * dt * (k01 + k11)
+            dy0 = _get_rk_step(
+                self._butcher_tableau, 
+                t, f, y, dt, k0, **rhsArgs
+            )
+            dy1 = _get_rk_step(
+                self._butcher_tableau, 
+                t, f, y, 0.5 * dt, k0, 1, **rhsArgs
+            )
+            dy1 += _get_rk_step(
+                self._butcher_tableau, 
+                t + 0.5 * dt, f, y + dy1, 0.5 * dt, start_step=3, **rhsArgs
+            )
 
             # compute deviation
             updateDiff = normFunction(dy1 - dy0)
@@ -181,4 +183,45 @@ class AdaptiveHeun(AbstractStepper):
 
         self.dt = dt
 
-        return yInitial + dy1, realDt
+        return y + dy1, realDt
+
+def _get_rk_step(butcher_tableau, t, f, y0, dt, k0=None, start_step=0, **rhs_kwargs):
+    '''
+    The Butcher tableau of the explicit Runge-Kutta scheme has to be given as a tuple
+    (A, b, c).
+
+    The tableau defines the integration scheme through:
+
+        k_i = f(
+            y_n + dt * sum_j A[i,j] * k_j,
+            t_n + c[i] * dt
+        )
+
+    and the final update:
+
+        y_{n+1} = y_n + dt * sum_i b[i] * k_i
+
+    where:
+        * A : strictly lower-triangular matrix of stage coefficients
+        * b : vector of coefficients for the final weighted sum
+        * c : vector of time shifts for each stage
+
+    The tableau must follow the standard explicit RK convention:
+        * len(A) == len(b) == len(c)
+        * c[0] == 0
+        * A[0,:] == 0
+        * A[i,j] = 0 for j >= i
+    '''
+    A, b, c = butcher_tableau
+
+    K = [f(y0, t, **rhs_kwargs, intStep=i + start_step)] if k0 is None else [k0]
+    step = b[0] * K[0]
+
+    for i in range(1, len(b)):
+        y_stage = y0 + dt * sum(A[i][j] * K[j] for j in range(i))
+        t_stage = t + c[i] * dt
+
+        K.append(f(y_stage, t_stage, **rhs_kwargs, intStep=i + start_step))
+        step += b[i] * K[i]
+
+    return dt * step
