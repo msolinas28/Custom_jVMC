@@ -223,7 +223,8 @@ class AdaptiveHeun(AbstractStepper):
         return y + dy1, current_dt
     
 class RK23(AbstractStepper):
-    """ This class implements the explicit Runge-Kutta method of order 2(3) by Bogacki and Shampine.
+    """ 
+    This class implements the explicit Runge-Kutta method of order 2(3) by Bogacki and Shampine.
 
     Initializer arguments:
         * ``timeStep``: Initial time step (will be adapted automatically)
@@ -260,6 +261,56 @@ class RK23(AbstractStepper):
 
             current_dt = self.dt
             converged, self.dt = _adaptive_step_control(dy_low, dy_high, self.tolerance, self.maxStep, normFunction, self.dt, order=3)
-            self._k0 = K[3] if converged else None
+            self._k0 = K[-1] if converged else None
+
+        return y_new, current_dt
+    
+class RK45(AbstractStepper):
+    """ 
+    This class implements the explicit Runge-Kutta method of order 4(5) by Dormand and Prince.
+
+    Initializer arguments:
+        * ``timeStep``: Initial time step (will be adapted automatically)
+        * ``tol``: Tolerance for integration errors.
+        * ``maxStep``: Maximal allowed time step.
+    """
+
+    def __init__(self, timeStep=1e-3, tol=1e-8, maxStep=1):
+        self.dt = timeStep
+        self.tolerance = tol
+        self.maxStep = maxStep
+        self._k0 = None
+
+        self._butcher_tableau = (
+            jnp.array([
+                [0, 0, 0, 0, 0, 0], 
+                [0.2, 0, 0, 0, 0, 0], 
+                [3/40, 9/40, 0, 0, 0, 0],
+                [44/45, -56/15, 32/9, 0, 0, 0],
+                [19375/6561, -25460/2187, 64448/6561, -212/729, 0, 0],
+                [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656, 0]
+            ]),
+            jnp.array([35/384, 0, 500/1113, 125/192, -2187/6784, 11/84]),
+            jnp.array([0, 0.2, 3/10, 0.8, 8/9, 1])
+        )
+
+    def step(self, t, f, y, normFunction=jnp.linalg.norm, **rhsArgs):
+        converged = False
+
+        while not converged:
+            # k0 = self._k0 if self._k0 is not None else f(y, t, **rhsArgs, intStep=0) 
+            # TODO: at the moment this is needed to trigger intStep=0, but the above line saves a step
+            k0 = f(y, t, **rhsArgs, intStep=0)
+            dy_high, K = _get_rk_step(
+                self._butcher_tableau,
+                t, f, y, self.dt, k0, **rhsArgs
+            )
+            y_new = y + dy_high
+            K.append(f(y_new, t + self.dt , **rhsArgs, intStep=6))
+            dy_low = self.dt * (5179/57600 * K[0] + 7571/16695 * K[2] + 393/640 * K[3] - 92097/339200 * K[4] + 187/2100 * K[5] + 1/40 * K[6])
+
+            current_dt = self.dt
+            converged, self.dt = _adaptive_step_control(dy_low, dy_high, self.tolerance, self.maxStep, normFunction, self.dt, order=5)
+            self._k0 = K[-1] if converged else None
 
         return y_new, current_dt
