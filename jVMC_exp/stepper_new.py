@@ -32,7 +32,7 @@ def _get_rk_step(butcher_tableau, t, f, y0, dt, k0=None, start_step=0, **rhs_kwa
     '''
     A, b, c = butcher_tableau
 
-    K = [f(y0, t, **rhs_kwargs, intStep=i + start_step)] if k0 is None else [k0]
+    K = [f(y0, t, **rhs_kwargs, intStep=start_step)] if k0 is None else [k0]
     step = b[0] * K[0]
 
     for i in range(1, len(b)):
