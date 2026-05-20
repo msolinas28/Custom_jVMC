@@ -247,7 +247,9 @@ class RK23(AbstractStepper):
         converged = False
 
         while not converged:
-            k0 = self._k0 if self._k0 is not None else f(y, t, **rhsArgs, intStep=0)
+            # k0 = self._k0 if self._k0 is not None else f(y, t, **rhsArgs, intStep=0) 
+            # TODO: at the moment this is needed to trigger intStep=0, but the above line saves a step
+            k0 = f(y, t, **rhsArgs, intStep=0)
             dy_high, K = _get_rk_step(
                 self._butcher_tableau,
                 t, f, y, self.dt, k0, **rhsArgs
