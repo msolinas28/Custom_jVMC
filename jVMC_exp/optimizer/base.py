@@ -217,17 +217,17 @@ class Evolution(AbstractOptimizer):
     def __init__(
             self, sampler: AbstractSampler, psi: NQS, 
             imag_time: bool, make_real: bool, use_cross_valiadation: bool=False, 
-            diag_shift: float | Callable=1e-3, diag_scale: float | Callable=0., 
+            diagonalShift: float | Callable=1e-3, diagonalScale: float | Callable=0., 
             solver: AbstractSolver=PinvSNR()
         ):
         self.rhsPrefactor = 1 if imag_time else 1j
         self._lhs_trans_fn = lambda x: jnp.real(x) if make_real else lambda x: 1j * jnp.imag(x)
         self._rhs_trans_fn = lambda x: self._lhs_trans_fn((- self.rhsPrefactor) * x)
 
-        self._diag_shift_fn = diag_shift if isinstance(diag_shift, Callable) else lambda step: diag_shift
+        self._diag_shift_fn = diagonalShift if isinstance(diagonalShift, Callable) else lambda step: diagonalShift
         self.diag_shift = self._diag_shift_fn(0)
 
-        self._diag_scale_fn = diag_scale if isinstance(diag_scale, Callable) else lambda step: diag_scale
+        self._diag_scale_fn = diagonalScale if isinstance(diagonalScale, Callable) else lambda step: diagonalScale
         self.diag_scale = self._diag_scale_fn(0)
         
         warnings.warn(
