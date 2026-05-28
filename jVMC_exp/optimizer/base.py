@@ -221,7 +221,10 @@ class Evolution(AbstractOptimizer):
             solver: AbstractSolver=PinvSNR()
         ):
         self.rhsPrefactor = 1 if imag_time else 1j
-        self._lhs_trans_fn = lambda x: jnp.real(x) if make_real else lambda x: 1j * jnp.imag(x)
+        if psi.holomorphic:
+            self._lhs_trans_fn = lambda x: x
+        else:
+            self._lhs_trans_fn = lambda x: jnp.real(x) if make_real else 1j * jnp.imag(x)
         self._rhs_trans_fn = lambda x: self._lhs_trans_fn((- self.rhsPrefactor) * x)
 
         self._diag_shift_fn = diagonalShift if isinstance(diagonalShift, Callable) else lambda step: diagonalShift
