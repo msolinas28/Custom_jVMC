@@ -15,6 +15,35 @@ import jVMC_exp.operator.discrete.branch_free as op
 OperatorWithKwargs = tuple[AbstractOperator, dict[str, Any]]
 ObservableEntry = Union[AbstractOperator, OperatorWithKwargs]
 
+def remove_double(arr, params_shape):
+    new_arr = []
+    start = 0
+    for s in params_shape:
+        new_arr.append(arr[start:start + s[0]])
+        start += 2 * s[0]
+    
+    return jnp.concatenate(new_arr)
+
+def make_real_array(arr, params_shape):
+    new_arr = []
+    start = 0
+    for s in params_shape:
+        cmplx_arr = arr[start:start + s[0]]
+        new_arr.append(jnp.real(cmplx_arr))
+        new_arr.append(jnp.imag(cmplx_arr))
+        start += s[0]
+    
+    return jnp.concatenate(new_arr)
+
+def make_cmplx_array(arr, params_shape):
+    new_arr = []
+    start = 0
+    for s in params_shape:
+        new_arr.append((arr[start:start + s[0]] + 1.j * arr[start + s[0]:start + 2 * s[0]]))
+        start += 2 * s[0]
+    
+    return jnp.concatenate(new_arr)
+
 def get_iterable(x):
     if isinstance(x, collections.abc.Iterable):
         return x
