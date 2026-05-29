@@ -2,6 +2,8 @@ import jax.numpy as jnp
 import collections
 from typing import Dict, Union, Any
 import numpy as np
+from functools import partial
+import jax
 
 import jVMC_exp
 from jVMC_exp.global_defs import DT_OPERATORS_CPX
@@ -11,6 +13,7 @@ from jVMC_exp.vqs import NQS
 from jVMC_exp.sampler import AbstractMCSampler
 from jVMC_exp.operator.base import AbstractOperator
 import jVMC_exp.operator.discrete.branch_free as op
+from jVMC_exp.optimizer import TDVP
 
 OperatorWithKwargs = tuple[AbstractOperator, dict[str, Any]]
 ObservableEntry = Union[AbstractOperator, OperatorWithKwargs]
@@ -237,3 +240,16 @@ def matrix_to_jvmc_operator(
     if return_conjugate:
         return build_from(matrix), build_from(matrix.conj().T)
     return build_from(matrix)
+
+def s_norm_fn(opt: TDVP):
+    if opt.psi.holomorphic:
+        make_cmplx_array_fn = partial(make_cmplx_array, params_shape=opt.psi.paramShapes)
+
+        @jax.jit
+        def _norm_fn(v):
+            v = make_cmplx_array_fn(v)    
+            return jnp.abs(jnp.real(jnp.vdot(v, jnp.dot(opt._S0, v))))
+        
+        return _norm_fn
+
+    return lambda v: jnp.abs(jnp.real(jnp.vdot(v, jnp.dot(opt._S0, v))))

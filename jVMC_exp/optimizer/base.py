@@ -5,10 +5,12 @@ import tqdm
 from typing import Dict
 import warnings
 from typing import Callable
+from functools import partial
 
 from jVMC_exp.stats import SampledObs
 from jVMC_exp.vqs import NQS
 from jVMC_exp.sampler import AbstractSampler, ExactSampler
+from jVMC_exp.util import make_cmplx_array, make_real_array, remove_double
 from jVMC_exp.util.output_manager import OutputManager
 from jVMC_exp.stepper import AbstractStepper, Euler
 from jVMC_exp.util import ObservableEntry, measure
@@ -221,7 +223,10 @@ class Evolution(AbstractOptimizer):
             solver: AbstractSolver=PinvSNR()
         ):
         self.rhsPrefactor = 1 if imag_time else 1j
-        self._lhs_trans_fn = (lambda x: jnp.real(x)) if make_real else (lambda x: 1j * jnp.imag(x))
+        if psi.holomorphic:
+            self._lhs_trans_fn = lambda x: x
+        else:
+            self._lhs_trans_fn = (lambda x: jnp.real(x)) if make_real else (lambda x: 1j * jnp.imag(x))
         self._rhs_trans_fn = lambda x: self._lhs_trans_fn((- self.rhsPrefactor) * x)
 
         self._diag_shift_fn = diagonalShift if isinstance(diagonalShift, Callable) else lambda step: diagonalShift
@@ -229,6 +234,10 @@ class Evolution(AbstractOptimizer):
 
         self._diag_scale_fn = diagonalScale if isinstance(diagonalScale, Callable) else lambda step: diagonalScale
         self.diag_scale = self._diag_scale_fn(0)
+
+        self._make_cmplx_fn = jax.jit(partial(make_cmplx_array, params_shape=psi.paramShapes))
+        self._make_real_fn = jax.jit(partial(make_real_array, params_shape=psi.paramShapes))
+        self._remove_double_trans = jax.vmap(partial(remove_double, params_shape=psi.paramShapes))
         
         warnings.warn(
             "Naming convention changed: "
@@ -246,7 +255,8 @@ class Evolution(AbstractOptimizer):
         self._solver_state = SolverState(
             covar_grad_o_loc=lambda: self._covar_grad_o_loc,
             rhs_trans_fn=self._rhs_trans_fn,
-            exact_sampler=isinstance(self.sampler, ExactSampler)
+            exact_sampler=isinstance(self.sampler, ExactSampler),
+            holomorphic=self.psi.holomorphic
         )
 
         self._F0 = None
@@ -267,11 +277,17 @@ class Evolution(AbstractOptimizer):
     def get_update(self, objective_function_output: ObjectiveFunctionOutput):
         grad = objective_function_output.grad
         grad_log_psi = objective_function_output.grad_log_psi
+
+        if self.psi.holomorphic:
+            grad = grad.transform(self._remove_double_trans)
+            grad_log_psi = grad_log_psi.transform(self._remove_double_trans)
+
         self._covar_grad_o_loc = grad
 
         S = self._get_lhs(grad_log_psi)
         F = self._get_rhs(grad)   
-        self.update, self._additional_info = self.solver(S, F, self.solver_state)
+        update, self._additional_info = self.solver(S, F, self.solver_state)
+        self.update = self._make_real_fn(update) if self.psi.holomorphic else update
 
         return self.update
     
@@ -289,6 +305,7 @@ class Evolution(AbstractOptimizer):
 
         validation_tdvp_err = self._get_tdvp_error(update_1)
         _ = self.get_update(objective_function_output)
+        update_1 = self._make_cmplx_fn(update_1) if self.psi.holomorphic else update_1
         Sv = S2(update_1) if callable(S2) else S2.dot(update_1)
         validation_residual = (jnp.linalg.norm(Sv - F2) / jnp.linalg.norm(F2)) / self._additional_info["residual"]
 
@@ -298,6 +315,7 @@ class Evolution(AbstractOptimizer):
         self.meta_data["tdvp_error_cross_validation_ratio"] = crossValidationFactor_tdvpErr
 
     def _get_tdvp_error(self, update):
+        update = self._make_cmplx_fn(update) if self.psi.holomorphic else update
         Sv = self._S0(update) if callable(self._S0) else self._S0.dot(update)
 
         return jnp.abs(1. + jnp.real(update.dot(Sv) - 2. * jnp.real(update.dot(self._F0))) / (self.o_loc.var + 1e-10))
