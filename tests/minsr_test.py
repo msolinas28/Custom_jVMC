@@ -32,16 +32,16 @@ class TestGsSearch(unittest.TestCase):
 
             # Set up exact sampler
             exact_sampler = sampler.ExactSampler(psi, 2)
+            
+            loss_function = jVMC_exp.objective_function.Observable(H)
+            stepper = jVMC_exp.stepper.Euler(timeStep=learning_rate)
+            opt = jVMC_exp.optimizer.MinSR(exact_sampler, psi, pinvTol=1e-6, diagonalShift=1e-3)
 
-            tdvp_equation = jVMC_exp.util.MinSR(exact_sampler, pinvTol=1e-6, diagonalShift=1e-3)
-            stepper = jVMC_exp.util.Euler(timeStep=learning_rate)
+            opt.ground_state_search(num_steps, loss_function, stepper)
 
-            for _ in tqdm.tqdm(range(num_steps)):
-                psi.parameters, _ = stepper.step(0, tdvp_equation, psi.parameters_flat, hamiltonian=H, psi=psi)
-
-            obs = measure({"energy": H}, psi, exact_sampler)
-            print(jnp.abs((obs['energy']['mean'] - exE) / exE))
-            self.assertTrue(jnp.max(jnp.abs((obs['energy']['mean'] - exE) / exE)) < 1e-3)
+            E = exact_sampler(H)
+            print(jnp.abs((E.mean - exE) / exE))
+            self.assertTrue(jnp.max(jnp.abs((E.mean - exE) / exE)) < 1e-3)
 
 if __name__ == "__main__":
     unittest.main()
