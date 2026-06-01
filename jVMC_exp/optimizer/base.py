@@ -229,11 +229,8 @@ class Evolution(AbstractOptimizer):
             self._lhs_trans_fn = (lambda x: jnp.real(x)) if make_real else (lambda x: 1j * jnp.imag(x))
         self._rhs_trans_fn = lambda x: self._lhs_trans_fn((- self.rhsPrefactor) * x)
 
-        self._diag_shift_fn = diagonalShift if isinstance(diagonalShift, Callable) else lambda step: diagonalShift
-        self.diag_shift = self._diag_shift_fn(0)
-
-        self._diag_scale_fn = diagonalScale if isinstance(diagonalScale, Callable) else lambda step: diagonalScale
-        self.diag_scale = self._diag_scale_fn(0)
+        self.diag_scale = diagonalScale
+        self.diag_shift = diagonalShift
 
         self._make_cmplx_fn = jax.jit(partial(make_cmplx_array, params_shape=psi.paramShapes))
         self._make_real_fn = jax.jit(partial(make_real_array, params_shape=psi.paramShapes))
@@ -270,9 +267,27 @@ class Evolution(AbstractOptimizer):
     def solver_state(self):
         return self._solver_state
     
+    @property
+    def diag_scale(self):
+        return self._diag_scale
+    
+    @diag_scale.setter
+    def diag_scale(self, value):
+        self._diag_scale_fn = value if isinstance(value, Callable) else lambda step: value
+        self._diag_scale = self._diag_scale_fn(0)
+
+    @property
+    def diag_shift(self):
+        return self._diag_shift
+    
+    @diag_shift.setter
+    def diag_shift(self, value):
+        self._diag_shift_fn = value if isinstance(value, Callable) else lambda step: value
+        self._diag_shift = self._diag_shift_fn(0)
+
     def update_hyperparams(self, step):
-        self.diag_shift = self._diag_shift_fn(step)
-        self.diag_scale = self._diag_scale_fn(step)
+        self._diag_shift = self._diag_shift_fn(step)
+        self._diag_scale = self._diag_scale_fn(step)
     
     def get_update(self, objective_function_output: ObjectiveFunctionOutput):
         grad = objective_function_output.grad
