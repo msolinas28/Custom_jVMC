@@ -313,7 +313,6 @@ class Evolution(AbstractOptimizer):
 
         return self.update
     
-    # TODO: Test if this actually works (tdvp error has to be handled in a different way)
     def cross_validation(self, objective_function_output: ObjectiveFunctionOutput):
         residual = self.meta_data["residual"]
         tvp_error = self.meta_data["tdvp_error"]
