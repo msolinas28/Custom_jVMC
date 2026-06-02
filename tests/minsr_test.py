@@ -7,7 +7,6 @@ import jVMC_exp.nets as nets
 from jVMC_exp.vqs import NQS
 import jVMC_exp.operator.discrete as op
 import jVMC_exp.sampler as sampler
-from jVMC_exp.util import measure
 
 class TestGsSearch(unittest.TestCase):
     def test_gs_search_cpx(self):
@@ -18,7 +17,7 @@ class TestGsSearch(unittest.TestCase):
         
         batch_size = int(2 ** L)
         learning_rate = 1e-2
-        num_steps = 200
+        num_steps = 300
 
         for hx, exE in zip(hxs, exEs):
             # Set up variational wave function
@@ -40,8 +39,8 @@ class TestGsSearch(unittest.TestCase):
             opt.ground_state_search(num_steps, loss_function, stepper)
 
             E = exact_sampler(H)
-            print(jnp.abs((E.mean - exE) / exE))
-            self.assertTrue(jnp.max(jnp.abs((E.mean - exE) / exE)) < 1e-3)
+            print(jnp.abs((E.mean.item() - exE) / exE))
+            self.assertTrue(jnp.max(jnp.abs((E.mean.item() - exE) / exE)) < 1e-3)
 
 if __name__ == "__main__":
     unittest.main()
