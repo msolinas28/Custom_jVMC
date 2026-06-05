@@ -1,5 +1,4 @@
 import unittest
-import tqdm
 import jax.numpy as jnp
 
 import jVMC_exp
@@ -17,24 +16,24 @@ class TestGsSearch(unittest.TestCase):
         
         batch_size = int(2 ** L)
         learning_rate = 1e-2
-        num_steps = 300
+        num_steps = 200
 
         for hx, exE in zip(hxs, exEs):
             # Set up variational wave function
             rbm = nets.CpxRBM(numHidden=3, bias=False)
             psi = NQS(rbm, L, batch_size, seed=1234)
-
+            print(psi.holomorphic)
             # Set up hamiltonian for ground state search
             H = 0
             for l in range(L):
                 H += J * op.SigmaZ(l) * op.SigmaZ((l + 1) % L) + hx * op.SigmaX(l)
 
             # Set up exact sampler
-            exact_sampler = sampler.ExactSampler(psi, 2)
+            exact_sampler = sampler.ExactSampler(psi)
             
             loss_function = jVMC_exp.objective_function.Observable(H)
             stepper = jVMC_exp.stepper.Euler(timeStep=learning_rate)
-            opt = jVMC_exp.optimizer.MinSR(exact_sampler, psi, pinvTol=1e-6, diagonalShift=1e-3)
+            opt = jVMC_exp.optimizer.MinSR(exact_sampler, psi, pinv_tol=1e-6, diagonalShift=1e-3)
 
             opt.ground_state_search(num_steps, loss_function, stepper)
 
