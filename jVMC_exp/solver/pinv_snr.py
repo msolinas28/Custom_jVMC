@@ -70,6 +70,7 @@ class PinvSNR(AbstractSolver):
             residual=residual.item(),
             pinv_cutoff=max(cutoff, self.pinv_cutoff),
             snr=snr,
+            condition_number=(self.last_eigenvalues[-1] / self.last_eigenvalues[0]).item()
             # spectrum=self.last_eigenvalues
         )
 
