@@ -16,13 +16,13 @@ class TestGsSearch(unittest.TestCase):
         
         batch_size = int(2 ** L)
         learning_rate = 1e-2
-        num_steps = 200
+        num_steps = 300
 
         for hx, exE in zip(hxs, exEs):
             # Set up variational wave function
             rbm = nets.CpxRBM(numHidden=3, bias=False)
             psi = NQS(rbm, L, batch_size, seed=1234)
-            print(psi.holomorphic)
+
             # Set up hamiltonian for ground state search
             H = 0
             for l in range(L):
