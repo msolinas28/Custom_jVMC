@@ -279,19 +279,15 @@ class NQS:
         return self._numParameters
         
     def init_net(self, seed: int | None):
-        dummy_sample = jnp.ones(self.sampleShape)
         if seed == None:
             seed = generate_seed()
-        self._parameters = jax.device_put(self.net.init(jax.random.PRNGKey(seed), dummy_sample), REPLICATED_SHARDING)
-        
+
         # TODO: this is fragile and is only needed for holo check. 
         # Holo should be given by the user at init to make it more genera
         # Otherwise another optional function, which would take an input state as well, could be used to check holo
-        out = self.net.apply(self._parameters, dummy_sample)
-        if not jnp.isfinite(out):
-            dummy_sample = jax.random.normal(jax.random.PRNGKey(seed), self.sampleShape)
-            out = self.net.apply(self._parameters, dummy_sample)
-        self._out_dtype = out.dtype
+        dummy_sample = jax.random.normal(jax.random.PRNGKey(seed), self.sampleShape)
+        self._parameters = jax.device_put(self.net.init(jax.random.PRNGKey(seed), dummy_sample), REPLICATED_SHARDING)
+        self._out_dtype = self.net.apply(self._parameters, dummy_sample).dtype
         
         self._realParams, self._holomorphic, self._flat_gradient_function, self._dict_gradient_function = pick_gradient(
             self.apply_fun, self.parameters, dummy_sample
