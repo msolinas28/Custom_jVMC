@@ -64,7 +64,7 @@ class MinSR(AbstractOptimizer):
         pass
 
 
-###### TODO: test if it works on bigger systems
+###### TODO: still giving problems on bigger systems
 
 # import jax
 # import jax.numpy as jnp
