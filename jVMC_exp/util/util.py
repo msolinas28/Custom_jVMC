@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 OperatorWithKwargs = tuple[Any, dict[str, Any]]
 ObservableEntry = Union[Any, OperatorWithKwargs]
-
+    
 def has_callable_attr(cls, attr: str):
     return callable(getattr(cls, attr, None))
 
