@@ -255,7 +255,7 @@ class NQS:
         """
         if not self.realParams:
             return jnp.concatenate([
-                jnp.concatenate([p.ravel(),p.ravel(),]) for p in tree_flatten(self.params)[0]
+                jnp.concatenate([p.ravel().real,p.ravel().imag,]) for p in tree_flatten(self.params)[0]
             ])
         
         return jnp.concatenate([p.ravel() for p in tree_flatten(self.params)[0]])
