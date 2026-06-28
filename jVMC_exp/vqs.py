@@ -36,13 +36,6 @@ def _check_dtype(dtype: jnp.dtype | None, dtype_ref: jnp.dtype, label: str):
     
     return dtype
 
-def _cast_output(x):
-    x = jnp.asarray(x)
-    is_complex = jnp.issubdtype(jnp.dtype(x.dtype), jnp.complexfloating)
-    dtype = global_defs.DT_OUT_CPX if is_complex else global_defs.DT_OUT_REAL
-
-    return x.astype(dtype)
-
 def _cast_pytree(pytree, dtype):
     return jax.tree_util.tree_map(lambda x: x.astype(dtype), pytree)
 
@@ -359,6 +352,10 @@ class NQS:
     @property
     def grad_dtype(self):
         return self._grad_dtype
+    
+    @property
+    def out_dtype(self):
+        return self._out_dtype
         
     def init_net(self, seed: int | None):
         if seed == None:
@@ -370,6 +367,9 @@ class NQS:
         dummy_sample = jax.random.normal(jax.random.PRNGKey(seed), self.sampleShape)
         self._parameters = jax.device_put(self.net.init(jax.random.PRNGKey(seed), dummy_sample), REPLICATED_SHARDING)
         self._netTreeDef = jax.tree_util.tree_structure(self.params)
+        out = self.apply_fun(self.parameters, dummy_sample)
+        is_complex = jnp.issubdtype(out.dtype, jnp.complexfloating)
+        self._out_dtype = global_defs.DT_OUT_CPX if is_complex else global_defs.DT_OUT_REAL        
 
         self._realParams, self._holomorphic, self._flat_gradient_function, self._dict_gradient_function = pick_gradient(
             self.apply_fun, self.parameters, dummy_sample
@@ -396,7 +396,9 @@ class NQS:
         
         :meta public:
         """ 
-        return _cast_output(self._apply_fun_sh(s, parameters=self.eval_parameters, batch_size=self.batchSize))
+        return self._apply_fun_sh(
+            s, parameters=self.eval_parameters, batch_size=self.batchSize
+        ).astype(self.out_dtype)
     
     @sharded()
     def _apply_fun_sh(self, s, *, parameters, batch_size):
@@ -404,9 +406,9 @@ class NQS:
 
     def call_ratio(self, s, sp):
         if self.eval_ratio:
-            return _cast_output(
-                self._apply_ratio_sh(s, sp, parameters=self.eval_parameters, batch_size=self.batchSize)
-            )
+            return self._apply_ratio_sh(
+                s, sp, parameters=self.eval_parameters, batch_size=self.batchSize
+            ).astype(self.out_dtype)
         # TODO: before this was inside _apply_ratio_sh, so that it was skipping the custom eval_ratio.
         #       To make it work with different dtypes, we have to think of something different.
         # if self._mixed_precision:
@@ -418,7 +420,7 @@ class NQS:
     
     @sharded()
     def _apply_ratio_sh(self, s, sp, *, parameters, batch_size):
-        return _cast_output(self.apply_fun(parameters, s, sp, method=self.net.eval_ratio))
+        return self.apply_fun(parameters, s, sp, method=self.net.eval_ratio)
 
     def gradients(self, s):
         """
@@ -434,7 +436,9 @@ class NQS:
             with respect to each variational parameter :math:`\\theta_k` for each \
             input configuration :math:`s`.
         """
-        return _cast_output(self._gradients_sh(s, parameters=self.grad_parameters, batch_size=self.batchSize))
+        return self._gradients_sh(
+            s, parameters=self.grad_parameters, batch_size=self.batchSize
+        ).astype(self.out_dtype)
     
     @sharded(automatic_sharding=True) # TODO: Set flag to False once jax problem is solved
     def _gradients_sh(self, s, *, parameters, batch_size):
@@ -445,7 +449,7 @@ class NQS:
         if self.holomorphic:
             result = self._append_gradients_dict_jsh(result, result)
 
-        return tree_map(_cast_output, result)
+        return _cast_pytree(result, self.out_dtype)
     
     @sharded(automatic_sharding=True) # TODO: Set flag to False once jax problem is solved
     def _gradients_dict_sh(self, s, *, parameters, batch_size):
