@@ -206,7 +206,7 @@ class NQS:
             raise ValueError(
                 "Parameter tree structure mismatch.\n"
                 f"  Expected: {self._netTreeDef}\n"
-                f"  Received: {jax.tree_util.tree_structure(value["params"])}"
+                f"  Received: {jax.tree_util.tree_structure(value['params'])}"
             )
 
         if self._frozen_params is not None:
