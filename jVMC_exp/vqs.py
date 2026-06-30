@@ -369,7 +369,7 @@ class NQS:
         self._netTreeDef = jax.tree_util.tree_structure(self.params)
         out = self.apply_fun(self.parameters, dummy_sample)
         is_complex = jnp.issubdtype(out.dtype, jnp.complexfloating)
-        self._out_dtype = global_defs.DT_OUT_CPX if is_complex else global_defs.DT_OUT_REAL        
+        self._out_dtype = global_defs.DT_OUT_CPX if is_complex else global_defs.DT_OUT_REAL
 
         self._realParams, self._holomorphic, self._flat_gradient_function, self._dict_gradient_function = pick_gradient(
             self.apply_fun, self.parameters, dummy_sample
@@ -409,12 +409,6 @@ class NQS:
             return self._apply_ratio_sh(
                 s, sp, parameters=self.eval_parameters, batch_size=self.batchSize
             ).astype(self.out_dtype)
-        # TODO: before this was inside _apply_ratio_sh, so that it was skipping the custom eval_ratio.
-        #       To make it work with different dtypes, we have to think of something different.
-        # if self._mixed_precision:
-        #     log_psi_s = _cast_output(self.apply_fun(parameters, s))
-        #     log_psi_sp = _cast_output(self.apply_fun(parameters, sp))
-        #     return jnp.exp(log_psi_sp - log_psi_s)
 
         return jnp.exp(self(sp) - self(s))
     
