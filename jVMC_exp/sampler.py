@@ -115,19 +115,25 @@ class AbstractMCSampler(AbstractSampler):
             initState=None, mu=2, logProbFactor=0.5
         ):
         if (not psi.is_generator) and (not isinstance(updateProposer, AbstractProposer)):
-            raise RuntimeError("Instantiation of MCSampler: `updateProposer` is `None` and cannot be used for MCMC sampling." \
-                                "'updateProposer' must be an instance of 'jVMC.propose.AbstractProposer'.")
+            raise RuntimeError(
+                "Instantiation of MCSampler: `updateProposer` is `None` and cannot be used for MCMC sampling. "
+                "'updateProposer' must be an instance of 'jVMC.propose.AbstractProposer'."
+            )
         super().__init__(psi)
 
         self.initial_states = initState
         if initState is not None: 
             self.initial_states = jnp.array(initState)
             if self.initial_states.shape[1:] != self.sampleShape:
-                raise ValueError(f"The provided initState has the wrog sample shape. \
-                                Got {self.initial_states.shape[1:]}, while sampleShape is {self.sampleShape}.")
+                raise ValueError(
+                    f"The provided initState has the wrog sample shape. "
+                    f"Got {self.initial_states.shape[1:]}, while sampleShape is {self.sampleShape}."
+                )
             elif numChains - self.initial_states[0] < 0:
-                raise ValueError(f"The number of chain in initState ({self.states.shape[0]}) \
-                                 is greater than the provided numChains ({numChains}).")
+                raise ValueError(
+                    f"The number of chain in initState ({self.states.shape[0]}) "
+                    f"is greater than the provided numChains ({numChains})."
+                )
 
         self.logProbFactor = logProbFactor
         self.mu = mu
@@ -217,7 +223,8 @@ class AbstractMCSampler(AbstractSampler):
                     self.initial_states = self.initial_states[:value]
         if self.numSamples < value:
             raise ValueError(
-                f"The provided number of chains {value} is bigger than the number of samples {self.numSamples}. "
+                f"The provided number of chains {value} is bigger "
+                f"than the number of samples {self.numSamples}."
             )
 
         self._numChains = value
@@ -626,7 +633,6 @@ class ExactSampler(AbstractSampler):
         Sampling is automatically distributed accross processes and available devices.
 
         Arguments:
-            * ``parameters``: Dummy argument to provide identical interface as the ``MCSampler`` class.
             * ``numSamples``: Dummy argument to provide identical interface as the ``MCSampler`` class.
 
         Returns:
