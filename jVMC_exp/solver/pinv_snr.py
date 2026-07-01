@@ -15,7 +15,7 @@ def smooth_cutoff_fn(x, c, exp=6):
 
 @jax.jit(static_argnums=(2,))
 def get_snr(VtF, rho_var, num_samples):
-    return jnp.sqrt(jnp.abs(num_samples * (jnp.conj(VtF) * VtF) / (rho_var + 1e-10))).ravel()
+    return jnp.sqrt(jnp.abs(num_samples * (jnp.conj(VtF) * VtF) / (rho_var + 1e-14))).ravel()
     
 class PinvSNR(AbstractSolver):
     """
@@ -83,12 +83,15 @@ class PinvSNR(AbstractSolver):
     def __call__(self, S, F, solver_state: SolverState):
         # Transform equation to eigenbasis and compute Signal to Noise Ratio
         self._transform_to_eigenbasis(S, F)
-        rho = solver_state.covar_grad_o_loc().transform(solver_state.rhs_trans_fn, jnp.transpose(self.last_eigenvectors))
+        rho = solver_state.covar_grad_o_loc().transform(
+            solver_state.rhs_trans_fn, 
+            jnp.transpose(jnp.conj(self.last_eigenvectors))
+        )
         snr = get_snr(self._VtF, rho.var.ravel(), rho._num_samples)
 
         # Discard eigenvalues below numerical precision
         invEv = jnp.where(jnp.abs(self.last_eigenvalues / self.last_eigenvalues[-1]) > 1e-14, 1. / self.last_eigenvalues, 0.)
-
+        
         residual = 1.0
         cutoff = 1e-2
         F_norm = jnp.linalg.norm(F)
