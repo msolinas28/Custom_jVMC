@@ -109,8 +109,8 @@ class PinvSNR(AbstractSolver):
             residual=residual.item(),
             pinv_cutoff=cutoff.item(),
             snr=snr,
-            condition_number=(self.last_eigenvalues[-1] / self.last_eigenvalues[0]).item()
-            # spectrum=self.last_eigenvalues
+            condition_number=(self.last_eigenvalues[-1] / jnp.min(jnp.abs(self.last_eigenvalues))).item(),
+            spectrum=self.last_eigenvalues
         )
 
         return update, info
