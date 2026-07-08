@@ -45,7 +45,8 @@ class AbstractOptimizer(ABC):
         return self._psi
     
     def __call__(
-            self, parameters, t, *, numSamples=None, intStep=None,
+            self, parameters, t, *,
+            numSamples=None, intStep=None, resample=True, weights=None,
             objective_function: AbstractObjectiveFunction, **objective_function_kwargs
     ):
         """ 
@@ -72,11 +73,17 @@ class AbstractOptimizer(ABC):
             return self.output_manager.stop_timing(name)
 
         # Get sample
-        self.output_manager.start_timing("sampling")
-        sampler_out = self.sampler.sample(numSamples=numSamples)
-        self._elapsed += stop_timing("sampling", wait_for=sampler_out[0])
+        if resample or intStep == 0:
+            self.output_manager.start_timing("sampling")
+            sampler_out = self.sampler.sample(numSamples=numSamples)
+            self._elapsed += stop_timing("sampling", wait_for=sampler_out[0])
+        # Importance Sampling
+        else:
+            self.sampler._weights = jnp.exp(
+                2 * jnp.real(self.psi(self.sampler.samples) - self.sampler.logPsi)
+            )
 
-        # Evaluate local observables and their gradient 
+        # Evaluate local observables and their gradient
         self.output_manager.start_timing("compute objective function and gradient")
         objective_fn_out = objective_function.value_and_grad(self.sampler, t=t, **objective_function_kwargs)
         self._elapsed += stop_timing("compute objective function and gradient", wait_for=objective_fn_out.grad_log_psi.observations)

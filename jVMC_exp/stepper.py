@@ -170,7 +170,11 @@ class AdaptiveHeun(AbstractStepper):
             jnp.array([0, 1])
         )
 
-    def step(self, t, f, y, normFunction=jnp.linalg.norm, **rhsArgs):
+    def step(
+        self, t, f, y,
+        *, normFunction=jnp.linalg.norm, resample=True,
+        **rhsArgs
+    ):
         """ This function performs an integration time step.
 
         For a first order ordinary differential equation (ODE) of the form
@@ -195,9 +199,11 @@ class AdaptiveHeun(AbstractStepper):
             New value of :math:`y` and time step used :math:`\\Delta t`.
         """
         converged = False
+        rhsArgs.update(resample=resample)
 
-        while not converged:
-            k0 = f(y, t, **rhsArgs, intStep=0)
+        k0 = f(y, t, **rhsArgs, intStep=0) # TODO: this was inside the loop before
+        
+        while not converged:    
             dy0, _ = _get_rk_step(
                 self._butcher_tableau, 
                 t, f, y, self.dt, k0, **rhsArgs
