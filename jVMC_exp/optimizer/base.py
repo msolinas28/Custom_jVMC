@@ -77,7 +77,7 @@ class AbstractOptimizer(ABC):
             self.output_manager.start_timing("sampling")
             sampler_out = self.sampler.sample(numSamples=numSamples)
             self._elapsed += stop_timing("sampling", wait_for=sampler_out[0])
-        # Importance Sampling
+        # Importance sampling
         else:
             self.sampler._weights = jnp.exp(
                 2 * jnp.real(self.psi(self.sampler.samples) - self.sampler.logPsi)
