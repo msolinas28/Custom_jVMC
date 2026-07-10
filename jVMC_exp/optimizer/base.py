@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from abc import ABC, abstractmethod
 import tqdm
-from typing import Dict
+from typing import Dict, List
 import warnings
 from typing import Callable
 from functools import partial
@@ -123,6 +123,7 @@ class AbstractOptimizer(ABC):
             objective_function: AbstractObjectiveFunction,
             stepper: AbstractStepper = Euler(),
             observables: Dict[str, ObservableEntry] | None = None,
+            callback: List[Callable] | None = None,
             save_meta_data: bool = False,
             **kwargs # KWARGS ARE FOR BOTH THE STEPPER AND THE OBJECTIVE FUNCTION, TODO: ADD DOCUMENTATION ON THIS
         ):
@@ -140,7 +141,7 @@ class AbstractOptimizer(ABC):
             # saving one sample call per step
             new_parameters, _ = self.step(0, stepper, objective_function, **kwargs)
             self.sampler._samples, self.sampler._logPsi, self.sampler._weights = self._sampler_out     
-            self._measure_and_store(n, observables, save_meta_data)
+            self._measure_and_store(n, observables, callback, save_meta_data)
             self.psi.parameters = new_parameters
 
             pbar.set_postfix(E=f"{self.o_loc}")
@@ -158,6 +159,7 @@ class AbstractOptimizer(ABC):
             objective_function: AbstractObjectiveFunction,
             stepper: AbstractStepper = Euler,
             observables: Dict[str, ObservableEntry] | None = None,
+            callback: List[Callable] | None = None,
             save_meta_data: bool = False,
             **kwargs
         ):
@@ -169,7 +171,7 @@ class AbstractOptimizer(ABC):
             self.sampler._samples, self.sampler._logPsi, self.sampler._weights = self._sampler_out
             dt = float(dt)
             self.meta_data['dt'] = dt 
-            self._measure_and_store(t, observables, save_meta_data)
+            self._measure_and_store(t, observables, callback, save_meta_data)
             self.psi.parameters = new_parameters
 
             if t + dt >= t_max:
@@ -188,7 +190,7 @@ class AbstractOptimizer(ABC):
         
         self.meta_data['dt'] = dt
         self.sampler.sample()
-        self._measure_and_store(t, observables, save_meta_data)
+        self._measure_and_store(t, observables, callback, save_meta_data)
 
         pbar.close()
         self.output_manager.print_timings()
@@ -220,12 +222,12 @@ class AbstractOptimizer(ABC):
         '''
         self.meta_data = {}
 
-    def _measure_and_store(self, t, observables, save_meta_data):
+    def _measure_and_store(self, t, observables, callback, save_meta_data):
         measures = {}
         energy = dict(
-            mean = jnp.real(self.o_loc.mean).item(),
-            variance = jnp.real(self.o_loc.var).item(),
-            MC_error = jnp.real(self.o_loc.error_of_mean).item()
+            mean = jnp.real(self.o_loc.mean).squeeze(),
+            variance = jnp.real(self.o_loc.var).squeeze(),
+            MC_error = jnp.real(self.o_loc.error_of_mean).squeeze()
         )
 
         if observables is not None:
@@ -234,6 +236,17 @@ class AbstractOptimizer(ABC):
 
         if save_meta_data:
             self.output_manager.write_metadata(t, **self.meta_data)
+
+        if callback is not None:
+            if callable(callback):
+                callback = (callback,)
+            elif not hasattr(callback, '__len__'):
+                raise ValueError(
+                    'Callback has to be a callable or a list of callables, '
+                    f'got {callback}.'
+                )
+            for cb in callback:
+                cb()
 
 class Evolution(AbstractOptimizer):
     def __init__(
