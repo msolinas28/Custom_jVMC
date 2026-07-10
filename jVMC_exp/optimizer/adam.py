@@ -1,6 +1,6 @@
 from optax import adam
 import tqdm
-from typing import Dict
+from typing import Dict, List, Callable
 
 from jVMC_exp.optimizer.base import AbstractOptimizer
 from jVMC_exp.objective_function.base import ObjectiveFunctionOutput
@@ -38,6 +38,7 @@ class Adam(AbstractOptimizer):
             steps,
             objective_function: AbstractObjectiveFunction,
             observables: Dict[str, ObservableEntry] | None = None,
+            callback: List[Callable] | None = None,
             save_meta_data: bool = False,
             **objective_function_kwargs
         ):
@@ -51,7 +52,7 @@ class Adam(AbstractOptimizer):
             # saving one sample call per step
             new_parameters, _ = self.step(0, self._stepper, objective_function, **objective_function_kwargs)
             self.sampler._samples, self.sampler._logPsi, self.sampler._weights = self._sampler_out     
-            self._measure_and_store(n, observables, save_meta_data)
+            self._measure_and_store(n, observables, callback, save_meta_data)
             self.psi.parameters = new_parameters
 
             pbar.set_postfix(E=f"{self.o_loc}")
@@ -63,5 +64,16 @@ class Adam(AbstractOptimizer):
         
         return self.output_manager.data["observables"]
 
-    def time_evolution(self):
-        raise NotImplementedError
+    def time_evolution(
+            self,
+            t_max,
+            objective_function: AbstractObjectiveFunction,
+            observables: Dict[str, ObservableEntry] | None = None,
+            callback: List[Callable] | None = None,
+            save_meta_data: bool = False,
+            **kwargs
+        ):
+        raise NotImplementedError(
+            "The Adam optimizer is intended for ground state search only and "
+            "cannot be used for time evolution. Use jVMC_exp.optimizer.TDVP instead."
+        )

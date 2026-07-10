@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List, Callable
 
 from .base import Evolution
 from jVMC_exp.solver.pinv_snr import PinvSNR
@@ -25,6 +25,7 @@ class SR(Evolution):
             objective_function: AbstractObjectiveFunction,
             stepper: AbstractStepper = Euler,
             observables: Dict[str, ObservableEntry] | None = None,
+            callback: List[Callable] | None = None,
             save_meta_data: bool = False,
             **kwargs
         ):
