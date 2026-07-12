@@ -15,7 +15,7 @@ class Adam(AbstractOptimizer):
             learning_rate: float=1e-3, b1: float=0.9, b2: float=0.999, eps: float=1e-8,
             output_manager: OutputManager | None = None
     ):
-        super().__init__(sampler, psi, False, output_manager=output_manager)
+        super().__init__(sampler, psi, True, False, output_manager=output_manager)
 
         self._adam = adam(learning_rate, b1, b2, eps)
         self._opt_state = self._adam.init(self.psi.parameters_flat)

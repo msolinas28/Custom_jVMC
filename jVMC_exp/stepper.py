@@ -172,8 +172,7 @@ class AdaptiveHeun(AbstractStepper):
 
     def step(
         self, t, f, y,
-        *, normFunction=jnp.linalg.norm, resample=True,
-        **rhsArgs
+        *, normFunction=jnp.linalg.norm, **rhsArgs
     ):
         """ This function performs an integration time step.
 
@@ -199,7 +198,6 @@ class AdaptiveHeun(AbstractStepper):
             New value of :math:`y` and time step used :math:`\\Delta t`.
         """
         converged = False
-        rhsArgs.update(resample=resample)
 
         k0 = f(y, t, **rhsArgs, intStep=0) # TODO: this was inside the loop before
         

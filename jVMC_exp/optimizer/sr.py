@@ -11,10 +11,10 @@ class SR(Evolution):
     def __init__(
             self, sampler, psi, 
             use_cross_valiadation=False, diagonalShift=0.001, diagonalScale=0., solver=PinvSNR(),
-            output_manager: OutputManager | None = None
+            resample_stepper=True, output_manager: OutputManager | None = None
         ):
         super().__init__(
-            sampler, psi, True, True, 
+            sampler, psi, resample_stepper, True, True, 
             use_cross_valiadation, diagonalShift, diagonalScale, solver,
             output_manager=output_manager
         )

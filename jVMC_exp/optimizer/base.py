@@ -20,11 +20,12 @@ from jVMC_exp.objective_function.base import AbstractObjectiveFunction, Objectiv
 
 class AbstractOptimizer(ABC):
     def __init__(
-            self, sampler: AbstractSampler, psi: NQS,
+            self, sampler: AbstractSampler, psi: NQS, resample_stepper: bool=True,
             use_cross_valiadation: bool=False, output_manager: OutputManager | None = None
         ):
         self._sampler = sampler
         self._psi = psi
+        self._resample = resample_stepper
         self.use_cross_valiadation = use_cross_valiadation
         self.meta_data = {}
         self._output_manager = output_manager if output_manager is not None else OutputManager()
@@ -46,7 +47,7 @@ class AbstractOptimizer(ABC):
     
     def __call__(
             self, parameters, t, *,
-            numSamples=None, intStep=None, resample=True, weights=None,
+            numSamples=None, intStep=None, resample=True,
             objective_function: AbstractObjectiveFunction, **objective_function_kwargs
     ):
         """ 
@@ -73,12 +74,12 @@ class AbstractOptimizer(ABC):
             return self.output_manager.stop_timing(name)
 
         # Get sample
-        if resample or intStep == 0:
+        if self._resample or intStep == 0:
             self.output_manager.start_timing("sampling")
             sampler_out = self.sampler.sample(numSamples=numSamples)
             self._elapsed += stop_timing("sampling", wait_for=sampler_out[0])
         # Importance sampling
-        elif not resample and intStep != 0:
+        elif not self._resample and intStep != 0:
             self.sampler._weights = jnp.exp(
                 2 * jnp.real(self.psi(self.sampler.samples) - self.sampler.logPsi)
             )
@@ -250,7 +251,7 @@ class AbstractOptimizer(ABC):
 
 class Evolution(AbstractOptimizer):
     def __init__(
-            self, sampler: AbstractSampler, psi: NQS, 
+            self, sampler: AbstractSampler, psi: NQS, resample_stepper: bool,
             imag_time: bool, make_real: bool, use_cross_valiadation: bool=False, 
             diagonalShift: float | Callable=1e-3, diagonalScale: float | Callable=0., 
             solver: AbstractSolver=PinvSNR(), output_manager: OutputManager | None = None
@@ -280,7 +281,9 @@ class Evolution(AbstractOptimizer):
         self._solver = solver
         self._get_lhs = self._get_lhs_dense if solver._needs_dense_matrix else self._get_lhs_lazy
        
-        super().__init__(sampler, psi, use_cross_valiadation, output_manager=output_manager)
+        super().__init__(
+            sampler, psi, resample_stepper, use_cross_valiadation, output_manager=output_manager
+        )
 
         self._solver_state = SolverState(
             covar_grad_o_loc=lambda: self._covar_grad_o_loc,
