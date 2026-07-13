@@ -97,7 +97,7 @@ class PinvSNR(AbstractSolver):
         F_norm = jnp.linalg.norm(F)
         first = True 
         while (residual > self.pinv_tol and cutoff > self.pinv_cutoff) or first:
-            residual, cutoff, pinvEv = self._regularizer_step(
+            residual, cutoff, pinvEv, effective_rank = self._regularizer_step(
                 cutoff, snr, self.last_eigenvalues, invEv, self._VtF, F_norm, solver_state.exact_sampler
             )
 
@@ -110,7 +110,8 @@ class PinvSNR(AbstractSolver):
             pinv_cutoff=cutoff.item(),
             snr=snr,
             condition_number=(self.last_eigenvalues[-1] / jnp.min(jnp.abs(self.last_eigenvalues))).item(),
-            spectrum=self.last_eigenvalues
+            spectrum=self.last_eigenvalues,
+            effective_rank=effective_rank.item()
         )
 
         return update, info
@@ -127,8 +128,9 @@ class PinvSNR(AbstractSolver):
 
         pinvEv = invEv * regularizer
         residual = jnp.linalg.norm((pinvEv * eigenvalues - 1) * VtF) / F_norm
+        effective_rank = jnp.mean(regularizer)
 
-        return residual, cutoff, pinvEv
+        return residual, cutoff, pinvEv, effective_rank
     
     def _transform_to_eigenbasis(self, S, F):
         if self._diagonalize_on_device:
