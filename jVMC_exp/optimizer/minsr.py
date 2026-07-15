@@ -5,7 +5,7 @@ from typing import Callable
 from jVMC_exp.sampler import AbstractSampler
 from jVMC_exp.vqs import NQS
 from jVMC_exp.optimizer.base import AbstractOptimizer
-from jVMC_exp.objective_function.base import ObjectiveFunctionOutput
+from jVMC_exp.objective_function.base import ObjectiveFunctionOutput, AbstractObjectiveFunction
 from jVMC_exp.sharding_config import DEVICE_SPEC, REPLICATED_SPEC, MESH, sharded
 
 @jax.jit
@@ -38,6 +38,15 @@ class MinSR(AbstractOptimizer):
 
         super().__init__(sampler, psi, resample_stepper, use_cross_valiadation=False)
 
+    def __call__(
+            self, parameters, t, *, numSamples=None, intStep=None,
+            objective_function: AbstractObjectiveFunction, **objective_function_kwargs
+    ):
+        return super().__call__(
+            parameters, t, numSamples=numSamples, intStep=intStep, 
+            objective_function=objective_function, compute_grad_covar=False, **objective_function_kwargs
+        )
+
     @property
     def diag_shift(self):
         return self._diag_shift
@@ -55,8 +64,8 @@ class MinSR(AbstractOptimizer):
         Uses the techique proposed in arXiv:2302.01941 to compute the updates.
         Efficient only if number of samples :math:`\\ll` number of parameters.
         """
-        grad_log_psi = objective_function_output.grad_log_psi._normalized_obs  # (Ns, Np)
-        o_loc = objective_function_output.o_loc._normalized_obs.reshape(-1)    # (Ns,)
+        grad_log_psi = objective_function_output.grad_log_psi._get_normalized_obs_and_consume()  # (Ns, Np)
+        o_loc = objective_function_output.o_loc._normalized_obs.reshape(-1)                      # (Ns,)
         
         if not self.psi.holomorphic and not self.psi.realParams:
             grad_log_psi = _concat_nonholo(grad_log_psi)

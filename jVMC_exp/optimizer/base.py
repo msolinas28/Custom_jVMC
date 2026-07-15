@@ -328,12 +328,10 @@ class Evolution(AbstractOptimizer):
     def get_update(self, objective_function_output: ObjectiveFunctionOutput):
         if self.psi.holomorphic:
             objective_function_output = objective_function_output.transform(self._remove_double_trans)
-        grad = objective_function_output.grad
-        grad_log_psi = objective_function_output.grad_log_psi
-        self._covar_grad_o_loc = grad
-
-        S = self._get_lhs(grad_log_psi)
-        F = self._get_rhs(grad)   
+    
+        self._covar_grad_o_loc = objective_function_output.grad
+        S = self._get_lhs(objective_function_output.grad_log_psi)
+        F = self._get_rhs(objective_function_output.grad)   
         update, self._additional_info = self.solver(S, F, self.solver_state)
         self.update = self._make_real_fn(update) if self.psi.holomorphic else update
 
