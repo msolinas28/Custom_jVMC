@@ -11,12 +11,12 @@ class TDVP(Evolution):
     def __init__(
             self, sampler, psi, make_real: bool, resample_stepper=True,
             use_cross_valiadation=False, diagonalShift=0., diagonalScale=0., solver=PinvSNR(),
-            output_manager: OutputManager | None = None
+            output_manager: OutputManager | None = None, jacobian_mode: str = "dense",
         ):
         super().__init__(
             sampler, psi, resample_stepper, False, make_real, 
             use_cross_valiadation, diagonalShift, diagonalScale, solver,
-            output_manager=output_manager
+            output_manager=output_manager, jacobian_mode=jacobian_mode,
         )
 
     def ground_state_search(

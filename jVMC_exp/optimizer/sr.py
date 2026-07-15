@@ -11,12 +11,15 @@ class SR(Evolution):
     def __init__(
             self, sampler, psi, 
             use_cross_valiadation=False, diagonalShift=0.001, diagonalScale=0., solver=PinvSNR(),
-            resample_stepper=True, output_manager: OutputManager | None = None
+            resample_stepper=True,
+            output_manager: OutputManager | None = None,
+            jacobian_mode: str = "dense",
         ):
         super().__init__(
             sampler, psi, resample_stepper, True, True, 
             use_cross_valiadation, diagonalShift, diagonalScale, solver,
-            output_manager=output_manager
+            output_manager=output_manager,
+            jacobian_mode=jacobian_mode,
         )
 
     def time_evolution(

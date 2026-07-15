@@ -7,7 +7,7 @@ import warnings
 from typing import Callable
 from functools import partial
 
-from jVMC_exp.stats import SampledObs
+from jVMC_exp.stats import BatchedJacobian, SampledObs
 from jVMC_exp.vqs import NQS
 from jVMC_exp.sampler import AbstractSampler, ExactSampler
 from jVMC_exp.util import make_cmplx_array, make_real_array, remove_double
@@ -45,9 +45,14 @@ class AbstractOptimizer(ABC):
     def psi(self):
         return self._psi
     
+    @property
+    @abstractmethod
+    def _needs_grad(self) -> bool:
+        pass
+
     def __call__(
             self, parameters, t, *,
-            numSamples=None, intStep=None, resample=True,
+            numSamples=None, intStep=None,
             objective_function: AbstractObjectiveFunction, **objective_function_kwargs
     ):
         """ 
@@ -86,8 +91,13 @@ class AbstractOptimizer(ABC):
 
         # Evaluate local observables and their gradient
         self.output_manager.start_timing("compute objective function and gradient")
-        objective_fn_out = objective_function.value_and_grad(self.sampler, t=t, **objective_function_kwargs)
-        self._elapsed += stop_timing("compute objective function and gradient", wait_for=objective_fn_out.grad_log_psi.observations)
+        objective_fn_out = objective_function.value_and_grad(
+            self.sampler,
+            compute_grad=self._needs_grad, 
+            t=t,
+            **objective_function_kwargs
+        )
+        self._elapsed += stop_timing("compute objective function and gradient", wait_for=objective_fn_out.sync_target)
 
         # Obtain the update from the gradients
         self.output_manager.start_timing("solve")
@@ -129,8 +139,10 @@ class AbstractOptimizer(ABC):
             **kwargs # KWARGS ARE FOR BOTH THE STEPPER AND THE OBJECTIVE FUNCTION, TODO: ADD DOCUMENTATION ON THIS
         ):
         if not hasattr(stepper, "update_dt"):
-            raise ValueError("For ground state search the stepper must " \
-                            f"implement a mehod called 'update_dt'")
+            raise ValueError(
+                "For ground state search the stepper must "
+                "implement a method called 'update_dt'"
+            )
 
         pbar = tqdm.tqdm(range(steps))
         for n in pbar: 
@@ -320,6 +332,10 @@ class Evolution(AbstractOptimizer):
     def diag_shift(self, value):
         self._diag_shift_fn = value if isinstance(value, Callable) else lambda step: value
         self._diag_shift = self._diag_shift_fn(0)
+    
+    @property
+    def _needs_grad(self):
+        return True
 
     def update_hyperparams(self, step):
         self._diag_shift = self._diag_shift_fn(step)
@@ -378,21 +394,26 @@ class Evolution(AbstractOptimizer):
 
         return S
     
-    def _get_lhs_lazy(self, grad_log_psi: SampledObs):
+    def _get_lhs_lazy(self, grad_log_psi: SampledObs | BatchedJacobian):
         '''
         Returns a function that computes the matrix vector product with the left hand side of the TDVP equation
         '''
-        O = grad_log_psi._normalized_obs
+        if isinstance(grad_log_psi, BatchedJacobian):
+            raw_matvec = grad_log_psi.matvec
+            diagonal = grad_log_psi.diagonal
+        else:
+            O = grad_log_psi._normalized_obs
 
-        def raw_matvec(v):
-            return (O.conj().T @ (O @ v))
+            def raw_matvec(v):
+                return (O.conj().T @ (O @ v))
+
+            diagonal = lambda: jnp.sum(jnp.abs(O) ** 2, axis=0)
         self._S0 = raw_matvec
 
         def matvec(v):
             Sv = self._lhs_trans_fn(raw_matvec(v))
             if self.diag_scale > 1e-15:
-                diag = jnp.sum(jnp.abs(O) ** 2, axis=0)
-                Sv = Sv + self.diag_scale * diag * v
+                Sv = Sv + self.diag_scale * diagonal() * v
             if self.diag_shift > 1e-15:
                 Sv = Sv + self.diag_shift * v
 

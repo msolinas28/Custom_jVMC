@@ -167,11 +167,15 @@ class Infidelity(AbstractObjectiveFunction):
     def value_and_grad(
             self, 
             sampler: AbstractSampler, 
-            sample_ref_state: bool=True, 
+            sample_ref_state: bool = True,
+            compute_grad: bool = True,
             **kwargs
         ) -> ObjectiveFunctionOutput:
         value = self(sampler, sample_ref_state=sample_ref_state, **kwargs)
         grad_log_psi = SampledObs(sampler.psi.gradients(sampler.samples), sampler.weights)
+        if not compute_grad:
+            return ObjectiveFunctionOutput(o_loc=value, grad_log_psi=grad_log_psi)
+
         f_loc = SampledObs(self._psi_f_loc, sampler.weights)
         grad = grad_log_psi.get_covar_obs(f_loc)
         grad._observations *= - 2.0 * self._ref_f_loc
