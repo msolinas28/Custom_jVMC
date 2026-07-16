@@ -223,10 +223,10 @@ class SampledObs():
         chain_length = self._num_samples // n_chains
         chain_obs = SampledObs(self.observations.reshape((n_chains, chain_length)).T)
 
-        B = jnp.sum((chain_obs.mean.real - self.mean.real)**2) / (n_chains - 1)
-        W = jnp.mean(chain_obs.var) 
-        
-        return jnp.sqrt(((chain_length - 1) / chain_length * W + B) / W)
+        B = jnp.var(chain_obs.mean.real)
+        W = jnp.mean(chain_obs.var)
+
+        return jnp.sqrt((chain_length - 1) / chain_length + B / W)
     
     def get_autocorrelation_time(self, n_chains, c=5) -> SampledObs:
         if self._num_obs != 1:
