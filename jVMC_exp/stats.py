@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial, cached_property
 from typing import Callable
+import warnings
 
 # from jVMC_exp.sampler import AbstractSampler
 from jVMC_exp.sharding_config import (
@@ -12,6 +13,7 @@ from jVMC_exp.sharding_config import (
     REPLICATED_SPEC,
     MESH,
     sharded,
+    SizedIterable,
 )
 
 @jax.jit
@@ -75,7 +77,8 @@ def _covar_obs_block(norm_grad, norm_obs):
 @jax.jit(static_argnums=(1, 2))
 @partial(jax.vmap, in_axes=(0, None, None))
 def _get_autocorrelation_time(x, c, dim):
-    fft = jnp.abs(jnp.fft.fft(x - jnp.mean(x), n=dim))
+    n_fft = 2 ** (dim + 1)  
+    fft = jnp.abs(jnp.fft.fft(x - jnp.mean(x), n=n_fft))
     correlation = jnp.fft.ifft(fft ** 2)[:x.size].real
     correlation = correlation / correlation[0]
     tau = 2 * jnp.cumsum(correlation) - 1
@@ -223,8 +226,8 @@ class SampledObs():
         chain_length = self._num_samples // n_chains
         chain_obs = SampledObs(self.observations.reshape((n_chains, chain_length)).T)
 
-        B = jnp.sum((chain_obs.mean.real - self.mean.real)**2) / (n_chains - 1)
-        W = jnp.mean(chain_obs.var) 
+        B = jnp.var(chain_obs.mean.real, ddof=1)
+        W = jnp.mean(chain_obs.var * chain_length / (chain_length - 1))
         
         return jnp.sqrt(((chain_length - 1) / chain_length * W + B) / W)
     
@@ -292,61 +295,125 @@ class SampledObs():
 
 from jVMC_exp.sharding_config import SizedIterable
 
-class IterableSampledObs():
+def _reshape_in_batches(data, n_batches: int):
+    remainder = data.shape[0] % n_batches
+    if remainder != 0:
+        num_pad = n_batches - remainder
+        data = jnp.pad(data, ((0, num_pad),) + ((0, 0),) * (data.ndim - 1), constant_values=0)
+    batch_size = data.shape[0] // n_batches
+
+    batched_data = []
+    for i in range(n_batches):
+        batched_data.append(
+            jax.device_put(data[i * batch_size:(i + 1) * batch_size], DEVICE_SHARDING)
+        )
+    
+    return batched_data
+
+class LazySampledObs():
     def __init__(self, observations: SizedIterable, weights):
         if weights is None:
-            raise ValueError("IterableSampledObs require weights to be an array")
+            raise ValueError("LazySampledObs require weights to be an array")
         weights /= jnp.sum(weights)
         self._num_samples = len(weights)
-
-        remainder = self._num_samples % observations.n_iterations
-        if remainder != 0:
-            num_pad = observations.n_iterations - remainder
-            weights = jnp.pad(weights, (0, num_pad), constant_values=0)
-        batch_size = weights // observations.n_iterations
         
-        self._weights = []
-        for i in range(len(observations)):
-            self._weights.append(
-                jax.device_put(weights[i * batch_size:(i + 1) * batch_size], DEVICE_SHARDING)
-            )
-        
+        self._weights = _reshape_in_batches(weights, len(observations))
         self._observations = observations
 
-    # def __repr__(self):
-    #     return self.__str__()
-    
-    # def __str__(self):
-    #     if self._num_obs == 1:
-    #         return f"{self.mean.item():.4e} ± {self.error_of_mean.item():.4e} (Var = {self.var.item():.4e})"
-    #     else:
-    #         return f"SampledObs with {self._num_obs} features"
+    # @property
+    # def observations(self):
+    #     warnings.warn(
+    #         "Calling observations materializes the whole array of observations"
+    #     )
+    #     observations = []
+    #     for batch in self._observations:
+    #         observations.append(batch)
 
-    @property
-    def observations(self):
-        Warning(
-            "Calling observations materializes the whole array of observations"
-        )
-        observations = []
-        for batch in self._observations:
-            observations.append(batch)
-
-        return jnp.concatenate(observations)
+    #     return jnp.concatenate(observations)
     
     @property
     def weights(self):
-        return self._weights
+        return jnp.concatenate(self._weights)
     
     @cached_property
     def mean(self):
         mean = 0
-        for batch, weights in zip(self._observations, self.weights):
+        for batch, weights in zip(self._observations, self._weights):
             mean += _get_mean(batch, weights)
         
         return mean
+    
+    @property
+    def _centered_obs(self):
+        for batch in self._observations:
+            yield _center(batch, self.mean)
 
+    @property
+    def _normalized_obs(self):
+        for batch, weights in zip(self._observations, self._weights):
+            yield _normalize(batch, weights, self.mean)
 
+    @cached_property
+    def var(self):
+        var = 0
+        for _normalized_obs in self._normalized_obs:
+            var += _get_var(_normalized_obs)
+        
+        return var
+    
+    @property
+    def error_of_mean(self):
+        return _get_error_of_mean(self.var, self.weights)    
 
+    # TODO: understand if tangent kernel is needed
+
+    def get_covar(self, other: SampledObs | LazySampledObs | None = None):
+        """
+        Returns the covariance.
+
+        Args:
+            * ``other`` [optional]: Another instance of `SampledObs`.
+        """
+        if other is None:
+            covar = 0
+            for normalized_obs in self._normalized_obs:
+                covar += _get_covar(normalized_obs, normalized_obs)
+
+            return covar
+
+        elif isinstance(other, SampledObs):
+            normalized_obs_other = _reshape_in_batches(other._normalized_obs, len(self._observations))
+        else:
+            normalized_obs_other = other._normalized_obs
+        
+        covar = 0
+        for normalized_obs, normalized_obs_other in zip(self._normalized_obs, normalized_obs_other):
+            covar += _get_covar(normalized_obs, normalized_obs_other) 
+
+        return covar
+    
+    # def get_covar_var(self):
+    #     raise NotImplementedError(
+    #         "get_covar_var can't be computed without materializing all the observables"
+    #     )
+    
+    # def get_covar_obs(self, other: SampledObs | None = None) -> SampledObs:
+    #     raise NotImplementedError(
+    #         "get_covar_obs materializes an object that has the size of observations "
+    #         "defeating the purpose of LazySampledObs"
+    #     )
+    
+    def transform(self, element_wise_fn=lambda x: x, linear_map=None) -> LazySampledObs:
+        if linear_map is not None:
+            raise NotImplementedError(
+                "A linear map can't be applied withoud materializing all the observables"
+            )
+        
+        jitted_fn = jax.jit(element_wise_fn)
+        transormed_iterable = lambda: (jitted_fn(batch) for batch in self._observations)
+        new_obs = SizedIterable(transormed_iterable, self._observations.n_iterations)
+
+        return LazySampledObs(new_obs, self.weights)
 
 
 

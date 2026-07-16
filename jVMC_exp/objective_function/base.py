@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from chex import dataclass
+import jax
 
-from jVMC_exp.stats import BatchedJacobian, SampledObs
+from jVMC_exp.stats import SampledObs, LazySampledObs
 from jVMC_exp.operator.base import AbstractOperator
 from jVMC_exp.sampler import AbstractSampler
 from jVMC_exp.sharding_config import sharded
@@ -10,33 +11,26 @@ from jVMC_exp.util.grads import pick_gradient
 @dataclass
 class ObjectiveFunctionOutput():
     o_loc: SampledObs | None = None
-    grad: SampledObs | None = None
-    grad_log_psi: SampledObs | BatchedJacobian | None = None
-
-    @property
-    def sync_target(self):
-        for obj in (self.grad, self.grad_log_psi, self.o_loc):
-            if obj is None:
-                continue
-            if hasattr(obj, "sync_target"):
-                return obj.sync_target
-            if hasattr(obj, "observations"):
-                return obj.observations
-        return None
-
-    def get_subset(self, start=None, end=None, step=None):
-        return ObjectiveFunctionOutput(
-            o_loc=self.o_loc.get_subset(start=start, end=end, step=step) if self.o_loc is not None else None,
-            grad=self.grad.get_subset(start=start, end=end, step=step) if self.grad is not None else None,
-            grad_log_psi=self.grad_log_psi.get_subset(start=start, end=end, step=step ) if self.grad_log_psi is not None else None
-        )
+    grad_log_psi: SampledObs | LazySampledObs | None = None
+    grad: jax.Array | None = None
     
-    def transform(self, element_wise_fn=lambda x: x, linear_map=None):
-        return ObjectiveFunctionOutput(
-            o_loc=self.o_loc.transform(element_wise_fn, linear_map) if self.o_loc is not None else None,
-            grad=self.grad.transform(element_wise_fn, linear_map) if self.grad is not None else None,
-            grad_log_psi=self.grad_log_psi.transform(element_wise_fn, linear_map) if self.grad_log_psi is not None else None
-        )
+    # @property
+    # def sync_target(self):
+    #     for obj in (self.grad, self.grad_log_psi, self.o_loc):
+    #         if obj is None:
+    #             continue
+    #         if hasattr(obj, "sync_target"):
+    #             return obj.sync_target
+    #         if hasattr(obj, "observations"):
+    #             return obj.observations
+    #     return None
+    
+    # def transform(self, element_wise_fn=lambda x: x, linear_map=None):
+    #     return ObjectiveFunctionOutput(
+    #         o_loc=self.o_loc.transform(element_wise_fn, linear_map) if self.o_loc is not None else None,
+    #         grad=self.grad.transform(element_wise_fn, linear_map) if self.grad is not None else None,
+    #         grad_log_psi=self.grad_log_psi.transform(element_wise_fn, linear_map) if self.grad_log_psi is not None else None
+    #     )
 
 class AbstractObjectiveFunction(ABC):
     @abstractmethod
@@ -62,13 +56,13 @@ class Observable(AbstractObjectiveFunction):
     def value_and_grad(self, sampler: AbstractSampler, compute_grad: bool = True, **op_kwargs):
         o_loc = self(sampler, **op_kwargs)
         if self._batched_jacobian:
-            grad_log_psi = BatchedJacobian(sampler.psi, sampler.samples, sampler.weights)
+            grad_log_psi = LazySampledObs(sampler.psi.lazy_gradients(sampler.samples), sampler.weights)
         else:
             grad_log_psi = SampledObs(sampler.psi.gradients(sampler.samples), sampler.weights)
 
         if compute_grad:
-            grad_obs = grad_log_psi.get_covar_obs(o_loc)
-            return ObjectiveFunctionOutput(o_loc=o_loc, grad=grad_obs, grad_log_psi=grad_log_psi)
+            grad = grad_log_psi.get_covar(o_loc)
+            return ObjectiveFunctionOutput(o_loc=o_loc, grad=grad, grad_log_psi=grad_log_psi)
 
         return ObjectiveFunctionOutput(o_loc=o_loc, grad_log_psi=grad_log_psi)
 

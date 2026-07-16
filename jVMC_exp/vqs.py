@@ -439,11 +439,11 @@ class NQS:
     def _gradients_sh(self, s, *, parameters, batch_size):
         return self.flat_gradient_function(self.apply_fun, parameters, s)
     
-    def iterative_gradients(self, s):
-        return self._gradients_iter_sh(s, parameters=self.grad_parameters, batch_size=self.batchSize)
+    def lazy_gradients(self, s):
+        return self._lazy_gradients_sh(s, parameters=self.grad_parameters, batch_size=self.batchSize)
     
     @sharded(automatic_sharding=True, yield_iter=True)
-    def _gradients_iter_sh(self, s, *, parameters, batch_size):
+    def _lazy_gradients_sh(self, s, *, parameters, batch_size):
         return self.flat_gradient_function(self.apply_fun, parameters, s)
     
     def gradients_dict(self, s):

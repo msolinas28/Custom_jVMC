@@ -7,7 +7,7 @@ import warnings
 from typing import Callable
 from functools import partial
 
-from jVMC_exp.stats import BatchedJacobian, SampledObs
+from jVMC_exp.stats import LazySampledObs, SampledObs
 from jVMC_exp.vqs import NQS
 from jVMC_exp.sampler import AbstractSampler, ExactSampler
 from jVMC_exp.util import make_cmplx_array, make_real_array, remove_double
@@ -343,6 +343,7 @@ class Evolution(AbstractOptimizer):
     
     def get_update(self, objective_function_output: ObjectiveFunctionOutput):
         if self.psi.holomorphic:
+            # TODO: check if this is allocating double the memory
             objective_function_output = objective_function_output.transform(self._remove_double_trans)
     
         self._covar_grad_o_loc = objective_function_output.grad
@@ -380,6 +381,7 @@ class Evolution(AbstractOptimizer):
 
         return jnp.abs(1. + (jnp.real(update.dot(Sv)) - 2 * jnp.real(update.dot(self._F0))) / (self.o_loc.var + 1e-10))
     
+    # Working
     def _get_lhs_dense(self, grad_log_psi: SampledObs):
         '''
         Returns left hand side of the TDVP equation
@@ -394,11 +396,11 @@ class Evolution(AbstractOptimizer):
 
         return S
     
-    def _get_lhs_lazy(self, grad_log_psi: SampledObs | BatchedJacobian):
+    def _get_lhs_lazy(self, grad_log_psi: SampledObs | LazySampledObs):
         '''
         Returns a function that computes the matrix vector product with the left hand side of the TDVP equation
         '''
-        if isinstance(grad_log_psi, BatchedJacobian):
+        if isinstance(grad_log_psi, LazySampledObs):
             raw_matvec = grad_log_psi.matvec
             diagonal = grad_log_psi.diagonal
         else:
