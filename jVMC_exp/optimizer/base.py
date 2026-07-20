@@ -382,7 +382,7 @@ class Evolution(AbstractOptimizer):
         return jnp.abs(1. + (jnp.real(update.dot(Sv)) - 2 * jnp.real(update.dot(self._F0))) / (self.o_loc.var + 1e-10))
     
     # Working
-    def _get_lhs_dense(self, grad_log_psi: SampledObs):
+    def _get_lhs_dense(self, grad_log_psi: SampledObs | LazySampledObs):
         '''
         Returns left hand side of the TDVP equation
         '''

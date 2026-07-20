@@ -363,7 +363,7 @@ class LazySampledObs():
     
     @property
     def error_of_mean(self):
-        return _get_error_of_mean(self.var, self.weights)    
+        return _get_error_of_mean(self.var, self.weights)
 
     # TODO: understand if tangent kernel is needed
 
