@@ -24,6 +24,7 @@ class AbstractSampler(ABC):
         self._samples = None
         self._logPsi = None
         self._weights = None
+        self.numSamples = None
 
     @property
     def psi(self):
@@ -572,6 +573,7 @@ class ExactSampler(AbstractSampler):
         self._lDim = lDim
         self._logProbFactor = logProbFactor
         self._lastNorm = 0.
+        self.numSamples = self.numSamples
 
         self.get_probabilities = jax.jit(
             jax.shard_map(

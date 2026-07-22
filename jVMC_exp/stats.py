@@ -25,6 +25,10 @@ def _get_var(norm_data):
     return jnp.sum(jnp.abs(norm_data)**2, axis=0)
 
 @jax.jit
+def _get_var_not_normed(data, weights):
+    return jnp.tensordot(weights, jnp.abs(data)**2, axes=(0, 0)) - jnp.abs(jnp.tensordot(weights, data, axes=(0, 0)))**2
+
+@jax.jit
 def _get_error_of_mean(var, weights):
     return jnp.sqrt(var * jnp.sum(weights ** 2))
 
@@ -35,6 +39,10 @@ def _center(data, mean):
 @jax.jit
 def _normalize(data, weights, mean):
     return jnp.einsum("i, i... -> i...", jnp.sqrt(weights), data - mean)
+
+@jax.jit
+def _normalize_no_center(data, weights):
+    return jnp.einsum("i, i... -> i...", jnp.sqrt(weights), data)
 
 @jax.jit(donate_argnums=(0,))
 def _normalize_no_copy(data, weights):
@@ -319,17 +327,6 @@ class LazySampledObs():
         
         self._weights = _reshape_in_batches(weights, len(observations))
         self._observations = observations
-
-    # @property
-    # def observations(self):
-    #     warnings.warn(
-    #         "Calling observations materializes the whole array of observations"
-    #     )
-    #     observations = []
-    #     for batch in self._observations:
-    #         observations.append(batch)
-
-    #     return jnp.concatenate(observations)
     
     @property
     def weights(self):
@@ -342,22 +339,12 @@ class LazySampledObs():
             mean += _get_mean(batch, weights)
         
         return mean
-    
-    @property
-    def _centered_obs(self):
-        for batch in self._observations:
-            yield _center(batch, self.mean)
-
-    @property
-    def _normalized_obs(self):
-        for batch, weights in zip(self._observations, self._weights):
-            yield _normalize(batch, weights, self.mean)
 
     @cached_property
     def var(self):
         var = 0
-        for _normalized_obs in self._normalized_obs:
-            var += _get_var(_normalized_obs)
+        for batch, weights in zip(self._observations, self._weights):
+            var += _get_var_not_normed(batch, weights)
         
         return var
     
@@ -374,35 +361,46 @@ class LazySampledObs():
         Args:
             * ``other`` [optional]: Another instance of `SampledObs`.
         """
+        covar = 0
         if other is None:
-            covar = 0
-            for normalized_obs in self._normalized_obs:
-                covar += _get_covar(normalized_obs, normalized_obs)
+            mean = 0
+            for batch, weights in zip(self._observations, self._weights):
+                weighted_data = _normalize_no_center(batch, weights)
+                mean += _get_mean(batch, weights)
+                covar += _get_covar(weighted_data, weighted_data)
 
-            return covar
+            return covar - jnp.tensordot(jnp.conj(mean), mean, axes=0)
 
         elif isinstance(other, SampledObs):
             normalized_obs_other = _reshape_in_batches(other._normalized_obs, len(self._observations))
-        else:
-            normalized_obs_other = other._normalized_obs
-        
-        covar = 0
-        for normalized_obs, normalized_obs_other in zip(self._normalized_obs, normalized_obs_other):
-            covar += _get_covar(normalized_obs, normalized_obs_other) 
+            
+            for batch, weights, batch_other in zip(self._observations, self._weights, normalized_obs_other):
+                weighted_data = _normalize_no_center(batch, weights)
+                covar += _get_covar(weighted_data, batch_other)
 
-        return covar
-    
-    # def get_covar_var(self):
-    #     raise NotImplementedError(
-    #         "get_covar_var can't be computed without materializing all the observables"
-    #     )
-    
-    # def get_covar_obs(self, other: SampledObs | None = None) -> SampledObs:
-    #     raise NotImplementedError(
-    #         "get_covar_obs materializes an object that has the size of observations "
-    #         "defeating the purpose of LazySampledObs"
-    #     )
-    
+            return covar
+        
+        elif isinstance(other, LazySampledObs):
+            mean_1 = 0
+            mean_2 = 0
+            for batch_1, weights_1, batch_2, weights_2 in zip(self._observations, self._weights, other._observations, other._weights):
+                weighted_data_1 = _normalize_no_center(batch_1, weights_1)
+                weighted_data_2 = _normalize_no_center(batch_2, weights_2)
+                mean_1 += _get_mean(batch_1, weights_1)
+                mean_2 += _get_mean(batch_2, weights_2)
+                covar += _get_covar(weighted_data_1, weighted_data_2)
+
+            return covar - jnp.tensordot(jnp.conj(mean_1), mean_2, axes=0)
+        
+        else:
+            raise NotImplementedError(
+                "Can only compute the variance with a SampledObs or a LazySampledObs, "
+                f"got {other}"
+            )
+        
+    # def get_covar_obs(self, other: SampledObs | LazySampledObs | None = None) -> SimpleSampledObs:
+        
+
     def transform(self, element_wise_fn=lambda x: x, linear_map=None) -> LazySampledObs:
         if linear_map is not None:
             raise NotImplementedError(
@@ -415,14 +413,8 @@ class LazySampledObs():
 
         return LazySampledObs(new_obs, self.weights)
 
-
-
-
-
-
-
-class BatchedJacobian:
-    pass
+# class BatchedJacobian:
+#     pass
 #     """
 #     Reusable, batched representation of sampled network logarithmic
 #     derivatives.

@@ -3,7 +3,7 @@ import warnings
 import numpy as np
 import jax
 
-from jVMC_exp.solver.base import SolverState, AbstractSolver
+from jVMC_exp.solver.base import AbstractSolver
 
 def _eigh_numpy(S):
     e, V = np.linalg.eigh(np.array(S))
@@ -80,14 +80,22 @@ class PinvSNR(AbstractSolver):
     def _needs_dense_matrix(self) -> bool:
         return True
     
-    def __call__(self, S, F, solver_state: SolverState):
+    def __call__(
+            self, S, F, *, 
+            F_var, n_samples, exact_sampler, holomorphic, **kwargs
+        ):
         # Transform equation to eigenbasis and compute Signal to Noise Ratio
         self._transform_to_eigenbasis(S, F)
-        rho = solver_state.covar_grad_o_loc().transform(
-            solver_state.rhs_trans_fn, 
-            jnp.transpose(jnp.conj(self.last_eigenvectors))
-        )
-        snr = get_snr(self._VtF, rho.var.ravel(), rho._num_samples)
+        
+        # rho = solver_state.covar_grad_o_loc().transform(
+        #     solver_state.rhs_trans_fn, 
+        #     jnp.transpose(jnp.conj(self.last_eigenvectors))
+        # )
+        if F_var is not None:
+            rho_var = F_var # TODO
+            snr = get_snr(self._VtF, rho_var.ravel(), n_samples)
+        else:
+            snr = None
 
         # Discard eigenvalues below numerical precision
         invEv = jnp.where(jnp.abs(self.last_eigenvalues / self.last_eigenvalues[-1]) > 1e-14, 1. / self.last_eigenvalues, 0.)
@@ -98,13 +106,13 @@ class PinvSNR(AbstractSolver):
         first = True 
         while (residual > self.pinv_tol and cutoff > self.pinv_cutoff) or first:
             residual, cutoff, pinvEv, effective_rank = self._regularizer_step(
-                cutoff, snr, self.last_eigenvalues, invEv, self._VtF, F_norm, solver_state.exact_sampler
+                cutoff, snr, self.last_eigenvalues, invEv, self._VtF, F_norm, exact_sampler
             )
 
             first = False
 
         update = jnp.dot(self.last_eigenvectors, (pinvEv * self._VtF))
-        update = update if solver_state.holomorphic else jnp.real(update)
+        update = update if holomorphic else jnp.real(update)
         info = dict(
             residual=residual.item(),
             pinv_cutoff=cutoff.item(),
@@ -123,7 +131,7 @@ class PinvSNR(AbstractSolver):
         regularizer = smooth_cutoff_fn(jnp.abs(eigenvalues / eigenvalues[-1]), cutoff)
 
         # Construct a soft cutoff based on the SNR
-        if not exact_sampler:
+        if not exact_sampler and snr is not None:
             regularizer *= smooth_cutoff_fn(snr, self.snr_tol)
 
         pinvEv = invEv * regularizer

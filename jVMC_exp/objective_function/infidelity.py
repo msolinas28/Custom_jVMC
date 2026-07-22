@@ -5,7 +5,7 @@ import warnings
 from jVMC_exp.sampler import AbstractSampler
 from jVMC_exp.operator.discrete.base import AbstractOperator
 from jVMC_exp.operator.discrete.branch_free import IdentityOperator
-from jVMC_exp.stats import SampledObs
+from jVMC_exp.stats import SampledObs, LazySampledObs
 from .base import AbstractObjectiveFunction, ObjectiveFunctionOutput
 
 class MovingAverage:
@@ -42,7 +42,8 @@ class Infidelity(AbstractObjectiveFunction):
         conjugated_operator: AbstractOperator | None=None,
         control_variate: str | None = None,
         moving_average_width: int=1,
-        l_dim: int=2
+        l_dim: int=2,
+        batched_jacobian: bool = False
     ):
         self.control_variate = control_variate
         self.moving_average_width = moving_average_width
@@ -64,6 +65,8 @@ class Infidelity(AbstractObjectiveFunction):
         self._conjugated_operator = conjugated_operator or self.operator
 
         self._reset_cached_observables()
+
+        self._batched_jacobian = batched_jacobian
 
     @property
     def reference_sampler(self):
@@ -172,15 +175,18 @@ class Infidelity(AbstractObjectiveFunction):
             **kwargs
         ) -> ObjectiveFunctionOutput:
         value = self(sampler, sample_ref_state=sample_ref_state, **kwargs)
-        grad_log_psi = SampledObs(sampler.psi.gradients(sampler.samples), sampler.weights)
-        if not compute_grad:
-            return ObjectiveFunctionOutput(o_loc=value, grad_log_psi=grad_log_psi)
+        if self._batched_jacobian:
+            grad_log_psi = LazySampledObs(sampler.psi.lazy_gradients(sampler.samples), sampler.weights)
+        else:
+            grad_log_psi = SampledObs(sampler.psi.gradients(sampler.samples), sampler.weights)
 
-        f_loc = SampledObs(self._psi_f_loc, sampler.weights)
-        grad = grad_log_psi.get_covar_obs(f_loc)
-        grad._observations *= - 2.0 * self._ref_f_loc
+        if compute_grad:
+            f_loc = SampledObs(-2.0 * self._ref_f_loc * self._psi_f_loc, sampler.weights)
+            grad, grad_var = grad_log_psi.get_covar_and_covar_var(f_loc)
 
-        return ObjectiveFunctionOutput(o_loc=value, grad=grad, grad_log_psi=grad_log_psi)
+            return ObjectiveFunctionOutput(o_loc=value, grad=grad, grad_var=grad_var, grad_log_psi=grad_log_psi)
+        
+        return ObjectiveFunctionOutput(o_loc=value, grad_log_psi=grad_log_psi)
     
     def _reset_cached_observables(self):
         self._ref_f_loc = None

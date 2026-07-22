@@ -14,7 +14,7 @@ from jVMC_exp.util import make_cmplx_array, make_real_array, remove_double
 from jVMC_exp.util.output_manager import OutputManager
 from jVMC_exp.stepper import AbstractStepper, Euler
 from jVMC_exp.util import ObservableEntry, measure
-from jVMC_exp.solver.base import AbstractSolver, SolverState
+from jVMC_exp.solver.base import AbstractSolver
 from jVMC_exp.solver.pinv_snr import PinvSNR
 from jVMC_exp.objective_function.base import AbstractObjectiveFunction, ObjectiveFunctionOutput
 
@@ -297,11 +297,10 @@ class Evolution(AbstractOptimizer):
             sampler, psi, resample_stepper, use_cross_valiadation, output_manager=output_manager
         )
 
-        self._solver_state = SolverState(
-            covar_grad_o_loc=lambda: self._covar_grad_o_loc,
-            rhs_trans_fn=self._rhs_trans_fn,
+        self._solver_state = dict(
             exact_sampler=isinstance(self.sampler, ExactSampler),
-            holomorphic=self.psi.holomorphic
+            holomorphic=self.psi.holomorphic,
+            n_samples=sampler.numSamples
         )
 
         self._F0 = None
@@ -343,13 +342,12 @@ class Evolution(AbstractOptimizer):
     
     def get_update(self, objective_function_output: ObjectiveFunctionOutput):
         if self.psi.holomorphic:
-            # TODO: check if this is allocating double the memory
+            # TODO: fix this
             objective_function_output = objective_function_output.transform(self._remove_double_trans)
-    
-        self._covar_grad_o_loc = objective_function_output.grad
+
         S = self._get_lhs(objective_function_output.grad_log_psi)
         F = self._get_rhs(objective_function_output.grad)   
-        update, self._additional_info = self.solver(S, F, self.solver_state)
+        update, self._additional_info = self.solver(S, F, **self.solver_state)
         self.update = self._make_real_fn(update) if self.psi.holomorphic else update
 
         return self.update
@@ -423,10 +421,12 @@ class Evolution(AbstractOptimizer):
 
         return matvec 
     
-    def _get_rhs(self, grad: SampledObs):
-        self._F0 = - self.rhsPrefactor * grad.mean.ravel()
+    def _get_rhs(self, grad):
+        self._F0 = - self.rhsPrefactor * grad
         F = self._lhs_trans_fn(self._F0)
         F.block_until_ready()
+
+        self._solver_state["F_var"] = 1 # TODO
 
         return F
 
