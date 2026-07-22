@@ -132,8 +132,8 @@ class AbstractOptimizer(ABC):
             raise ValueError("For ground state search the stepper must " \
                             f"implement a mehod called 'update_dt'")
 
-        pbar = tqdm.tqdm(range(steps))
-        for n in pbar: 
+        pbar = tqdm.tqdm(range(steps), disable=jax.process_index() != 0)
+        for n in pbar:
             stepper.update_dt(n)
             self.update_hyperparams(n)
 
@@ -146,12 +146,12 @@ class AbstractOptimizer(ABC):
             self.psi.parameters = new_parameters
 
             pbar.set_postfix(E=f"{self.o_loc}")
-  
+
         self.output_manager.print_timings()
-        
+
         if save_meta_data:
             return self.output_manager.data['observables'], self.output_manager.data['metadata']
-        
+
         return self.output_manager.data["observables"]
 
     def time_evolution(
@@ -165,7 +165,7 @@ class AbstractOptimizer(ABC):
             **kwargs
         ):
 
-        pbar = tqdm.tqdm(total=t_max)
+        pbar = tqdm.tqdm(total=t_max, disable=jax.process_index() != 0)
         t = 0
         while t < t_max:
             new_parameters, dt = self.step(t, stepper, objective_function, **kwargs) 
@@ -198,9 +198,9 @@ class AbstractOptimizer(ABC):
 
         if save_meta_data:
             return self.output_manager.data['observables'], self.output_manager.data['metadata']
-        
+
         return self.output_manager.data["observables"]
-    
+
     def update_hyperparams(self, step):
         pass
 
@@ -270,13 +270,14 @@ class Evolution(AbstractOptimizer):
         self._make_real_fn = jax.jit(partial(make_real_array, params_shape=psi.paramShapes))
         self._remove_double_trans = jax.vmap(partial(remove_double, params_shape=psi.paramShapes))
         
-        warnings.warn(
-            "Naming convention changed: "
-            "'diag_shift' now adds a constant term to the diagonal, "
-            "while 'diag_scale' multiplies the diagonal entries. "
-            "This is the opposite of the previous convention.",
-            UserWarning,
-        )
+        if jax.process_index() == 0:
+            warnings.warn(
+                "Naming convention changed: "
+                "'diag_shift' now adds a constant term to the diagonal, "
+                "while 'diag_scale' multiplies the diagonal entries. "
+                "This is the opposite of the previous convention.",
+                UserWarning,
+            )
 
         self._solver = solver
         self._get_lhs = self._get_lhs_dense if solver._needs_dense_matrix else self._get_lhs_lazy

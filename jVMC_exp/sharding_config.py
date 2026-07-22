@@ -12,11 +12,14 @@ if global_defs.USE_DISTRIBUTED:
         jax.distributed.initialize()
         num_processes = jax.process_count()
         num_devices = jax.device_count()
-        print(f"JAX distributed initialized: {num_processes} processes and {num_devices} devices.")
+        if jax.process_index() == 0:
+            print(f"JAX distributed initialized: {num_processes} processes and {num_devices} devices.")
     except Exception as e:
-        print(f"Failed to initialize JAX distributed: {e}")
+        if jax.process_index() == 0:
+            print(f"Failed to initialize JAX distributed: {e}")
 else:
-    print("Running in single-node mode (JVMC_USE_DISTRIBUTED not set)")
+    if jax.process_index() == 0:
+        print("Running in single-node mode (JVMC_USE_DISTRIBUTED not set)")
 
 global_devices = mesh_utils.create_device_mesh((jax.device_count(),))
 MESH = Mesh(global_devices, axis_names=("devices",))
