@@ -194,8 +194,8 @@ class SampledObs():
         chain_length = self._num_samples // n_chains
         chain_obs = SampledObs(self.observations.reshape((n_chains, chain_length)).T)
 
-        B = jnp.sum((chain_obs.mean.real - self.mean.real)**2) / (n_chains - 1)
-        W = jnp.mean(chain_obs.var) 
+        B = jnp.var(chain_obs.mean.real, ddof=1)
+        W = jnp.mean(chain_obs.var * chain_length / (chain_length - 1))
         
         return jnp.sqrt(((chain_length - 1) / chain_length * W + B) / W)
     
