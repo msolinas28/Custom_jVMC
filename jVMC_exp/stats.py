@@ -66,6 +66,55 @@ def _get_covar_var(centered_data_1, centered_data_2, weights):
 
     return covar_sqrd - jnp.abs(covar) ** 2
 
+@jax.jit
+@jax.vmap
+def _outer_per_sample(data_1, data_2):
+    return jnp.outer(data_1, data_2)
+
+@jax.jit
+def _get_covar_var_moments(data_1, data_2, weights):
+    """
+    Weighted raw (uncentered) moments of a single batch, needed to accumulate
+    both the covariance and the variance of the covariance across batches
+    without having to center the data first (which would require the global
+    mean, i.e. a full pass over the data, before it can even start).
+    """
+    data_1 = data_1.reshape(data_1.shape[0], -1)
+    data_2 = data_2.reshape(data_2.shape[0], -1)
+    sq_1 = jnp.abs(data_1) ** 2
+    sq_2 = jnp.abs(data_2) ** 2
+
+    mean_1 = jnp.tensordot(weights, data_1, axes=(0, 0))
+    mean_2 = jnp.tensordot(weights, data_2, axes=(0, 0))
+    var_1 = jnp.tensordot(weights, sq_1, axes=(0, 0))
+    var_2 = jnp.tensordot(weights, sq_2, axes=(0, 0))
+
+    m_11 = jnp.tensordot(weights, _get_covar_per_sample(data_1, data_2), axes=(0, 0))
+    m_20 = jnp.tensordot(weights, _outer_per_sample(data_1, data_2), axes=(0, 0))
+    m_sq1 = jnp.tensordot(weights, _outer_per_sample(sq_1, data_2), axes=(0, 0))
+    m_sq2 = jnp.tensordot(weights, _outer_per_sample(data_1, sq_2), axes=(0, 0))
+    m_sqsq = jnp.tensordot(weights, _outer_per_sample(sq_1, sq_2), axes=(0, 0))
+
+    return mean_1, mean_2, var_1, var_2, m_11, m_20, m_sq1, m_sq2, m_sqsq
+
+@jax.jit
+def _finalize_covar_and_covar_var(mean_1, mean_2, var_1, var_2, m_11, m_20, m_sq1, m_sq2, m_sqsq):
+    covar = m_11 - jnp.outer(jnp.conj(mean_1), mean_2)
+
+    second_moment = (
+        m_sqsq
+        - 2 * jnp.real(jnp.conj(mean_2)[None, :] * m_sq1)
+        - 2 * jnp.real(jnp.conj(mean_1)[:, None] * m_sq2)
+        + 2 * jnp.real(jnp.outer(jnp.conj(mean_1), jnp.conj(mean_2)) * m_20)
+        + 2 * jnp.real(jnp.outer(mean_1, jnp.conj(mean_2)) * m_11)
+        + jnp.outer(var_1, jnp.abs(mean_2) ** 2)
+        + jnp.outer(jnp.abs(mean_1) ** 2, var_2)
+        - 3 * jnp.outer(jnp.abs(mean_1) ** 2, jnp.abs(mean_2) ** 2)
+    )
+    covar_var = second_moment - jnp.abs(covar) ** 2
+
+    return covar, covar_var
+
 @jax.jit(static_argnums=(1,))
 def _apply_and_project(data, apply_fn, projection):
     return jnp.matmul(projection, apply_fn(data)) 
@@ -73,14 +122,6 @@ def _apply_and_project(data, apply_fn, projection):
 @jax.jit
 def _get_tangent_kernel(norm_data):
     return jnp.matmul(norm_data, jnp.conj(jnp.transpose(norm_data)))
-
-@jax.jit
-def _set_matrix_block(matrix, block, row_start, col_start):
-    return jax.lax.dynamic_update_slice(matrix, block, (row_start, col_start))
-
-@jax.jit
-def _covar_obs_block(norm_grad, norm_obs):
-    return jax.vmap(jnp.outer)(jnp.conj(norm_grad), norm_obs)
 
 @jax.jit(static_argnums=(1, 2))
 @partial(jax.vmap, in_axes=(0, None, None))
@@ -214,6 +255,12 @@ class SampledObs():
         covar_per_sample = _get_covar_per_sample(self._centered_obs, other._centered_obs)
 
         return SampledObs(covar_per_sample, self.weights)
+    
+    def get_covar_and_covar_var(self, other: SampledObs | None = None):
+        covar = self.get_covar(other)
+        covar_var = self.get_covar_var(other)
+
+        return covar, covar_var
     
     def get_R_hat(self, n_chains):
         """
@@ -352,8 +399,6 @@ class LazySampledObs():
     def error_of_mean(self):
         return _get_error_of_mean(self.var, self.weights)
 
-    # TODO: understand if tangent kernel is needed
-
     def get_covar(self, other: SampledObs | LazySampledObs | None = None):
         """
         Returns the covariance.
@@ -397,328 +442,99 @@ class LazySampledObs():
                 "Can only compute the variance with a SampledObs or a LazySampledObs, "
                 f"got {other}"
             )
-        
-    # def get_covar_obs(self, other: SampledObs | LazySampledObs | None = None) -> SimpleSampledObs:
-        
+    
+    def get_covar_and_covar_var(self, other: SampledObs | LazySampledObs | None = None):
+        moments = None
+        def _accumulate(moments, batch_1, batch_2, weights):
+            new_moments = _covar_stats(batch_1, batch_2, weights)
+            if moments is None:
+                return new_moments
+            
+            return tuple(m + b for m, b in zip(moments, new_moments))     
 
-    def transform(self, element_wise_fn=lambda x: x, linear_map=None) -> LazySampledObs:
-        if linear_map is not None:
+        if other is None:
+            for batch, weights in zip(self._observations, self._weights):
+                moments = _accumulate(moments, batch, batch, weights)
+
+        elif isinstance(other, SampledObs):
+            observations_other = _reshape_in_batches(other._observations, len(self._observations))
+            for batch, weights, batch_other in zip(self._observations, self._weights, observations_other):
+                moments = _accumulate(moments, batch, batch_other, weights)
+
+        elif isinstance(other, LazySampledObs):
+            for batch, weights, batch_other in zip(self._observations, self._weights, other._observations):
+                moments = _accumulate(moments, batch, batch_other, weights)
+        
+        else:
             raise NotImplementedError(
-                "A linear map can't be applied withoud materializing all the observables"
+                "Can only compute the variance with a SampledObs or a LazySampledObs, "
+                f"got {other}"
             )
+
+        covar = moments[2] - moments[0] * moments[1]
+        covar_var = moments[3] - moments[2]**2
+
+        return covar, covar_var
+
+def _covar_stats(data_1, data_2, weights):
+    xy_i = jnp.einsum('i..., i... -> i...', jnp.conj(data_1), data_2)
+    xy_sq_i = jnp.abs(xy_i)**2
+    xy_mean = jnp.einsum('i, i...', weights, xy_i)
+    xy_sq_mean = jnp.einsum('i, i...', weights, xy_sq_i)
+    x_mean = jnp.einsum('i, i...', weights, data_1)
+    y_mean = jnp.einsum('i, i...', weights, data_2)
+
+    return x_mean, y_mean, xy_mean, xy_sq_mean
         
-        jitted_fn = jax.jit(element_wise_fn)
-        transormed_iterable = lambda: (jitted_fn(batch) for batch in self._observations)
-        new_obs = SizedIterable(transormed_iterable, self._observations.n_iterations)
+    # def get_covar_and_covar_var(self, other: SampledObs | LazySampledObs | None = None):
+    #     """
+    #     Returns the covariance and the variance of the covariance.
 
-        return LazySampledObs(new_obs, self.weights)
+    #     Both quantities are accumulated together over a single pass through
+    #     the underlying iterable(s), so this should be preferred over calling
+    #     `get_covar` and `get_covar_var` separately.
 
-# class BatchedJacobian:
-#     pass
-#     """
-#     Reusable, batched representation of sampled network logarithmic
-#     derivatives.
+    #     Args:
+    #         * ``other`` [optional]: Another instance of `SampledObs` or `LazySampledObs`.
+    #     """
+    #     def _accumulate(moments, batch_1, batch_2, weights):
+    #         batch_moments = _get_covar_var_moments(batch_1, batch_2, weights)
+    #         if moments is None:
+    #             return batch_moments
+    #         return tuple(m + b for m, b in zip(moments, batch_moments))
 
-#     The object stores samples and weights, but not the full sample-parameter
-#     Jacobian. Jacobian blocks are recomputed from ``psi.gradients`` whenever
-#     they are requested. Small reductions such as the weighted mean and diagonal
-#     are cached after first use.
-#     """
-#     def __init__(
-#             self,
-#             sampler,#: AbstractSampler, 
-#             block_transform: Callable = lambda x: x,
-#             real_imag_doubled: bool = False,
-#         ):
-#         self._sampler = sampler
-#         self._block_transform = block_transform
-#         self._real_imag_doubled = bool(real_imag_doubled)
+    #     moments = None
 
-#         num_devices = MESH.shape["devices"]
-#         remainder = self._num_samples % num_devices
-#         self._num_pad = (num_devices - remainder) if remainder != 0 else 0
-#         if self._num_pad > 0:
-#             sample_pad = ((0, self._num_pad),) + ((0, 0),) * (samples.ndim - 1)
-#             samples = jnp.pad(samples, sample_pad, mode="constant")
-#             weights = jnp.pad(weights, (0, self._num_pad), constant_values=0)
+    #     if other is None:
+    #         for batch, weights in zip(self._observations, self._weights):
+    #             moments = _accumulate(moments, batch, batch, weights)
 
-#         if batch_size is None:
-#             batch_size = psi.batchSize
-#         if batch_size % num_devices != 0:
-#             raise ValueError(
-#                 f"The batch size ({batch_size}) has to be divisible by the "
-#                 f"number of devices ({num_devices})"
-#             )
-#         self.batch_size = int(batch_size)
+    #     elif isinstance(other, SampledObs):
+    #         other_batches = _reshape_in_batches(other.observations, len(self._observations))
 
-#         self._samples = jax.device_put(samples, DEVICE_SHARDING)
-#         self._weights = jax.device_put(weights, DEVICE_SHARDING)
-#         self._padded_num_samples = int(samples.shape[0])
-#         self._slices = tuple(
-#             slice(start, min(start + self.batch_size, self._padded_num_samples))
-#             for start in range(0, self._padded_num_samples, self.batch_size)
-#         )
-#         self._mean = None
-#         self._diagonal = None
-#         self._num_obs = None
-#         self._dtype = None
+    #         for batch, weights, batch_other in zip(self._observations, self._weights, other_batches):
+    #             moments = _accumulate(moments, batch, batch_other, weights)
 
-#     @property
-#     def samples(self):
-#         return self._samples
+    #     elif isinstance(other, LazySampledObs):
+    #         for batch_1, weights_1, batch_2 in zip(self._observations, self._weights, other._observations):
+    #             moments = _accumulate(moments, batch_1, batch_2, weights_1)
 
-#     @property
-#     def weights(self):
-#         return self._weights
+    #     else:
+    #         raise NotImplementedError(
+    #             "Can only compute the variance with a SampledObs or a LazySampledObs, "
+    #             f"got {other}"
+    #         )
 
-#     @property
-#     def mean(self):
-#         if self._mean is None:
-#             self._mean = self._compute_mean()
-#         return self._mean
+    #     return _finalize_covar_and_covar_var(*moments)
 
-#     @property
-#     def sync_target(self):
-#         return self.mean
+    # def transform(self, element_wise_fn=lambda x: x, linear_map=None) -> LazySampledObs:
+    #     if linear_map is not None:
+    #         raise NotImplementedError(
+    #             "A linear map can't be applied withoud materializing all the observables"
+    #         )
+        
+    #     jitted_fn = jax.jit(element_wise_fn)
+    #     transormed_iterable = lambda: (jitted_fn(batch) for batch in self._observations)
+    #     new_obs = SizedIterable(transormed_iterable, self._observations.n_iterations)
 
-#     @property
-#     def num_blocks(self):
-#         return len(self._slices)
-
-#     @property
-#     def num_effective_samples(self):
-#         factor = 2 if self._real_imag_doubled else 1
-#         return factor * self._padded_num_samples
-
-#     @property
-#     def _normalized_obs(self):
-#         if not self._real_imag_doubled:
-#             return self.materialize()._normalized_obs
-#         return jnp.concatenate(tuple(self.iter_normalized_blocks()), axis=0)
-
-#     def _slice(self, idx):
-#         return self._slices[int(idx)]
-
-#     def _effective_slice(self, idx):
-#         sl = self._slice(idx)
-#         if not self._real_imag_doubled:
-#             return sl
-#         return slice(2 * sl.start, 2 * sl.stop)
-
-#     def _block_output(self, block):
-#         if self._num_obs is None:
-#             self._num_obs = int(block.shape[-1])
-#             self._dtype = block.dtype
-#         return block
-
-#     def _compute_block(self, samples):
-#         return self._block_transform(self.psi.gradients(samples))
-
-#     def block(self, idx):
-#         sl = self._slice(idx)
-#         return self._block_output(self._compute_block(self.samples[sl]))
-
-#     def iter_blocks(self):
-#         for idx in range(self.num_blocks):
-#             yield self.block(idx)
-
-#     def normalized_block(self, idx):
-#         sl = self._slice(idx)
-#         block = self.block(idx)
-#         block = self._center_weighted_block_sh(
-#             block,
-#             self.weights[sl],
-#             mean=self.mean,
-#             batch_size=int(block.shape[0]),
-#         )
-#         if self._real_imag_doubled:
-#             return jnp.concatenate([jnp.real(block), jnp.imag(block)], axis=0)
-#         return block
-
-#     def iter_normalized_blocks(self):
-#         for idx in range(self.num_blocks):
-#             yield self.normalized_block(idx)
-
-#     def materialize(self):
-#         observations = jnp.concatenate(tuple(self.iter_blocks()), axis=0)[:self._num_samples]
-#         return SampledObs(observations, self._raw_weights)
-
-#     def get_subset(self, start=None, end=None, step=None):
-#         sl = slice(start, end, step)
-#         weights = self._raw_weights[sl]
-#         return BatchedJacobian(
-#             self.psi,
-#             self._raw_samples[sl],
-#             weights / jnp.sum(weights),
-#             batch_size=self.batch_size,
-#             block_transform=self._block_transform,
-#             real_imag_doubled=self._real_imag_doubled,
-#         )
-
-#     def transform(self, element_wise_fn=lambda x: x, linear_map=None):
-#         def block_transform(x):
-#             x = self._block_transform(x)
-#             if linear_map is not None:
-#                 return _apply_and_project(x, element_wise_fn, linear_map)
-#             return jax.jit(element_wise_fn)(x)
-
-#         return BatchedJacobian(
-#             self.psi,
-#             self._raw_samples,
-#             self._raw_weights,
-#             batch_size=self.batch_size,
-#             block_transform=block_transform,
-#             real_imag_doubled=self._real_imag_doubled,
-#         )
-
-#     def real_imag_doubled(self):
-#         out = BatchedJacobian(
-#             self.psi,
-#             self._raw_samples,
-#             self._raw_weights,
-#             batch_size=self.batch_size,
-#             block_transform=self._block_transform,
-#             real_imag_doubled=True,
-#         )
-#         out._mean = self._mean
-#         return out
-
-#     def get_covar(self, other=None):
-#         if other is None:
-#             out = None
-#             for block in self.iter_normalized_blocks():
-#                 contribution = jnp.conj(jnp.transpose(block)) @ block
-#                 out = contribution if out is None else out + contribution
-#             return out
-
-#         if isinstance(other, BatchedJacobian):
-#             out = None
-#             for left, right in zip(self.iter_normalized_blocks(), other.iter_normalized_blocks()):
-#                 contribution = jnp.conj(jnp.transpose(left)) @ right
-#                 out = contribution if out is None else out + contribution
-#             return out
-
-#         other_norm = other._normalized_obs
-#         out = None
-#         for idx, block in enumerate(self.iter_normalized_blocks()):
-#             sl = self._slice(idx)
-#             contribution = jnp.conj(jnp.transpose(block)) @ other_norm[sl]
-#             out = contribution if out is None else out + contribution
-#         return out
-
-#     def get_covar_obs(self, other: SampledObs | None = None) -> SampledObs:
-#         if other is None:
-#             return self.materialize().get_covar_obs()
-
-#         other_norm = other._normalized_obs
-#         blocks = []
-#         for idx, block in enumerate(self.iter_normalized_blocks()):
-#             sl = self._slice(idx)
-#             blocks.append(_covar_obs_block(block, other_norm[sl]))
-
-#         observations = jnp.concatenate(tuple(blocks), axis=0)[:self._num_samples]
-#         return SampledObs(observations, self._raw_weights)
-
-#     def tangent_kernel(self):
-#         first_block = jax.block_until_ready(self.normalized_block(0))
-#         tangent = jax.device_put(
-#             jnp.zeros((self.num_effective_samples, self.num_effective_samples), dtype=first_block.dtype),
-#             DEVICE_SHARDING,
-#         )
-
-#         for idx_i in range(self.num_blocks):
-#             sl_i = self._effective_slice(idx_i)
-#             left = first_block if idx_i == 0 else jax.block_until_ready(self.normalized_block(idx_i))
-#             for idx_j in range(idx_i, self.num_blocks):
-#                 sl_j = self._effective_slice(idx_j)
-#                 right = left if idx_i == idx_j else jax.block_until_ready(self.normalized_block(idx_j))
-#                 block = self._tangent_cross_block_sh(
-#                     left,
-#                     right=jax.device_put(right, REPLICATED_SHARDING),
-#                     batch_size=int(left.shape[0]),
-#                 )
-#                 tangent = _set_matrix_block(tangent, block, sl_i.start, sl_j.start)
-
-#                 if idx_i != idx_j:
-#                     lower = self._tangent_cross_block_sh(
-#                         right,
-#                         right=jax.device_put(left, REPLICATED_SHARDING),
-#                         batch_size=int(right.shape[0]),
-#                     )
-#                     tangent = _set_matrix_block(tangent, lower, sl_j.start, sl_i.start)
-#                 tangent = jax.block_until_ready(tangent)
-
-#         return tangent
-
-#     def normalized_observable(self, obs: SampledObs):
-#         obs = obs._normalized_obs.reshape(-1)
-#         if not self._real_imag_doubled:
-#             return obs[:self.num_effective_samples]
-
-#         blocks = []
-#         for idx in range(self.num_blocks):
-#             sl = self._slice(idx)
-#             block = obs[sl]
-#             blocks.append(jnp.concatenate([jnp.real(block), jnp.imag(block)], axis=0))
-#         return jnp.concatenate(tuple(blocks), axis=0)
-
-#     def diagonal(self):
-#         if self._diagonal is None:
-#             diagonal = None
-#             for block in self.iter_normalized_blocks():
-#                 contribution = jnp.sum(jnp.abs(block) ** 2, axis=0)
-#                 diagonal = contribution if diagonal is None else diagonal + contribution
-#             self._diagonal = diagonal
-#         return self._diagonal
-
-#     def matvec(self, v):
-#         out = None
-#         for block in self.iter_normalized_blocks():
-#             contribution = jnp.conj(jnp.transpose(block)) @ (block @ v)
-#             out = contribution if out is None else out + contribution
-#         return out
-
-#     def conj_transpose_matvec(self, v):
-#         out = None
-#         for idx, block in enumerate(self.iter_normalized_blocks()):
-#             sl = self._effective_slice(idx)
-#             contribution = self._contract_block_sh(
-#                 block,
-#                 v[sl],
-#                 batch_size=None,
-#             )
-#             contribution = contribution[0] if contribution.ndim > 1 else contribution
-#             out = contribution if out is None else out + contribution
-#         return out
-
-#     def _compute_mean(self):
-#         mean = None
-#         for idx in range(self.num_blocks):
-#             sl = self._slice(idx)
-#             block = jax.block_until_ready(self.block(idx))
-#             if mean is None:
-#                 mean = jax.device_put(jnp.zeros((block.shape[-1],), dtype=block.dtype), REPLICATED_SHARDING)
-#             contribution = self._mean_block_sh(
-#                 block,
-#                 self.weights[sl],
-#                 batch_size=None,
-#             )
-#             contribution = contribution[0] if contribution.ndim > 1 else contribution
-#             mean = jax.block_until_ready(mean + contribution)
-#         return mean
-
-#     @sharded(use_vmap=False, in_specs=(DEVICE_SPEC, DEVICE_SPEC), out_specs=REPLICATED_SPEC)
-#     def _mean_block_sh(self, block, weights, *, batch_size):
-#         return jax.lax.psum(jnp.tensordot(weights, block, axes=(0, 0)), "devices")
-
-#     @sharded(use_vmap=False, in_specs=(DEVICE_SPEC, DEVICE_SPEC))
-#     def _center_weighted_block_sh(self, block, weights, *, mean, batch_size):
-#         return (block - mean[None, :]) * jnp.sqrt(weights)[:, None]
-
-#     @sharded(use_vmap=False, in_specs=(DEVICE_SPEC,))
-#     def _tangent_cross_block_sh(self, left, *, right, batch_size):
-#         return left @ jnp.conj(jnp.transpose(right))
-
-#     @sharded(use_vmap=False, in_specs=(DEVICE_SPEC, DEVICE_SPEC), out_specs=REPLICATED_SPEC)
-#     def _contract_block_sh(self, block, v, *, batch_size):
-#         return jax.lax.psum(jnp.conj(jnp.transpose(block)) @ v, "devices")
+    #     return LazySampledObs(new_obs, self.weights)
