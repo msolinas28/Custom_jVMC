@@ -466,8 +466,7 @@ class AbstractMCSampler(AbstractSampler):
 
         meta, configs = jax.lax.scan(scan_fun, (states, logProb, key, numProposed, numAccepted), None, length=numSamples)
 
-        # Reshape in from (numChains, numSamplesPerChain, sampleShape) to (numChains * numSamplesPerChain, sampleShape)
-        return meta, configs.reshape((configs.shape[0] * configs.shape[1],) + sampleShape), updateProposerArg
+        return meta, jnp.swapaxes(configs, 0, 1).reshape((-1,) + sampleShape), updateProposerArg
 
     def _sweep(
             self, states, logProb, key, numProposed, numAccepted, params, 
