@@ -2,19 +2,8 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 from functools import partial, cached_property
-from typing import Callable
-import warnings
 
-# from jVMC_exp.sampler import AbstractSampler
-from jVMC_exp.sharding_config import (
-    DEVICE_SHARDING,
-    REPLICATED_SHARDING,
-    DEVICE_SPEC,
-    REPLICATED_SPEC,
-    MESH,
-    sharded,
-    SizedIterable,
-)
+from jVMC_exp.sharding_config import DEVICE_SHARDING, MESH, SizedIterable
 
 @jax.jit
 def _get_mean(data, weights):
@@ -73,12 +62,6 @@ def _outer_per_sample(data_1, data_2):
 
 @jax.jit
 def _get_covar_var_moments(data_1, data_2, weights):
-    """
-    Weighted raw (uncentered) moments of a single batch, needed to accumulate
-    both the covariance and the variance of the covariance across batches
-    without having to center the data first (which would require the global
-    mean, i.e. a full pass over the data, before it can even start).
-    """
     data_1 = data_1.reshape(data_1.shape[0], -1)
     data_2 = data_2.reshape(data_2.shape[0], -1)
     sq_1 = jnp.abs(data_1) ** 2
@@ -299,7 +282,8 @@ class SampledObs():
     
     def transform(self, element_wise_fn=lambda x: x, linear_map=None) -> SampledObs:
         """
-        Apply a transformation to observations and return a new SampledObs.
+        Apply a transformation to observations. 
+        It modifies the underlying observations to save memory.
             
         The transformation is applied in two stages:
         1. Element-wise function applied to each observation
@@ -308,17 +292,12 @@ class SampledObs():
         Args:
             element_wise_fun: Function applied element-wise to each observation.
             linear_map: Optional linear transformation matrix applied after element_wise_fun.
-        
-        Returns:
-            SampledObs: New instance with transformed observations.
         """
         if linear_map is not None:
-            new_obs = _apply_and_project(self.observations, element_wise_fn, linear_map)
+            self._observations = _apply_and_project(self.observations, element_wise_fn, linear_map)
         else:
-            new_obs = jax.jit(element_wise_fn)(self.observations)
-        
-        return SampledObs(new_obs, self.weights)
-    
+            self._observations = jax.jit(element_wise_fn)(self.observations)
+
     def select(self, idx):
         """
         Returns a `SampledObs` for the data selection indicated by the given indices.
@@ -373,7 +352,25 @@ class LazySampledObs():
         self._num_samples = len(weights)
         
         self._weights = _reshape_in_batches(weights, len(observations))
-        self._observations = observations
+        self.observations = observations
+
+    @property
+    def observations(self):
+        return self._observations
+
+    @observations.setter
+    def observations(self, value):
+        if not isinstance(value, SizedIterable):
+            raise ValueError(
+                "Observations must be an instance jVMC_exp.sharding_config.SizedIterable"
+        )
+
+        self._observations = value
+
+        # Clear cached properties
+        for name, attr in type(self).__dict__.items():
+            if isinstance(attr, cached_property):
+                self.__dict__.pop(name, None)
     
     @property
     def weights(self):
@@ -442,99 +439,55 @@ class LazySampledObs():
                 "Can only compute the variance with a SampledObs or a LazySampledObs, "
                 f"got {other}"
             )
-    
+        
     def get_covar_and_covar_var(self, other: SampledObs | LazySampledObs | None = None):
-        moments = None
+        """
+        Returns the covariance and the variance of the covariance.
+
+        Both quantities are accumulated together over a single pass through
+        the underlying iterable(s), so this should be preferred over calling
+        `get_covar` and `get_covar_var` separately.
+
+        Args:
+            * ``other`` [optional]: Another instance of `SampledObs` or `LazySampledObs`.
+        """
         def _accumulate(moments, batch_1, batch_2, weights):
-            new_moments = _covar_stats(batch_1, batch_2, weights)
+            batch_moments = _get_covar_var_moments(batch_1, batch_2, weights)
             if moments is None:
-                return new_moments
-            
-            return tuple(m + b for m, b in zip(moments, new_moments))     
+                return batch_moments
+            return tuple(m + b for m, b in zip(moments, batch_moments))
+
+        moments = None
 
         if other is None:
             for batch, weights in zip(self._observations, self._weights):
                 moments = _accumulate(moments, batch, batch, weights)
 
         elif isinstance(other, SampledObs):
-            observations_other = _reshape_in_batches(other._observations, len(self._observations))
-            for batch, weights, batch_other in zip(self._observations, self._weights, observations_other):
+            other_batches = _reshape_in_batches(other.observations, len(self._observations))
+
+            for batch, weights, batch_other in zip(self._observations, self._weights, other_batches):
                 moments = _accumulate(moments, batch, batch_other, weights)
 
         elif isinstance(other, LazySampledObs):
-            for batch, weights, batch_other in zip(self._observations, self._weights, other._observations):
-                moments = _accumulate(moments, batch, batch_other, weights)
-        
+            for batch_1, weights_1, batch_2 in zip(self._observations, self._weights, other._observations):
+                moments = _accumulate(moments, batch_1, batch_2, weights_1)
+
         else:
             raise NotImplementedError(
                 "Can only compute the variance with a SampledObs or a LazySampledObs, "
                 f"got {other}"
             )
 
-        covar = moments[2] - moments[0] * moments[1]
-        covar_var = moments[3] - moments[2]**2
+        return _finalize_covar_and_covar_var(*moments)
 
-        return covar, covar_var
-
-def _covar_stats(data_1, data_2, weights):
-    xy_i = jnp.einsum('i..., i... -> i...', jnp.conj(data_1), data_2)
-    xy_sq_i = jnp.abs(xy_i)**2
-    xy_mean = jnp.einsum('i, i...', weights, xy_i)
-    xy_sq_mean = jnp.einsum('i, i...', weights, xy_sq_i)
-    x_mean = jnp.einsum('i, i...', weights, data_1)
-    y_mean = jnp.einsum('i, i...', weights, data_2)
-
-    return x_mean, y_mean, xy_mean, xy_sq_mean
+    def transform(self, element_wise_fn=lambda x: x, linear_map=None) -> LazySampledObs:
+        if linear_map is not None:
+            raise NotImplementedError(
+                "A linear map can't be applied withoud materializing all the observables"
+            )
         
-    # def get_covar_and_covar_var(self, other: SampledObs | LazySampledObs | None = None):
-    #     """
-    #     Returns the covariance and the variance of the covariance.
-
-    #     Both quantities are accumulated together over a single pass through
-    #     the underlying iterable(s), so this should be preferred over calling
-    #     `get_covar` and `get_covar_var` separately.
-
-    #     Args:
-    #         * ``other`` [optional]: Another instance of `SampledObs` or `LazySampledObs`.
-    #     """
-    #     def _accumulate(moments, batch_1, batch_2, weights):
-    #         batch_moments = _get_covar_var_moments(batch_1, batch_2, weights)
-    #         if moments is None:
-    #             return batch_moments
-    #         return tuple(m + b for m, b in zip(moments, batch_moments))
-
-    #     moments = None
-
-    #     if other is None:
-    #         for batch, weights in zip(self._observations, self._weights):
-    #             moments = _accumulate(moments, batch, batch, weights)
-
-    #     elif isinstance(other, SampledObs):
-    #         other_batches = _reshape_in_batches(other.observations, len(self._observations))
-
-    #         for batch, weights, batch_other in zip(self._observations, self._weights, other_batches):
-    #             moments = _accumulate(moments, batch, batch_other, weights)
-
-    #     elif isinstance(other, LazySampledObs):
-    #         for batch_1, weights_1, batch_2 in zip(self._observations, self._weights, other._observations):
-    #             moments = _accumulate(moments, batch_1, batch_2, weights_1)
-
-    #     else:
-    #         raise NotImplementedError(
-    #             "Can only compute the variance with a SampledObs or a LazySampledObs, "
-    #             f"got {other}"
-    #         )
-
-    #     return _finalize_covar_and_covar_var(*moments)
-
-    # def transform(self, element_wise_fn=lambda x: x, linear_map=None) -> LazySampledObs:
-    #     if linear_map is not None:
-    #         raise NotImplementedError(
-    #             "A linear map can't be applied withoud materializing all the observables"
-    #         )
-        
-    #     jitted_fn = jax.jit(element_wise_fn)
-    #     transormed_iterable = lambda: (jitted_fn(batch) for batch in self._observations)
-    #     new_obs = SizedIterable(transormed_iterable, self._observations.n_iterations)
-
-    #     return LazySampledObs(new_obs, self.weights)
+        jitted_fn = jax.jit(element_wise_fn)
+        iterable = self._observations
+        transormed_iterable = lambda: (jitted_fn(batch) for batch in iterable)
+        self.observations = SizedIterable(transormed_iterable, iterable.n_iterations)

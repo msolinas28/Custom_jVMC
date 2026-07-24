@@ -342,12 +342,17 @@ class Evolution(AbstractOptimizer):
     
     def get_update(self, objective_function_output: ObjectiveFunctionOutput):
         if self.psi.holomorphic:
-            # TODO: fix this
-            objective_function_output = objective_function_output.transform(self._remove_double_trans)
+            objective_function_output.grad_log_psi.transform(self._remove_double_trans)
+            objective_function_output.grad = self._remove_double_trans(
+                objective_function_output.grad[None, ...]
+            )
+            objective_function_output.grad_var = self._remove_double_trans(
+                objective_function_output.grad_var[None, ...]
+            )
 
-        S = self._get_lhs(objective_function_output.grad_log_psi)
-        F = self._get_rhs(objective_function_output.grad)   
-        update, self._additional_info = self.solver(S, F, **self.solver_state)
+        A = self._get_lhs(objective_function_output.grad_log_psi)
+        b, b_var = self._get_rhs(objective_function_output.grad, objective_function_output.grad_var)
+        update, self._additional_info = self.solver(A, b, b_var=b_var, **self.solver_state)
         self.update = self._make_real_fn(update) if self.psi.holomorphic else update
 
         return self.update
@@ -377,6 +382,7 @@ class Evolution(AbstractOptimizer):
         update = self._make_cmplx_fn(update) if self.psi.holomorphic else update
         Sv = self._S0(update) if callable(self._S0) else self._S0.dot(update)
 
+        # F_0 def is changed!!
         return jnp.abs(1. + (jnp.real(update.dot(Sv)) - 2 * jnp.real(update.dot(self._F0))) / (self.o_loc.var + 1e-10))
     
     # Working
@@ -399,15 +405,18 @@ class Evolution(AbstractOptimizer):
         Returns a function that computes the matrix vector product with the left hand side of the TDVP equation
         '''
         if isinstance(grad_log_psi, LazySampledObs):
-            raw_matvec = grad_log_psi.matvec
-            diagonal = grad_log_psi.diagonal
-        else:
-            O = grad_log_psi._normalized_obs
+            raise ValueError(
+                f"Solver '{type(self.solver).__name__}' is matrix-free (_needs_dense_matrix=False) "
+                "and builds its matvec directly from the fully materialized Jacobian, but the "
+                "Jacobian was computed in batches (LazySampledObs), which has no such materialized "
+                "array. Either use a solver with _needs_dense_matrix=True (e.g. PinvSNR), or "
+                "compute the Jacobian without batching."
+            )
+        
+        def raw_matvec(v):
+            return (grad_log_psi._normalized_obs.conj().T @ (grad_log_psi._normalized_obs @ v))
 
-            def raw_matvec(v):
-                return (O.conj().T @ (O @ v))
-
-            diagonal = lambda: jnp.sum(jnp.abs(O) ** 2, axis=0)
+        diagonal = lambda: jnp.sum(jnp.abs(grad_log_psi._normalized_obs) ** 2, axis=0)
         self._S0 = raw_matvec
 
         def matvec(v):
@@ -421,14 +430,13 @@ class Evolution(AbstractOptimizer):
 
         return matvec 
     
-    def _get_rhs(self, grad):
-        self._F0 = - self.rhsPrefactor * grad
-        F = self._lhs_trans_fn(self._F0)
-        F.block_until_ready()
+    def _get_rhs(self, grad, grad_var):
+        self._F0 = grad
+        b = self._rhs_trans_fn(grad)
+        b_var = 0
+        b.block_until_ready()
 
-        self._solver_state["F_var"] = 1 # TODO
-
-        return F
+        return b, b_var
 
     def _update_meta_data(self):
         self.meta_data = dict(

@@ -79,10 +79,11 @@ class PinvSNR(AbstractSolver):
     @property
     def _needs_dense_matrix(self) -> bool:
         return True
-    
+
+    #TODO: change names to A b
     def __call__(
-            self, S, F, *, 
-            F_var, n_samples, exact_sampler, holomorphic, **kwargs
+            self, S, F, b_var=None, *, 
+            n_samples, exact_sampler, holomorphic, **kwargs
         ):
         # Transform equation to eigenbasis and compute Signal to Noise Ratio
         self._transform_to_eigenbasis(S, F)
