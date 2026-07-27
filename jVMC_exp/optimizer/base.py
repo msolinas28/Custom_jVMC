@@ -365,7 +365,7 @@ class Evolution(AbstractOptimizer):
         update = self._make_cmplx_fn(update) if self.psi.holomorphic else update
         Sv = self._S0(update) if callable(self._S0) else self._S0.dot(update)
 
-        return jnp.abs(1. + (jnp.real(update.dot(Sv)) - 2 * jnp.real(update.dot(self._F0))) / (self.o_loc.var + 1e-10))
+        return jnp.abs(1. + (jnp.real(jnp.vdot(update, Sv)) - 2 * jnp.real(jnp.vdot(update, self._F0))) / (self.o_loc.var + 1e-14))
     
     def _get_lhs_dense(self, grad_log_psi: SampledObs):
         '''
