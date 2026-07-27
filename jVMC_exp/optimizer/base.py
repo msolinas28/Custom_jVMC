@@ -358,6 +358,11 @@ class Evolution(AbstractOptimizer):
         return self.update
     
     def cross_validation(self, objective_function_output: ObjectiveFunctionOutput):
+        if isinstance(objective_function_output.grad, LazySampledObs):
+            raise NotImplementedError(
+                'Cross validation can not be implemented without materializing the whole Jacobian'
+            )
+
         residual = self.meta_data["residual"]
         tvp_error = self.meta_data["tdvp_error"]
         objective_fn_out_1 = objective_function_output.get_subset(start=0, step=2)
@@ -382,10 +387,10 @@ class Evolution(AbstractOptimizer):
         update = self._make_cmplx_fn(update) if self.psi.holomorphic else update
         Sv = self._S0(update) if callable(self._S0) else self._S0.dot(update)
 
-        # F_0 def is changed!!
-        return jnp.abs(1. + (jnp.real(update.dot(Sv)) - 2 * jnp.real(update.dot(self._F0))) / (self.o_loc.var + 1e-10))
+        return jnp.abs(
+            1. + (jnp.real(jnp.vdot(update, Sv)) - 2 * jnp.real(jnp.vdot(update, - self.rhsPrefactor  * self._F0))) / (self.o_loc.var + 1e-14)
+        )
     
-    # Working
     def _get_lhs_dense(self, grad_log_psi: SampledObs | LazySampledObs):
         '''
         Returns left hand side of the TDVP equation
@@ -433,7 +438,8 @@ class Evolution(AbstractOptimizer):
     def _get_rhs(self, grad, grad_var):
         self._F0 = grad
         b = self._rhs_trans_fn(grad)
-        b_var = 0
+        # Approximate grad_var_im = grad_var_re
+        b_var = grad_var / 2 if not self.psi.holomorphic else grad_var
         b.block_until_ready()
 
         return b, b_var

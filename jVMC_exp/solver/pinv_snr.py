@@ -14,8 +14,8 @@ def smooth_cutoff_fn(x, c, exp=6):
     return 1 / (1 + (c / x)**exp)
 
 @jax.jit(static_argnums=(2,))
-def get_snr(VtF, rho_var, num_samples):
-    return jnp.sqrt(jnp.abs(num_samples * (jnp.conj(VtF) * VtF) / (rho_var + 1e-14))).ravel()
+def get_snr(Vtb, Vtb_var, num_samples):
+    return jnp.sqrt(jnp.abs(num_samples * (jnp.conj(Vtb) * Vtb) / (Vtb_var + 1e-14))).ravel()
     
 class PinvSNR(AbstractSolver):
     """
@@ -82,37 +82,40 @@ class PinvSNR(AbstractSolver):
 
     #TODO: change names to A b
     def __call__(
-            self, S, F, b_var=None, *, 
+            self, A, b, b_var=None, *, 
             n_samples, exact_sampler, holomorphic, **kwargs
         ):
         # Transform equation to eigenbasis and compute Signal to Noise Ratio
-        self._transform_to_eigenbasis(S, F)
+        self._transform_to_eigenbasis(A, b)
+        b_norm = jnp.linalg.norm(b)
         
-        # rho = solver_state.covar_grad_o_loc().transform(
-        #     solver_state.rhs_trans_fn, 
-        #     jnp.transpose(jnp.conj(self.last_eigenvectors))
-        # )
-        if F_var is not None:
-            rho_var = F_var # TODO
-            snr = get_snr(self._VtF, rho_var.ravel(), n_samples)
+        if b_var is not None:
+            
+            snr = get_snr(
+                self._Vtb, 
+                jnp.dot(jnp.abs(jnp.transpose(jnp.conj(self._V)))**2, b_var),
+                n_samples
+            )
         else:
             snr = None
 
         # Discard eigenvalues below numerical precision
-        invEv = jnp.where(jnp.abs(self.last_eigenvalues / self.last_eigenvalues[-1]) > 1e-14, 1. / self.last_eigenvalues, 0.)
+        invEv = jnp.where(
+            jnp.abs(self.last_eigenvalues / self.last_eigenvalues[-1]) > 1e-14
+            , 1. / self.last_eigenvalues,
+            0.
+        )
         
-        residual = 1.0
         cutoff = 1e-2
-        F_norm = jnp.linalg.norm(F)
         first = True 
         while (residual > self.pinv_tol and cutoff > self.pinv_cutoff) or first:
             residual, cutoff, pinvEv, effective_rank = self._regularizer_step(
-                cutoff, snr, self.last_eigenvalues, invEv, self._VtF, F_norm, exact_sampler
+                cutoff, snr, self.last_eigenvalues, invEv, self._Vtb, b_norm, exact_sampler
             )
 
             first = False
 
-        update = jnp.dot(self.last_eigenvectors, (pinvEv * self._VtF))
+        update = jnp.dot(self.last_eigenvectors, (pinvEv * self._Vtb))
         update = update if holomorphic else jnp.real(update)
         info = dict(
             residual=residual.item(),
@@ -126,7 +129,7 @@ class PinvSNR(AbstractSolver):
         return update, info
     
     @jax.jit(static_argnums=(0, 7))
-    def _regularizer_step(self, cutoff, snr, eigenvalues, invEv, VtF, F_norm, exact_sampler):
+    def _regularizer_step(self, cutoff, snr, eigenvalues, invEv, Vtb, b_norm, exact_sampler):
         # Set regularizer for singular value cutoff
         cutoff = jnp.max(jnp.array([0.8 * cutoff, self.pinv_cutoff]))
         regularizer = smooth_cutoff_fn(jnp.abs(eigenvalues / eigenvalues[-1]), cutoff)
@@ -136,23 +139,23 @@ class PinvSNR(AbstractSolver):
             regularizer *= smooth_cutoff_fn(snr, self.snr_tol)
 
         pinvEv = invEv * regularizer
-        residual = jnp.linalg.norm((pinvEv * eigenvalues - 1) * VtF) / F_norm
+        residual = jnp.linalg.norm((pinvEv * eigenvalues - 1) * Vtb) / b_norm
         effective_rank = jnp.mean(regularizer)
 
         return residual, cutoff, pinvEv, effective_rank
     
-    def _transform_to_eigenbasis(self, S, F):
+    def _transform_to_eigenbasis(self, A, b):
         if self._diagonalize_on_device:
             try:
-                self._ev, self._V = jnp.linalg.eigh(S)
+                self._ev, self._V = jnp.linalg.eigh(A)
             except ValueError:
                 warnings.warn(
                     "jax.numpy.linalg.eigh raised an exception. Falling back to " 
                     "numpy.linalg.eigh for diagonalization.", RuntimeWarning
                 )
             
-                self._ev, self._V = _eigh_numpy(S)
+                self._ev, self._V = _eigh_numpy(A)
         else:
-            self._ev, self._V = _eigh_numpy(S)
+            self._ev, self._V = _eigh_numpy(A)
 
-        self._VtF = jnp.dot(jnp.transpose(jnp.conj(self._V)), F)
+        self._Vtb = jnp.dot(jnp.transpose(jnp.conj(self._V)), b)
