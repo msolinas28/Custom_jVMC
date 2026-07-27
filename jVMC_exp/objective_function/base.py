@@ -13,7 +13,9 @@ class ObjectiveFunctionOutput():
     o_loc: SampledObs | None = None
     grad_log_psi: SampledObs | LazySampledObs | None = None
     grad: jax.Array | None = None
-    grad_var: jax.Array | None = None
+    grad_var_re: jax.Array | None = None
+    grad_var_im: jax.Array | None = None
+    grad_cov_re_im: jax.Array | None = None
 
 class AbstractObjectiveFunction(ABC):
     @abstractmethod
@@ -45,8 +47,12 @@ class Observable(AbstractObjectiveFunction):
             grad_log_psi = SampledObs(sampler.psi.gradients(sampler.samples), sampler.weights)
 
         if compute_grad:
-            grad, grad_var = grad_log_psi.get_covar_and_covar_var(o_loc)
-            return ObjectiveFunctionOutput(o_loc=o_loc, grad=grad, grad_var=grad_var, grad_log_psi=grad_log_psi)
+            grad, grad_var_re, grad_var_im, grad_cov_re_im = grad_log_psi.get_covar_and_covar_var(o_loc)
+            return ObjectiveFunctionOutput(
+                o_loc=o_loc, grad=grad,
+                grad_var_re=grad_var_re, grad_var_im=grad_var_im, grad_cov_re_im=grad_cov_re_im,
+                grad_log_psi=grad_log_psi
+            )
 
         return ObjectiveFunctionOutput(o_loc=o_loc, grad_log_psi=grad_log_psi)
 

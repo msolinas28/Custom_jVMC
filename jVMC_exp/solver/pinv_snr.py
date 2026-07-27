@@ -80,7 +80,6 @@ class PinvSNR(AbstractSolver):
     def _needs_dense_matrix(self) -> bool:
         return True
 
-    #TODO: change names to A b
     def __call__(
             self, A, b, b_var=None, *, 
             n_samples, exact_sampler, holomorphic, **kwargs
@@ -88,16 +87,23 @@ class PinvSNR(AbstractSolver):
         # Transform equation to eigenbasis and compute Signal to Noise Ratio
         self._transform_to_eigenbasis(A, b)
         b_norm = jnp.linalg.norm(b)
-        
-        if b_var is not None:
-            
-            snr = get_snr(
-                self._Vtb, 
-                jnp.dot(jnp.abs(jnp.transpose(jnp.conj(self._V)))**2, b_var),
-                n_samples
-            )
-        else:
-            snr = None
+
+        snr = None
+        if not exact_sampler:
+            if b_var is not None:
+                snr = get_snr(
+                    self._Vtb, 
+                    jnp.dot(jnp.abs(jnp.transpose(jnp.conj(self._V)))**2, b_var),
+                    n_samples
+                )
+            elif self.snr_tol != 0:
+                warnings.warn(
+                    f"PinvSNR has snr_tol={self.snr_tol}, but was called with b_var=None, "
+                    "so no SNR-based regularization can be applied. "
+                    "Pass b_var to enable the SNR cutoff, or set snr_tol=0 to silence " 
+                    "this warning if that's intended.",
+                    UserWarning,
+                )
 
         # Discard eigenvalues below numerical precision
         invEv = jnp.where(
@@ -106,8 +112,9 @@ class PinvSNR(AbstractSolver):
             0.
         )
         
+        residual = 1.0
         cutoff = 1e-2
-        first = True 
+        first = True
         while (residual > self.pinv_tol and cutoff > self.pinv_cutoff) or first:
             residual, cutoff, pinvEv, effective_rank = self._regularizer_step(
                 cutoff, snr, self.last_eigenvalues, invEv, self._Vtb, b_norm, exact_sampler

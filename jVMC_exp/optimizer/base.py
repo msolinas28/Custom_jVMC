@@ -114,7 +114,7 @@ class AbstractOptimizer(ABC):
 
                 if self.use_cross_valiadation:
                     self.output_manager.start_timing("cross_validation")
-                    self.cross_validation(objective_fn_out)
+                    self.cross_validation(objective_function, t=t, **objective_function_kwargs)
                     self._elapsed += stop_timing("cross_validation")
 
         return update
@@ -225,7 +225,7 @@ class AbstractOptimizer(ABC):
         self._additional_info = None
 
     @abstractmethod
-    def cross_validation(self, objective_function_output: ObjectiveFunctionOutput):
+    def cross_validation(self, objective_function: AbstractObjectiveFunction, **objective_function_kwargs):
         pass
 
     @abstractmethod
@@ -269,18 +269,31 @@ class Evolution(AbstractOptimizer):
             solver: AbstractSolver=PinvSNR(), output_manager: OutputManager | None = None
         ):
         self.rhsPrefactor = 1 if imag_time else 1j
+        c = - self.rhsPrefactor
+        c_r, c_i = jnp.real(c), jnp.imag(c)
         if psi.holomorphic:
             self._lhs_trans_fn = lambda x: x
+            self._rhs_var_trans_fn = lambda var_re, var_im, cov_re_im: var_re + var_im
+        elif make_real:
+            self._lhs_trans_fn = lambda x: jnp.real(x)
+            self._rhs_var_trans_fn = lambda var_re, var_im, cov_re_im: (
+                c_r ** 2 * var_re + c_i ** 2 * var_im - 2 * c_r * c_i * cov_re_im
+            )
         else:
-            self._lhs_trans_fn = (lambda x: jnp.real(x)) if make_real else (lambda x: 1j * jnp.imag(x))
-        self._rhs_trans_fn = lambda x: self._lhs_trans_fn((- self.rhsPrefactor) * x)
+            self._lhs_trans_fn = lambda x: 1j * jnp.imag(x)
+            self._rhs_var_trans_fn = lambda var_re, var_im, cov_re_im: (
+                c_r ** 2 * var_im + c_i ** 2 * var_re + 2 * c_r * c_i * cov_re_im
+            )
+        self._rhs_trans_fn = lambda x: self._lhs_trans_fn(c * x)
 
         self.diag_scale = diagonalScale
         self.diag_shift = diagonalShift
 
         self._make_cmplx_fn = jax.jit(partial(make_cmplx_array, params_shape=psi.paramShapes))
         self._make_real_fn = jax.jit(partial(make_real_array, params_shape=psi.paramShapes))
-        self._remove_double_trans = jax.vmap(partial(remove_double, params_shape=psi.paramShapes))
+        remove_double_fn = partial(remove_double, params_shape=psi.paramShapes)
+        self._remove_double_trans = jax.vmap(remove_double_fn)
+        self._remove_double_fn = jax.jit(remove_double_fn)
         
         warnings.warn(
             "Naming convention changed: "
@@ -343,37 +356,71 @@ class Evolution(AbstractOptimizer):
     def get_update(self, objective_function_output: ObjectiveFunctionOutput):
         if self.psi.holomorphic:
             objective_function_output.grad_log_psi.transform(self._remove_double_trans)
-            objective_function_output.grad = self._remove_double_trans(
-                objective_function_output.grad[None, ...]
+            objective_function_output.grad = self._remove_double_fn(
+                objective_function_output.grad
             )
-            objective_function_output.grad_var = self._remove_double_trans(
-                objective_function_output.grad_var[None, ...]
+            objective_function_output.grad_var_re = self._remove_double_fn(
+                objective_function_output.grad_var_re
+            )
+            objective_function_output.grad_var_im = self._remove_double_fn(
+                objective_function_output.grad_var_im
+            )
+            objective_function_output.grad_cov_re_im = self._remove_double_fn(
+                objective_function_output.grad_cov_re_im
             )
 
         A = self._get_lhs(objective_function_output.grad_log_psi)
-        b, b_var = self._get_rhs(objective_function_output.grad, objective_function_output.grad_var)
+        b, b_var = self._get_rhs(
+            objective_function_output.grad,
+            objective_function_output.grad_var_re,
+            objective_function_output.grad_var_im,
+            objective_function_output.grad_cov_re_im,
+        )
         update, self._additional_info = self.solver(A, b, b_var=b_var, **self.solver_state)
         self.update = self._make_real_fn(update) if self.psi.holomorphic else update
 
         return self.update
     
-    def cross_validation(self, objective_function_output: ObjectiveFunctionOutput):
-        if isinstance(objective_function_output.grad, LazySampledObs):
-            raise NotImplementedError(
-                'Cross validation can not be implemented without materializing the whole Jacobian'
-            )
-
+    def cross_validation(self, objective_function: AbstractObjectiveFunction, **objective_function_kwargs):
         residual = self.meta_data["residual"]
         tvp_error = self.meta_data["tdvp_error"]
-        objective_fn_out_1 = objective_function_output.get_subset(start=0, step=2)
-        objective_fn_out_2 = objective_function_output.get_subset(start=1, step=2)
+
+        full_samples, full_logPsi, full_weights = (
+            self.sampler.samples, 
+            self.sampler.logPsi, 
+            self.sampler.weights
+        )
+
+        def _value_and_grad_on_subset(start):
+            self.sampler._samples = full_samples[start::2]
+            self.sampler._logPsi = full_logPsi[start::2]
+            w = full_weights[start::2]
+            self.sampler._weights = w / jnp.sum(w)
+
+            return objective_function.value_and_grad(
+                self.sampler, compute_grad=True, **objective_function_kwargs
+            )
+
+        try:
+            objective_fn_out_1 = _value_and_grad_on_subset(0)
+            objective_fn_out_2 = _value_and_grad_on_subset(1)
+        finally:
+            self.sampler._samples, self.sampler._logPsi, self.sampler._weights = (
+                full_samples, 
+                full_logPsi, 
+                full_weights
+            )
 
         update_1 = self.get_update(objective_fn_out_1)
         validation_tdvp_err = self._get_tdvp_error(update_1)
         if self.psi.holomorphic:
             update_1 = self._make_cmplx_fn(update_1)
-            objective_fn_out_2 = objective_fn_out_2.transform(self._remove_double_trans)
-        F2 = self._get_rhs(objective_fn_out_2.grad)
+            objective_fn_out_2.grad_log_psi.transform(self._remove_double_trans)
+            objective_fn_out_2.grad = self._remove_double_fn(objective_fn_out_2.grad)
+        F2, _ = self._get_rhs(
+            objective_fn_out_2.grad, objective_fn_out_2.grad_var_re,
+            objective_fn_out_2.grad_var_im, objective_fn_out_2.grad_cov_re_im,
+        )
         S2 = self._get_lhs(objective_fn_out_2.grad_log_psi)
         Sv = S2(update_1) if callable(S2) else S2.dot(update_1)
         validation_residual = (jnp.linalg.norm(Sv - F2) / jnp.linalg.norm(F2)) / residual
@@ -435,11 +482,12 @@ class Evolution(AbstractOptimizer):
 
         return matvec 
     
-    def _get_rhs(self, grad, grad_var):
+    def _get_rhs(self, grad, grad_var_re, grad_var_im, grad_cov_re_im):
         self._F0 = grad
         b = self._rhs_trans_fn(grad)
-        # Approximate grad_var_im = grad_var_re
-        b_var = grad_var / 2 if not self.psi.holomorphic else grad_var
+        b_var = None
+        if grad_var_re is not None:
+            b_var = self._rhs_var_trans_fn(grad_var_re, grad_var_im, grad_cov_re_im)
         b.block_until_ready()
 
         return b, b_var
