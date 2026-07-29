@@ -1,8 +1,10 @@
 import jax
 import jax.numpy as jnp
 from typing import Callable
+from functools import partial
 
 from jVMC_exp.sampler import AbstractSampler
+from jVMC_exp.stats import SampledObs, LazySampledObs, _normalize, _reshape_in_batches
 from jVMC_exp.vqs import NQS
 from jVMC_exp.optimizer.base import AbstractOptimizer
 from jVMC_exp.objective_function.base import ObjectiveFunctionOutput, AbstractObjectiveFunction
@@ -38,7 +40,6 @@ class MinSR(AbstractOptimizer):
 
         super().__init__(sampler, psi, resample_stepper, use_cross_valiadation=False)
 
-
     @property
     def diag_shift(self):
         return self._diag_shift
@@ -60,27 +61,33 @@ class MinSR(AbstractOptimizer):
         Uses the techique proposed in arXiv:2302.01941 to compute the updates.
         Efficient only if number of samples :math:`\\ll` number of parameters.
         """
-        grad_log_psi = objective_function_output.grad_log_psi._get_normalized_obs_and_consume()  # (Ns, Np)
-        o_loc = objective_function_output.o_loc._normalized_obs.reshape(-1)                      # (Ns,)
-        
-        if not self.psi.holomorphic and not self.psi.realParams:
-            grad_log_psi = _concat_nonholo(grad_log_psi)
-            o_loc = _concat_nonholo(o_loc)
-
-        update = self._solve(
-            grad_log_psi, 
-            o_loc, 
-            diag_shift=self.diag_shift,
-            pinv_tol=self.pinv_tol, 
-            batch_size=None
-        ).flatten()
+        if isinstance(objective_function_output.grad_log_psi, LazySampledObs):
+            update = self._solve_lazy(
+                objective_function_output.grad_log_psi,
+                objective_function_output.o_loc._normalized_obs.reshape(-1)
+            )
+        else:
+            update = self._solve(
+                objective_function_output.grad_log_psi._get_normalized_obs_and_consume(), 
+                objective_function_output.o_loc._normalized_obs.reshape(-1), 
+                diag_shift=self.diag_shift,
+                pinv_tol=self.pinv_tol, 
+                batch_size=None
+            ).flatten()
 
         update = update[:-self._params_pad_size] if self._params_pad_size > 0 else update
-       
-        return jnp.array(jax.experimental.multihost_utils.process_allgather(update, tiled=True))
+        update = jnp.array(jax.experimental.multihost_utils.process_allgather(update, tiled=True))
+        
+        return jnp.real(update) if not self.psi.holomorphic else update
+
+    def cross_validation(self):
+        raise NotImplementedError
     
+    def _update_meta_data(self):
+        pass
+
     @sharded(use_vmap=False, in_specs=(DEVICE_SPEC, REPLICATED_SPEC))
-    def _solve(self, gradients, o_loc, *, diag_shift, pinv_tol, batch_size):
+    def _solve(self, gradients, o_loc, *, diag_shift, pinv_tol, batch_size):      
         gradients = jnp.concatenate([
             gradients, 
             jnp.zeros((gradients.shape[0], self._params_pad_size))], axis=1
@@ -94,9 +101,29 @@ class MinSR(AbstractOptimizer):
         y = y @ o_loc                                               # (Ns,)
         
         return -1 * jnp.conj(jnp.transpose(gradients)) @ y          # (Np,)
-
-    def cross_validation(self):
-        raise NotImplementedError
     
-    def _update_meta_data(self):
-        pass
+    def _solve_lazy(self, grad: LazySampledObs, o_loc):  
+        y = []      
+        for batch_l, weights_l in zip(grad.observations, grad._weights):
+            batch_l = _normalize(batch_l, weights_l, grad.mean)
+
+            y_batch = []
+            for batch_r, weights_r in zip(grad.observations, grad._weights):
+                batch_r = _normalize(batch_r, weights_r, grad.mean)
+                y_batch.append(batch_l @ jnp.conj(jnp.transpose(batch_r)))
+
+            y.append(jnp.concatenate(y_batch, axis=1))
+        y = jnp.concatenate(y)
+
+        y = y + self.diag_shift * jnp.eye(y.shape[-1])
+        y = jnp.linalg.pinv(y, rtol=self.pinv_tol, hermitian=True)
+        y = y @ o_loc
+
+        y = _reshape_in_batches(y, grad._batch_size)
+        update = 0
+        for grad_batch, weights, y_batch in zip(grad.observations, grad._weights, y):
+            grad_batch = _normalize(grad_batch, weights, grad.mean)
+            
+            update += jnp.conj(jnp.transpose(grad_batch)) @ y_batch
+
+        return - update

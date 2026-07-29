@@ -4,6 +4,23 @@ import jax.numpy as jnp
 from functools import partial, cached_property
 
 from jVMC_exp.sharding_config import DEVICE_SHARDING, MESH, SizedIterable
+from jVMC_exp.sharding_config import SizedIterable
+
+def _reshape_in_batches(data, batch_size: int):
+    num_samples = data.shape[0]
+    append = (-num_samples) % batch_size
+    if append:
+        data = jnp.pad(data, ((0, append),) + ((0, 0),) * (data.ndim - 1), constant_values=0)
+    n_batches = data.shape[0] // batch_size
+
+    batched_data = []
+    for i in range(n_batches):
+        batch = data[i * batch_size:(i + 1) * batch_size]
+        if i == n_batches - 1 and append:
+            batch = batch[:batch_size - append]
+        batched_data.append(jax.device_put(batch, DEVICE_SHARDING))
+
+    return batched_data
 
 @jax.jit
 def _get_mean(data, weights):
@@ -393,31 +410,33 @@ class SampledObs():
 
         return norm_obs
 
-from jVMC_exp.sharding_config import SizedIterable
-
-def _reshape_in_batches(data, n_batches: int):
-    remainder = data.shape[0] % n_batches
-    if remainder != 0:
-        num_pad = n_batches - remainder
-        data = jnp.pad(data, ((0, num_pad),) + ((0, 0),) * (data.ndim - 1), constant_values=0)
-    batch_size = data.shape[0] // n_batches
-
-    batched_data = []
-    for i in range(n_batches):
-        batched_data.append(
-            jax.device_put(data[i * batch_size:(i + 1) * batch_size], DEVICE_SHARDING)
-        )
-    
-    return batched_data
-
 class LazySampledObs():
     def __init__(self, observations: SizedIterable, weights):
+        """
+        Args:
+            * ``observations``: Batched, lazily (re)computed observations.
+                Its ``batch_size`` (e.g. set by `sharded(..., yield_iter=True)`)
+                is reused to split `weights` into batches that line up
+                exactly with observations' -- a target batch *count* isn't
+                enough for this, since e.g. splitting 20 samples into 4 equal
+                batches ([5,5,5,5]) is a different partition than a
+                batch_size=6 iterable's ([6,6,6,2]).
+            * ``weights``: Full-length weights array, matching `observations`
+                sample-for-sample.
+        """
         if weights is None:
             raise ValueError("LazySampledObs require weights to be an array")
         weights /= jnp.sum(weights)
         self._num_samples = len(weights)
-        
-        self._weights = _reshape_in_batches(weights, len(observations))
+        self._batch_size = observations.batch_size
+
+        self._weights = _reshape_in_batches(weights, self._batch_size)
+        if len(self._weights) != len(observations):
+            raise ValueError(
+                f"observations.batch_size={self._batch_size} splits {self._num_samples} weights "
+                f"into {len(self._weights)} batches, but observations has {len(observations)} "
+                "batches -- they must be built with the same batch_size."
+            )
         self.observations = observations
 
     @property
@@ -480,8 +499,8 @@ class LazySampledObs():
             return (covar - jnp.tensordot(jnp.conj(mean), mean, axes=0)).squeeze()
 
         elif isinstance(other, SampledObs):
-            normalized_obs_other = _reshape_in_batches(other._normalized_obs, len(self._observations))
-            
+            normalized_obs_other = _reshape_in_batches(other._normalized_obs, self._batch_size)
+
             for batch, weights, batch_other in zip(self._observations, self._weights, normalized_obs_other):
                 weighted_data = _normalize_no_center(batch, weights)
                 covar += _get_covar(weighted_data, batch_other)
@@ -534,7 +553,7 @@ class LazySampledObs():
                 moments = _accumulate(moments, batch, batch, weights)
 
         elif isinstance(other, SampledObs):
-            other_batches = _reshape_in_batches(other.observations, len(self._observations))
+            other_batches = _reshape_in_batches(other.observations, self._batch_size)
 
             for batch, weights, batch_other in zip(self._observations, self._weights, other_batches):
                 moments = _accumulate(moments, batch, batch_other, weights)
@@ -560,4 +579,4 @@ class LazySampledObs():
         jitted_fn = jax.jit(element_wise_fn)
         iterable = self._observations
         transormed_iterable = lambda: (jitted_fn(batch) for batch in iterable)
-        self.observations = SizedIterable(transormed_iterable, iterable.n_iterations)
+        self.observations = SizedIterable(transormed_iterable, iterable.n_iterations, iterable.batch_size)

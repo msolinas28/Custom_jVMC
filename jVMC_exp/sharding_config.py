@@ -141,6 +141,7 @@ def create_batches(configs, b):
 class SizedIterable:
     reusable_iterable: Callable
     n_iterations: int
+    batch_size: int
 
     def __len__(self):
         return self.n_iterations
@@ -186,7 +187,10 @@ class sharded:
 
             reusable_iterable = lambda: self._iter_batches(batch_size, kwargs, *args, jsh_fn=jsh_fn)
             if self.yield_iter:
-                return SizedIterable(reusable_iterable=reusable_iterable, n_iterations=n_batches)
+                resolved_batch_size = num_samples if batch_size is None else batch_size
+                return SizedIterable(
+                    reusable_iterable=reusable_iterable, n_iterations=n_batches, batch_size=resolved_batch_size
+                )
 
             def concat(*xs):
                 if len(xs) == 1:
