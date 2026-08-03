@@ -573,7 +573,7 @@ class ExactSampler(AbstractSampler):
         self._lDim = lDim
         self._logProbFactor = logProbFactor
         self._lastNorm = 0.
-        self.numSamples = self.numSamples
+        self.numSamples = self.num_states
 
         self.get_probabilities = jax.jit(
             jax.shard_map(

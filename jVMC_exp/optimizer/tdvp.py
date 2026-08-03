@@ -11,7 +11,7 @@ class TDVP(Evolution):
     def __init__(
             self, sampler, psi, make_real: bool, resample_stepper=True,
             use_cross_valiadation=False, diagonalShift=0., diagonalScale=0., solver=PinvSNR(),
-            output_manager: OutputManager | None = None,
+            output_manager: OutputManager | None = None
         ):
         super().__init__(
             sampler, psi, resample_stepper, False, make_real, 
