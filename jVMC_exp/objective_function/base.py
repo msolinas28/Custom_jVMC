@@ -27,7 +27,7 @@ class AbstractObjectiveFunction(ABC):
         pass
 
 class Observable(AbstractObjectiveFunction):
-    def __init__(self, operator: AbstractOperator, batched_jacobian: bool):
+    def __init__(self, operator: AbstractOperator, batched_jacobian: bool = False):
         self._operator = operator
         self._batched_jacobian = batched_jacobian
         # TODO: might add a batch size here so that one can have different batch sizes

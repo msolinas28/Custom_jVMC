@@ -31,12 +31,6 @@ def _get_var(norm_data):
     return jnp.sum(jnp.abs(norm_data)**2, axis=0)
 
 @jax.jit
-def _get_var_not_normed(data, weights):
-    return (jnp.tensordot(
-        weights, jnp.abs(data)**2, axes=(0, 0)) - jnp.abs(jnp.tensordot(weights, data, axes=(0, 0))
-    )**2).squeeze()
-
-@jax.jit
 def _get_error_of_mean(var, weights):
     return jnp.sqrt(var * jnp.sum(weights ** 2))
 
@@ -471,11 +465,13 @@ class LazySampledObs():
 
     @cached_property
     def var(self):
-        var = 0
+        sq_sum = 0
+        mean = 0
         for batch, weights in zip(self._observations, self._weights):
-            var += _get_var_not_normed(batch, weights)
-        
-        return var
+            sq_sum += jnp.tensordot(weights, jnp.abs(batch) ** 2, axes=(0, 0))
+            mean += _get_mean(batch, weights)
+
+        return (sq_sum - jnp.abs(mean) ** 2).squeeze()
     
     @property
     def error_of_mean(self):

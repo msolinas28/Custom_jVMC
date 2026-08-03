@@ -11,20 +11,6 @@ import math
 
 from jVMC_exp import global_defs
 
-_original_shard_map = jax.shard_map
-if not getattr(_original_shard_map, "_jvmc_exp_check_rep_default", False):
-    _shard_map_params = inspect.signature(_original_shard_map).parameters
-
-    def _shard_map_check_rep_false(fun=None, *args, **kwargs):
-        if "check_rep" in _shard_map_params:
-            kwargs.setdefault("check_rep", False)
-        if fun is None:
-            return lambda f: _original_shard_map(f, *args, **kwargs)
-        return _original_shard_map(fun, *args, **kwargs)
-
-    _shard_map_check_rep_false._jvmc_exp_check_rep_default = True
-    jax.shard_map = _shard_map_check_rep_false
-
 if global_defs.USE_DISTRIBUTED:
     try:
         jax.distributed.initialize()
@@ -42,6 +28,21 @@ DEVICE_SHARDING = NamedSharding(MESH, P("devices"))
 REPLICATED_SHARDING = NamedSharding(MESH, P())
 DEVICE_SPEC = P("devices")
 REPLICATED_SPEC = P()
+
+@dataclass
+class SizedIterable:
+    reusable_iterable: Callable
+    n_iterations: int
+    batch_size: int
+
+    def __len__(self):
+        return self.n_iterations
+
+    def __iter__(self) -> Iterator:
+        return self.reusable_iterable()
+
+P = ParamSpec('P')
+R = TypeVar('R')
 
 def is_on_device(args, target_sharding=DEVICE_SHARDING):
     return any(jax.tree_util.tree_map(lambda x: x.sharding == target_sharding, args))
@@ -137,21 +138,6 @@ def create_batches(configs, b):
 
     return jnp.pad(configs, pads).reshape((-1, b) + configs.shape[1:])
     
-@dataclass
-class SizedIterable:
-    reusable_iterable: Callable
-    n_iterations: int
-    batch_size: int
-
-    def __len__(self):
-        return self.n_iterations
-
-    def __iter__(self) -> Iterator:
-        return self.reusable_iterable()
-
-P = ParamSpec('P')
-R = TypeVar('R')
-
 class sharded:
     """Decorator to automatically create sharded versions of methods."""
     def __init__(

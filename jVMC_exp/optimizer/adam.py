@@ -26,7 +26,7 @@ class Adam(AbstractOptimizer):
         return True
 
     def get_update(self, objective_function_out: ObjectiveFunctionOutput):
-        grad = objective_function_out.grad.mean.squeeze()
+        grad = objective_function_out.grad
         update, self._opt_state = self._adam.update(grad, self._opt_state, self.psi.parameters_flat)
 
         return update

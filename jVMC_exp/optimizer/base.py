@@ -71,8 +71,9 @@ class AbstractOptimizer(ABC):
         """
         tmp_parameters = self.psi.parameters
         self.psi.parameters = parameters
-        self._elapsed = 0
-        
+        if intStep is None or intStep == 0:
+            self._elapsed = 0
+
         def stop_timing(name, wait_for=None):
             if wait_for is not None:
                 jax.block_until_ready(wait_for)
@@ -97,7 +98,10 @@ class AbstractOptimizer(ABC):
             t=t,
             **objective_function_kwargs
         )
-        self._elapsed += stop_timing("compute objective function and gradient", wait_for=objective_fn_out.sync_target)
+        self._elapsed += stop_timing(
+            "compute objective function and gradient", 
+            wait_for=(objective_fn_out.o_loc, objective_fn_out.grad)
+        )
 
         # Obtain the update from the gradients
         self.output_manager.start_timing("solve")

@@ -39,7 +39,7 @@ class MinSR(AbstractOptimizer):
         num_params = psi.numParameters * (2 if not psi.realParams else 1)
         num_devices = MESH.shape["devices"]
         self._params_pad_size = int((num_devices - num_params % num_devices) % num_devices)
-        self._concat = (not self.psi.holomorphic) and (not self.psi.realParams)
+        self._concat = (not psi.holomorphic) and (not psi.realParams)
 
         super().__init__(sampler, psi, resample_stepper, use_cross_valiadation=False)
 
@@ -106,13 +106,20 @@ class MinSR(AbstractOptimizer):
         return -1 * jnp.conj(jnp.transpose(gradients)) @ y          # (Np,)
 
     def _solve_lazy(self, grad: LazySampledObs, o_loc):
+        def normalize_batch(batch, weights):
+                batch = _normalize(batch, weights, grad.mean)
+                if self._concat:
+                    batch = _concat_nonholo(batch)
+        
+                return batch
+        
         y = []
         for batch_l, weights_l in zip(grad.observations, grad._weights):
-            batch_l = self._normalized_batch(batch_l, weights_l, grad.mean, None)
+            batch_l = normalize_batch(batch_l, weights_l)
 
             y_batch = []
             for batch_r, weights_r in zip(grad.observations, grad._weights):
-                batch_r = self._normalized_batch(batch_r, weights_r, grad.mean, None)
+                batch_r = normalize_batch(batch_r, weights_r)
                 y_batch.append(batch_l @ jnp.conj(jnp.transpose(batch_r)))
 
             y.append(jnp.concatenate(y_batch, axis=1))
@@ -139,15 +146,7 @@ class MinSR(AbstractOptimizer):
 
         update = 0
         for grad_batch, weights, y_batch in zip(grad.observations, grad._weights, y):
-            grad_batch = self._normalized_batch(grad_batch, weights, grad.mean, None)
+            grad_batch = normalize_batch(grad_batch, weights)
             update += jnp.conj(jnp.transpose(grad_batch)) @ y_batch
 
         return -update
-
-    @sharded(use_vmap=False, in_specs=(DEVICE_SPEC, DEVICE_SPEC, REPLICATED_SPEC))
-    def _normalized_batch(self, batch, weights, mean, *, batch_size):
-        batch = _normalize(batch, weights, mean)
-        if self._concat:
-            batch = _concat_nonholo(batch)
-
-        return batch
