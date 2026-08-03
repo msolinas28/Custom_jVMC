@@ -58,7 +58,7 @@ def run(args):
     n_samples = mc_sampler.numSamples
     dense_jacobian_gib = n_samples * n_params * 16 / 2 ** 30  # complex128
     print(
-        f"jacobian={args.jacobian}  L={args.L}  num_hidden={args.num_hidden}  "
+        f"jacobian={args.jacobian} "
         f"n_params={n_params}  n_samples={n_samples}  batch_size={args.batch_size}  "
         f"dense_jacobian_size~{dense_jacobian_gib:.4f} GiB",
         flush=True,
@@ -106,21 +106,15 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--jacobian", choices=["dense", "batched"], required=True)
+    parser.add_argument("jacobian", choices=["dense", "batched"])
     parser.add_argument("--sampler", choices=["exact", "mc"], default="mc")
     parser.add_argument("--L", type=int, default=10)
     parser.add_argument("--num-hidden", type=int, default=8)
-    parser.add_argument("--num-samples", type=int, default=256)
-    parser.add_argument("--num-chains", type=int, default=32)
-    parser.add_argument(
-        "--batch-size", type=int, default=64,
-        help="psi.batchSize: the network-evaluation / Jacobian-batching chunk size. "
-             "Used identically by both --jacobian modes; the memory difference comes "
-             "purely from whether the batched Jacobian is concatenated (dense) or "
-             "streamed (batched)."
-    )
-    parser.add_argument("--num-steps", type=int, default=3)
-    parser.add_argument("--lr", type=float, default=1e-2)
+    parser.add_argument("--num-samples", type=int, default=2**12)
+    parser.add_argument("--num-chains", type=int, default=2**10)
+    parser.add_argument("--batch-size", type=int, default=2**12)
+    parser.add_argument("--num-steps", type=int, default=5)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--diag-shift", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--out", type=str, default=None, help="Optional CSV output path.")
