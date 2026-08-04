@@ -148,8 +148,8 @@ class AbstractOptimizer(ABC):
                 "implement a method called 'update_dt'"
             )
 
-        pbar = tqdm.tqdm(range(steps))
-        for n in pbar: 
+        pbar = tqdm.tqdm(range(steps), disable=jax.process_index() != 0)
+        for n in pbar:
             stepper.update_dt(n)
             self.update_hyperparams(n)
 
@@ -181,7 +181,7 @@ class AbstractOptimizer(ABC):
             **kwargs
         ):
 
-        pbar = tqdm.tqdm(total=t_max)
+        pbar = tqdm.tqdm(total=t_max, disable=jax.process_index() != 0)
         t = 0
         while t < t_max:
             new_parameters, dt = self.step(t, stepper, objective_function, **kwargs) 
@@ -299,13 +299,14 @@ class Evolution(AbstractOptimizer):
         self._remove_double_trans = jax.vmap(remove_double_fn)
         self._remove_double_fn = jax.jit(remove_double_fn)
         
-        warnings.warn(
-            "Naming convention changed: "
-            "'diag_shift' now adds a constant term to the diagonal, "
-            "while 'diag_scale' multiplies the diagonal entries. "
-            "This is the opposite of the previous convention.",
-            UserWarning,
-        )
+        if jax.process_index() == 0:
+            warnings.warn(
+                "Naming convention changed: "
+                "'diag_shift' now adds a constant term to the diagonal, "
+                "while 'diag_scale' multiplies the diagonal entries. "
+                "This is the opposite of the previous convention.",
+                UserWarning,
+            )
 
         self._solver = solver
         self._get_lhs = self._get_lhs_dense if solver._needs_dense_matrix else self._get_lhs_lazy
@@ -472,13 +473,13 @@ class Evolution(AbstractOptimizer):
         def raw_matvec(v):
             return (grad_log_psi._normalized_obs.conj().T @ (grad_log_psi._normalized_obs @ v))
 
-        diagonal = lambda: jnp.sum(jnp.abs(grad_log_psi._normalized_obs) ** 2, axis=0)
         self._S0 = raw_matvec
 
         def matvec(v):
             Sv = self._lhs_trans_fn(raw_matvec(v))
             if self.diag_scale > 1e-15:
-                Sv = Sv + self.diag_scale * diagonal() * v
+                diag = jnp.sum(jnp.abs(grad_log_psi._normalized_obs) ** 2, axis=0)
+                Sv = Sv + self.diag_scale * diag * v
             if self.diag_shift > 1e-15:
                 Sv = Sv + self.diag_shift * v
 

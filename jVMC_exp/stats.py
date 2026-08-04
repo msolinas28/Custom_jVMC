@@ -173,8 +173,7 @@ def _get_tangent_kernel(norm_data):
 @jax.jit(static_argnums=(1, 2))
 @partial(jax.vmap, in_axes=(0, None, None))
 def _get_autocorrelation_time(x, c, dim):
-    n_fft = 2 ** (dim + 1)  
-    fft = jnp.abs(jnp.fft.fft(x - jnp.mean(x), n=n_fft))
+    fft = jnp.abs(jnp.fft.fft(x - jnp.mean(x), n=dim))
     correlation = jnp.fft.ifft(fft ** 2)[:x.size].real
     correlation = correlation / correlation[0]
     tau = 2 * jnp.cumsum(correlation) - 1
@@ -341,7 +340,7 @@ class SampledObs():
         chain_length = self._num_samples // n_chains
         chain_obs = SampledObs(self.observations.reshape((n_chains, chain_length)).T)
 
-        B = jnp.var(chain_obs.mean.real, ddof=1)
+        B = jnp.var(chain_obs.mean, ddof=1)
         W = jnp.mean(chain_obs.var * chain_length / (chain_length - 1))
         
         return jnp.sqrt(((chain_length - 1) / chain_length * W + B) / W)
