@@ -33,7 +33,7 @@ def host_max_rss_bytes():
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return rss if sys.platform == "darwin" else rss * 1024
 
-num_hidden = 256
+num_hidden = 512
 L = 10
 n_samples = 2**16
 n_chains = n_samples // 16
@@ -49,13 +49,28 @@ mc_sampler = sampler.MCSampler(
 hamiltonian = build_hamiltonian(L)
 loss_function = jVMC_exp.objective_function.Observable(hamiltonian, batched_jacobian=batched)
 
-loss_out = loss_function.value_and_grad(mc_sampler, compute_grad=True)
-jax.block_until_ready((loss_out.grad, loss_out.o_loc))
-del loss_out
+mc_sampler.sample()
+o_loc = loss_function(mc_sampler)
+
+if batched:
+    grad_log_psi = jVMC_exp.stats.LazySampledObs(mc_sampler.psi.lazy_gradients(mc_sampler.samples), mc_sampler.weights)
+else:
+    grad_log_psi = jVMC_exp.stats.SampledObs(mc_sampler.psi.gradients(mc_sampler.samples), mc_sampler.weights)
+# grad, grad_var_re, grad_var_im, grad_cov_re_im = grad_log_psi.get_covar_and_covar_var(o_loc)
+# jax.block_until_ready((grad, grad_var_re, grad_var_im, grad_cov_re_im))
+jax.block_until_ready(grad_log_psi.get_covar(o_loc))
+
+# del grad, grad_var_re, grad_var_im, grad_cov_re_im
+del grad_log_psi
 
 t0 = time.perf_counter()
-loss_out = loss_function.value_and_grad(mc_sampler, compute_grad=True)
-jax.block_until_ready((loss_out.grad, loss_out.o_loc))
+if batched:
+    grad_log_psi = jVMC_exp.stats.LazySampledObs(mc_sampler.psi.lazy_gradients(mc_sampler.samples), mc_sampler.weights)
+else:
+    grad_log_psi = jVMC_exp.stats.SampledObs(mc_sampler.psi.gradients(mc_sampler.samples), mc_sampler.weights)
+# grad, grad_var_re, grad_var_im, grad_cov_re_im = grad_log_psi.get_covar_and_covar_var(o_loc)
+# jax.block_until_ready((grad, grad_var_re, grad_var_im, grad_cov_re_im))
+jax.block_until_ready(grad_log_psi.get_covar(o_loc))
 t = time.perf_counter() - t0
 
 results = dict(
@@ -68,6 +83,6 @@ results = dict(
     host_max_rss_bytes=host_max_rss_bytes(),
 )
 df = pd.DataFrame([results])
-df_old = pd.read_csv(f"jacobian_test.csv") if os.path.exists(f"jacobian_test.csv") else pd.DataFrame()
+df_old = pd.read_csv(f"jacobian_test_covar.csv") if os.path.exists(f"jacobian_test_covar.csv") else pd.DataFrame()
 df = pd.concat([df_old, df], ignore_index=True)
-df.to_csv(f"jacobian_test.csv", index=False)
+df.to_csv(f"jacobian_test_covar.csv", index=False)
