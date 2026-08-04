@@ -1,3 +1,3 @@
 from . import base
-from .pinv_snr import PinvSNR
+from .pinv_snr import PinvSNR, PinvSVD
 from .cg import CG

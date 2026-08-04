@@ -13,6 +13,22 @@ def _eigh_numpy(S):
 def smooth_cutoff_fn(x, c, exp=6):
     return 1 / (1 + (c / x)**exp)
 
+def _diagonalize(S, F, diagonalize_on_device):
+    if diagonalize_on_device:
+        try:
+            ev, V = jnp.linalg.eigh(S)
+        except ValueError:
+            warnings.warn(
+                "jax.numpy.linalg.eigh raised an exception. Falling back to "
+                "numpy.linalg.eigh for diagonalization.", RuntimeWarning
+            )
+            ev, V = _eigh_numpy(S)
+    else:
+        ev, V = _eigh_numpy(S)
+
+    VtF = jnp.dot(jnp.transpose(jnp.conj(V)), F)
+    return ev, V, VtF
+
 @jax.jit(static_argnums=(2,))
 def get_snr(VtF, rho_var, num_samples):
     return jnp.sqrt(jnp.abs(num_samples * (jnp.conj(VtF) * VtF) / (rho_var + 1e-14))).ravel()
@@ -133,17 +149,85 @@ class PinvSNR(AbstractSolver):
         return residual, cutoff, pinvEv, effective_rank
     
     def _transform_to_eigenbasis(self, S, F):
-        if self._diagonalize_on_device:
-            try:
-                self._ev, self._V = jnp.linalg.eigh(S)
-            except ValueError:
-                warnings.warn(
-                    "jax.numpy.linalg.eigh raised an exception. Falling back to " 
-                    "numpy.linalg.eigh for diagonalization.", RuntimeWarning
-                )
-            
-                self._ev, self._V = _eigh_numpy(S)
-        else:
-            self._ev, self._V = _eigh_numpy(S)
+        self._ev, self._V, self._VtF = _diagonalize(S, F, self._diagonalize_on_device)
 
-        self._VtF = jnp.dot(jnp.transpose(jnp.conj(self._V)), F)
+
+class PinvSVD(AbstractSolver):
+    """
+    Pseudo-inverse solver based on a smooth eigenvalue cutoff with a fixed
+    threshold, following the SVD regularization of Medvidovic and Sels.
+
+    Unlike ``PinvSNR``, the cutoff is not searched adaptively: it is fixed by
+    ``rcond`` (relative to the largest eigenvalue) and ``acond`` (absolute),
+    and applied once, directly to the raw eigenspectrum. There is no
+    SNR-based gating.
+
+    Parameters
+    ----------
+    rcond : float, default=1e-14
+        Relative eigenvalue cutoff, as a fraction of the largest eigenvalue.
+
+    acond : float, default=1e-8
+        Absolute eigenvalue cutoff.
+
+    exponent : float, default=6
+        Sharpness of the smooth cutoff transition.
+
+    diagonalize_on_device : bool, default=True
+        If True, diagonalize the covariance matrix using JAX. Otherwise,
+        fall back to NumPy.
+    """
+    def __init__(self, rcond=1e-14, acond=1e-8, exponent=6, diagonalize_on_device=True):
+        self.rcond = rcond
+        self.acond = acond
+        self.exponent = exponent
+        self._diagonalize_on_device = diagonalize_on_device
+
+        self._ev = None
+        self._V = None
+
+    @property
+    def last_eigenvalues(self):
+        return self._ev
+
+    @property
+    def last_eigenvectors(self):
+        return self._V
+
+    @property
+    def _needs_dense_matrix(self) -> bool:
+        return True
+
+    def __call__(self, S, F, solver_state: SolverState):
+        self._ev, self._V, self._VtF = _diagonalize(S, F, self._diagonalize_on_device)
+        F_norm = jnp.linalg.norm(F)
+
+        residual, pinvEv, effective_rank, cutoff = self._regularize(
+            self.last_eigenvalues, self._VtF, F_norm
+        )
+
+        update = jnp.dot(self.last_eigenvectors, pinvEv * self._VtF)
+        update = update if solver_state.holomorphic else jnp.real(update)
+        info = dict(
+            residual=residual.item(),
+            cutoff=cutoff.item(),
+            condition_number=(self.last_eigenvalues[-1] / jnp.min(jnp.abs(self.last_eigenvalues))).item(),
+            spectrum=self.last_eigenvalues,
+            effective_rank=effective_rank.item()
+        )
+
+        return update, info
+
+    @jax.jit(static_argnums=(0,))
+    def _regularize(self, eigenvalues, VtF, F_norm):
+        eps = jnp.finfo(eigenvalues.dtype).eps
+        cutoff = jnp.max(jnp.array([eps, self.acond, self.rcond * eigenvalues[-1]]))
+
+        ev_safe = jnp.maximum(eigenvalues, 10 * eps)
+        regularizer = smooth_cutoff_fn(ev_safe, cutoff, self.exponent)
+
+        pinvEv = regularizer / ev_safe
+        residual = jnp.linalg.norm((pinvEv * eigenvalues - 1) * VtF) / F_norm
+        effective_rank = jnp.mean(regularizer)
+
+        return residual, pinvEv, effective_rank, cutoff
