@@ -37,8 +37,7 @@ class MinSR(AbstractOptimizer):
         self.diag_shift = diagonalShift
 
         num_params = psi.numParameters * (2 if not psi.realParams else 1)
-        num_devices = MESH.shape["devices"]
-        self._params_pad_size = int((num_devices - num_params % num_devices) % num_devices)
+        self._params_pad_size = (- num_params) % MESH.shape["devices"]
         self._concat = (not psi.holomorphic) and (not psi.realParams)
 
         super().__init__(sampler, psi, resample_stepper, use_cross_valiadation=False)
