@@ -70,7 +70,7 @@ class MinSR(AbstractOptimizer):
         if isinstance(grad_log_psi, LazySampledObs):
             return self._solve_lazy(grad_log_psi, o_loc)
         
-        gradients = grad_log_psi._get_normalized_obs_and_consume()
+        gradients = grad_log_psi._normalized_obs
         if self._concat:
             gradients = _concat_nonholo(gradients)
             o_loc = _concat_nonholo(o_loc)
