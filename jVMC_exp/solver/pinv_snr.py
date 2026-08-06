@@ -22,7 +22,8 @@ class PinvSNR(AbstractSolver):
     - an eigenvalue cutoff controlled by ``pinv_cutoff``, which suppresses
       ill-conditioned directions of the covariance matrix;
     - a signal-to-noise ratio (SNR) cutoff controlled by ``snr_tol``, which
-      suppresses statistically unresolved update directions.
+      suppresses statistically unresolved update directions. This regularization
+      is skipped by default. Change snr_tol to activate it.
 
     The effective eigenvalue cutoff is chosen adaptively such that the residual
     force discarded by the regularization is below ``pinv_tol`` whenever
@@ -30,7 +31,7 @@ class PinvSNR(AbstractSolver):
 
     Parameters
     ----------
-    snr_tol : float, default=2
+    snr_tol : float, default=0
         Minimum signal-to-noise ratio of an eigenmode before it contributes
         significantly to the update.
 
@@ -56,7 +57,7 @@ class PinvSNR(AbstractSolver):
         size is chosen automatically.
     """
     def __init__(
-            self, snr_tol=2, pinv_tol=1e-14, pinv_cutoff=1e-8, 
+            self, snr_tol=0, pinv_tol=1e-14, pinv_cutoff=1e-8, 
             diagonalization_mode: Literal["device", "distributed", "host"] = "device",
             T_A: int | None = None
         ):
