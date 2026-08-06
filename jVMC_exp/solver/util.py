@@ -13,6 +13,9 @@ def _eigh_numpy(S):
 
     return jnp.array(e), jnp.array(V)
 
+def smooth_cutoff_fn(x, c, exp=6):
+    return 1 / (1 + (c / x)**exp)
+
 def diagonalize(
         A, 
         pad_size: int = 0, 

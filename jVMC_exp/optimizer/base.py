@@ -317,16 +317,18 @@ class Evolution(AbstractOptimizer):
             sampler, psi, resample_stepper, use_cross_valiadation, output_manager=output_manager
         )
 
+        double_params = (not psi.realParams) and (not psi.holomorphic)
+        num_params = psi.numParameters * (2 if double_params  else 1)
+        self._params_pad_size = (- num_params) % MESH.shape["devices"]
+
         self._solver_state = dict(
             exact_sampler=isinstance(self.sampler, ExactSampler),
-            holomorphic=self.psi.holomorphic
+            holomorphic=self.psi.holomorphic,
+            pad_size=self._params_pad_size
         )
 
         self._F0 = None
         self._S0 = None
-        double_params = (not psi.realParams) and (not psi.holomorphic)
-        num_params = psi.numParameters * (2 if double_params  else 1)
-        self._params_pad_size = (- num_params) % MESH.shape["devices"]
 
     @property
     def solver(self):
@@ -539,7 +541,7 @@ class Evolution(AbstractOptimizer):
 
             return Sv
 
-        return matvec 
+        return matvec
     
     def _get_rhs(self, grad, grad_var_re, grad_var_im, grad_cov_re_im):
         self._F0 = grad

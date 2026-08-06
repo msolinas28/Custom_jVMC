@@ -2,20 +2,16 @@ import jax.numpy as jnp
 import warnings
 import numpy as np
 import jax
+from typing import Literal
 
 from jVMC_exp.solver.base import AbstractSolver
-
-def _eigh_numpy(S):
-    e, V = np.linalg.eigh(np.array(S))
-
-    return jnp.array(e), jnp.array(V)
-
-def smooth_cutoff_fn(x, c, exp=6):
-    return 1 / (1 + (c / x)**exp)
+from jVMC_exp.solver.util import diagonalize, smooth_cutoff_fn
 
 @jax.jit
 def get_snr(Vtb, Vtb_var, num_samples):
-    return jnp.sqrt(jnp.abs(num_samples * (jnp.conj(Vtb) * Vtb) / (Vtb_var + 1e-14))).ravel()
+    return jnp.sqrt(
+        jnp.abs(num_samples * (jnp.conj(Vtb) * Vtb) / (Vtb_var + 1e-14))
+    ).ravel()
     
 class PinvSNR(AbstractSolver):
     """
@@ -51,11 +47,16 @@ class PinvSNR(AbstractSolver):
         If True, diagonalize the covariance matrix using JAX. Otherwise,
         fall back to NumPy.
     """
-    def __init__(self, snr_tol=2, pinv_tol=1e-14, pinv_cutoff=1e-8, diagonalize_on_device=True):
+    def __init__(
+            self, snr_tol=2, pinv_tol=1e-14, pinv_cutoff=1e-8, 
+            diagonalization_mode: Literal["device", "distributed", "host"] = "device",
+            T_A: int | None = None
+        ):
         self._snr_tol = snr_tol
         self._pinv_tol = pinv_tol
         self.pinv_cutoff = pinv_cutoff
-        self._diagonalize_on_device = diagonalize_on_device
+        self._diagonalization_mode = diagonalization_mode
+        self._T_A = T_A
 
         self._ev = None
         self._V = None
@@ -82,17 +83,19 @@ class PinvSNR(AbstractSolver):
 
     def __call__(
             self, A, b, b_var=None, *, 
-            effective_num_samples, exact_sampler, holomorphic, **kwargs
+            pad_size, effective_num_samples, exact_sampler, holomorphic, 
+            **kwargs
         ):
         # Transform equation to eigenbasis and compute Signal to Noise Ratio
-        self._transform_to_eigenbasis(A, b)
-        b_norm = jnp.linalg.norm(b)
-
+        self._ev, self._V = diagonalize(
+            A, pad_size, mode=self._diagonalization_mode, T_A=self._T_A
+        )
+        self._Vtb = jnp.dot(jnp.transpose(jnp.conj(self._V)), b)
         if jnp.abs(self.last_eigenvalues[-1]) < 1e-14:
-                    raise RuntimeError(
-                        f"Largest eigenvalue of the QGT is {self.last_eigenvalues[-1]}. "
-                        "QGT is most likely highly ill-conditioned/zero "
-                    )
+            raise RuntimeError(
+                f"Largest eigenvalue of the QGT is {self.last_eigenvalues[-1]}. "
+                "QGT is most likely highly ill-conditioned/zero "
+            )       
 
         snr = None
         if not exact_sampler:
@@ -117,7 +120,8 @@ class PinvSNR(AbstractSolver):
             , 1. / self.last_eigenvalues,
             0.
         )
-        
+
+        b_norm = jnp.linalg.norm(b) 
         residual = 1.0
         cutoff = 1e-2
         first = True
@@ -156,19 +160,3 @@ class PinvSNR(AbstractSolver):
         effective_rank = jnp.mean(regularizer)
 
         return residual, cutoff, pinvEv, effective_rank
-    
-    def _transform_to_eigenbasis(self, A, b):
-        if self._diagonalize_on_device:
-            try:
-                self._ev, self._V = jnp.linalg.eigh(A)
-            except ValueError:
-                warnings.warn(
-                    "jax.numpy.linalg.eigh raised an exception. Falling back to " 
-                    "numpy.linalg.eigh for diagonalization.", RuntimeWarning
-                )
-            
-                self._ev, self._V = _eigh_numpy(A)
-        else:
-            self._ev, self._V = _eigh_numpy(A)
-
-        self._Vtb = jnp.dot(jnp.transpose(jnp.conj(self._V)), b)
