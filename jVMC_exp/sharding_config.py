@@ -44,7 +44,7 @@ def make_2d_mesh(axis_names=("row", "col")):
     return Mesh(devices_2d, axis_names=axis_names)
 
 MESH_2D = make_2d_mesh(axis_names=("row", "col"))
-DEVICE_SPEC_2D = P(("row", "col"))
+DEVICE_SPEC_2D = P("row", "col")
 DEVICE_SHARDING_2D = NamedSharding(MESH_2D, DEVICE_SPEC_2D)
 
 @dataclass

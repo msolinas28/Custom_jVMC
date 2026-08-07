@@ -6,6 +6,7 @@ from typing import Literal
 import math
 import jaxmg
 
+from jVMC_exp.global_defs import USE_DISTRIBUTED
 from jVMC_exp.sharding_config import MESH, MESH_2D, DEVICE_SHARDING_2D
 
 def _eigh_numpy(S):
@@ -17,43 +18,100 @@ def smooth_cutoff_fn(x, c, exp=6):
     return 1 / (1 + (c / x)**exp)
 
 def diagonalize(
-        A, 
-        pad_size: int = 0, 
+        A,
+        pad_size: int = 0,
         mode: Literal["device", "distributed", "host"] = "device",
         T_A: int | None = None
     ):
+    """
+    Diagonalize a Hermitian matrix, optionally sharded across devices.
+
+    Parameters
+    ----------
+    A : array_like
+        Hermitian matrix to diagonalize.
+    pad_size : int, default=0
+        Number of trailing rows/columns of `A` that are padding rather than
+        real data. If nonzero, a large constant is added to the diagonal of
+        the padded block before diagonalization, pushing the corresponding
+        fake eigenvalues (and their eigenvectors) to the end of the
+        spectrum.
+    mode : {"device", "distributed", "host"}, default="device"
+        Diagonalization backend:
+
+        - "device": `jax.numpy.linalg.eigh` on the default device(s).
+        - "distributed": distributed diagonalization via `jaxmg.syevd` on
+          `MESH_2D`. Falls back to "device" if there is no GPU backend, if
+          `A`'s size isn't divisible by the number of devices, if there is
+          only one device, or if `JVMC_USE_DISTRIBUTED` isn't set (jaxmg's
+          cuSOLVERMp backend needs rank-per-GPU execution).
+        - "host": `numpy.linalg.eigh` on the host.
+    T_A : int, optional
+        Tile size used for the distributed diagonalization
+        (`mode="distributed"`). If not given, it defaults to the greatest
+        common divisor of `A.shape[0]` divided by `MESH_2D`'s process rows
+        and columns.
+
+    Returns
+    -------
+    ev : jax.Array
+        Eigenvalues of `A` in ascending order, still including the
+        `pad_size` fake eigenvalues at the end.
+    V : jax.Array
+        Eigenvectors of `A`, still including the `pad_size` fake
+        rows/columns.
+
+    Notes
+    -----
+    The padding is deliberately *not* stripped off before returning `ev`
+    and `V`. When `V` is sharded across devices, slicing it on the sharded
+    axis would force a reshard, gathering it and replicating it onto every
+    device. 
+    """
     if not jnp.allclose(A, A.conjugate().T):
         raise ValueError(
             "The given matrix is not Hermitian, "
             "thus can not be diagonalized with this method"
         )
 
-    if mode.lower() == "distributed" and jax.default_backend() != "gpu":
-        if jax.process_index() == 0:
-            warnings.warn(
-                "mode='distributed' requires a real GPU backend, "
-                f"got jax.default_backend()={jax.default_backend()}. "
-                "Falling back to mode='device'."
-            )
-        mode = "device"
+    if mode.lower() == "distributed": 
+        if jax.default_backend() != "gpu":
+            if jax.process_index() == 0:
+                warnings.warn(
+                    "mode='distributed' requires a real GPU backend, "
+                    f"got jax.default_backend()={jax.default_backend()}. "
+                    "Falling back to mode='device'."
+                )
+            mode = "device"
 
-    elif mode.lower() == "distributed" and A.shape[0] % MESH.shape["devices"] != 0:
-        if jax.process_index() == 0:
-            warnings.warn(
-                "mode=distributed requires the given matrix to "
-                "have shape divisible by the number of devices."
-                f"Got shape={A.shape}, n_devices={MESH.shape['devices']}."
-                "Falling back to mode='device'."
-            )
-        mode = "device"
+        if A.shape[0] % MESH.shape["devices"] != 0:
+            if jax.process_index() == 0:
+                warnings.warn(
+                    "mode=distributed requires the given matrix to "
+                    "have shape divisible by the number of devices."
+                    f"Got shape={A.shape}, n_devices={MESH.shape['devices']}."
+                    "Falling back to mode='device'."
+                )
+            mode = "device"
 
-    elif mode.lower() == "distributed" and MESH.shape["devices"] == 1:
-        if jax.process_index() == 0:
-            warnings.warn(
-                "Got mode=distributed but there is only one device. "
-                "Falling back to mode='device'."
-            )
-        mode = "device"
+        if MESH.shape["devices"] == 1:
+            if jax.process_index() == 0:
+                warnings.warn(
+                    "Got mode=distributed but there is only one device. "
+                    "Falling back to mode='device'."
+                )
+            mode = "device"
+
+        if not USE_DISTRIBUTED:
+            if jax.process_index() == 0:
+                warnings.warn(
+                    "mode='distributed' requires JVMC_USE_DISTRIBUTED=true and "
+                    "one process per GPU, since jaxmg's cuSOLVERMp backend "
+                    "needs rank-per-GPU execution "
+                    "(e.g. launch with `srun --ntasks=<n_gpus> --gpus-per-task=1`). "
+                    "Falling back to mode='device'."
+                )
+            mode = "device"
 
     if pad_size !=0:
         # Frobenius norm >= spectral radius for Hermitian A
@@ -91,10 +149,4 @@ def diagonalize(
             f"The available modes are 'device', 'host' or 'distributed' got {mode}."
         )
 
-    if pad_size != 0:
-        ev = ev[:N]
-        V = V[:N, :N]
-
     return ev, V
-
-    # self._Vtb = jnp.dot(jnp.transpose(jnp.conj(self._V)), b) # TODO: move it from here
