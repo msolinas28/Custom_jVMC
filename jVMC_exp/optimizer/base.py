@@ -474,7 +474,7 @@ class Evolution(AbstractOptimizer):
             )
         
         if isinstance(grad_log_psi, SampledObs):
-            S = self._get_qgt(grad_log_psi._centered_obs, batch_size=None)
+            S = self._get_qgt(grad_log_psi._normalized_obs, batch_size=None)
         else:
             mean = 0
             S = 0
@@ -532,16 +532,18 @@ class Evolution(AbstractOptimizer):
                 "array. Either use a solver with _needs_dense_matrix=True (e.g. PinvSNR), or "
                 "compute the Jacobian without batching."
             )
+
+        grad = grad_log_psi._normalized_obs
         
         def raw_matvec(v):
-            return (grad_log_psi._normalized_obs.conj().T @ (grad_log_psi._normalized_obs @ v))
+            return (grad.conj().T @ (grad @ v))
 
         self._S0 = raw_matvec
 
         def matvec(v):
             Sv = self._lhs_trans_fn(raw_matvec(v))
             if self.diag_scale > 1e-15:
-                diag = jnp.sum(jnp.abs(grad_log_psi._normalized_obs) ** 2, axis=0)
+                diag = jnp.sum(jnp.abs(grad) ** 2, axis=0)
                 Sv = Sv + self.diag_scale * diag * v
             if self.diag_shift > 1e-15:
                 Sv = Sv + self.diag_shift * v
