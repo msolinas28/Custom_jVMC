@@ -514,8 +514,7 @@ class Evolution(AbstractOptimizer):
         weighted_batch = jnp.einsum("i, i... -> i...", jnp.sqrt(weights), batch)
         mean = jax.lax.psum_scatter(
             jnp.tensordot(weights, batch, axes=(0, 0)), 
-            "devices", 
-            scatter_dimension=0, 
+            "devices",
             tiled=True
         )
 

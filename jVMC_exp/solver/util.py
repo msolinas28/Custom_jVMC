@@ -12,6 +12,48 @@ from jVMC_exp.sharding_config import (
     DEVICE_SHARDING, DEVICE_SHARDING_2D
 )
 
+def _distributed_warning(A, mode):
+    if mode.lower() == "distributed": 
+        if jax.default_backend() != "gpu":
+            if jax.process_index() == 0:
+                warnings.warn(
+                    "mode='distributed' requires a real GPU backend, "
+                    f"got jax.default_backend()={jax.default_backend()}. "
+                    "Falling back to mode='device'."
+                )
+            mode = "device"
+
+        if A.shape[0] % MESH.shape["devices"] != 0:
+            if jax.process_index() == 0:
+                warnings.warn(
+                    "mode=distributed requires the given matrix to "
+                    "have shape divisible by the number of devices."
+                    f"Got shape={A.shape}, n_devices={MESH.shape['devices']}."
+                    "Falling back to mode='device'."
+                )
+            mode = "device"
+
+        if MESH.shape["devices"] == 1:
+            if jax.process_index() == 0:
+                warnings.warn(
+                    "Got mode=distributed but there is only one device. "
+                    "Falling back to mode='device'."
+                )
+            mode = "device"
+
+        if not USE_DISTRIBUTED:
+            if jax.process_index() == 0:
+                warnings.warn(
+                    "mode='distributed' requires JVMC_USE_DISTRIBUTED=true and "
+                    "one process per GPU, since jaxmg's cuSOLVERMp backend "
+                    "needs rank-per-GPU execution "
+                    "(e.g. launch with `srun --ntasks=<n_gpus> --gpus-per-task=1`). "
+                    "Falling back to mode='device'."
+                )
+            mode = "device"
+
+    return mode
+
 def _eigh_numpy(S):
     e, V = np.linalg.eigh(np.array(S))
 
@@ -76,45 +118,7 @@ def diagonalize(
             "The given matrix is not Hermitian, "
             "thus can not be diagonalized with this method"
         )
-
-    if mode.lower() == "distributed": 
-        if jax.default_backend() != "gpu":
-            if jax.process_index() == 0:
-                warnings.warn(
-                    "mode='distributed' requires a real GPU backend, "
-                    f"got jax.default_backend()={jax.default_backend()}. "
-                    "Falling back to mode='device'."
-                )
-            mode = "device"
-
-        if A.shape[0] % MESH.shape["devices"] != 0:
-            if jax.process_index() == 0:
-                warnings.warn(
-                    "mode=distributed requires the given matrix to "
-                    "have shape divisible by the number of devices."
-                    f"Got shape={A.shape}, n_devices={MESH.shape['devices']}."
-                    "Falling back to mode='device'."
-                )
-            mode = "device"
-
-        if MESH.shape["devices"] == 1:
-            if jax.process_index() == 0:
-                warnings.warn(
-                    "Got mode=distributed but there is only one device. "
-                    "Falling back to mode='device'."
-                )
-            mode = "device"
-
-        if not USE_DISTRIBUTED:
-            if jax.process_index() == 0:
-                warnings.warn(
-                    "mode='distributed' requires JVMC_USE_DISTRIBUTED=true and "
-                    "one process per GPU, since jaxmg's cuSOLVERMp backend "
-                    "needs rank-per-GPU execution "
-                    "(e.g. launch with `srun --ntasks=<n_gpus> --gpus-per-task=1`). "
-                    "Falling back to mode='device'."
-                )
-            mode = "device"
+    mode = _distributed_warning(A, mode)
 
     if pad_size !=0:
         # Frobenius norm >= spectral radius for Hermitian A
@@ -155,3 +159,66 @@ def diagonalize(
         )
 
     return ev, V
+
+def pinvert(
+        A,
+        rtol: float,
+        mode: Literal["device", "distributed"] = "device",
+        T_A: int | None = None
+    ):
+    """
+    Compute the Moore-Penrose pseudo-inverse of a Hermitian matrix, optionally sharded across devices.
+
+    Parameters
+    ----------
+    A : array_like
+        Hermitian matrix to pseudo-invert.
+    rtol : float
+        Relative cutoff. Eigenvalues with :math:`|\\lambda_i / \\lambda_{max}| \\leq` `rtol` are
+        treated as zero and excluded from the pseudo-inverse.
+    mode : {"device", "distributed"}, default="device"
+        Pseudo-inversion backend:
+
+        - "device": `jax.numpy.linalg.pinv` on the default device(s).
+        - "distributed": distributed eigendecomposition via `jaxmg.syevd` on `MESH_2D`, followed
+          by reassembling the pseudo-inverse from the resulting eigenvectors/eigenvalues. Falls
+          back to "device" under the same conditions as `diagonalize` (no GPU backend, `A`'s size
+          not divisible by the number of devices, only one device, or `JVMC_USE_DISTRIBUTED` not
+          set -- see `diagonalize` and `_distributed_warning`).
+    T_A : int, optional
+        Tile size used for the distributed eigendecomposition (`mode="distributed"`). If not
+        given, it defaults to the greatest common divisor of `A.shape[0]` divided by `MESH_2D`'s
+        process rows and columns.
+
+    Returns
+    -------
+    jax.Array
+        The (regularized) pseudo-inverse of `A`, with the same shape as `A`.
+    """
+    if not jnp.allclose(A, A.conjugate().T):
+        raise ValueError(
+            "The given matrix is not Hermitian, "
+            "thus can not be inverted with this method"
+        )
+    mode = _distributed_warning(A, mode)
+
+    if mode.lower() == "device":
+        return jnp.linalg.pinv(A, rtol=rtol, hermitian=True)
+
+    elif mode.lower() == "distributed":
+        A = jax.device_put(A, DEVICE_SHARDING_2D, donate=True)
+
+        if T_A is None:
+            p_rows, p_cols = MESH_2D.shape["row"], MESH_2D.shape["col"]
+            T_A = math.gcd((A.shape[0]) // p_rows, (A.shape[0]) // p_cols)
+
+        ev, V = jaxmg.syevd(A, T_A, MESH_2D)
+        V = jax.device_put(V, DEVICE_SHARDING, donate=True)
+        inv_ev = jnp.where(jnp.abs(ev / ev[-1]) > rtol, 1. / ev, 0.)
+
+        return jnp.einsum("ij, j, lj -> il", V, inv_ev, jnp.conjugate(V))
+
+    else:
+        raise ValueError(
+            f"The available modes are 'device' or 'distributed' got {mode}."
+        )
