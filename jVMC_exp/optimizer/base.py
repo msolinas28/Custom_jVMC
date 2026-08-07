@@ -448,10 +448,18 @@ class Evolution(AbstractOptimizer):
 
     def _get_tdvp_error(self, update):
         update = self._make_cmplx_fn(update) if self.psi.holomorphic else update
-        Sv = self._S0(update) if callable(self._S0) else self._S0.dot(update)
+
+        if callable(self._S0):
+            Sv = self._S0(update)
+        else:
+            Sv = self._S0.dot(jnp.pad(update, (0, self._params_pad_size)))
+            Sv = Sv[:-self._params_pad_size] if self._params_pad_size else Sv
 
         return jnp.abs(
-            1. + (jnp.real(jnp.vdot(update, Sv)) - 2 * jnp.real(jnp.vdot(update, - self.rhsPrefactor  * self._F0))) / (self.o_loc.var + 1e-14)
+            1. 
+            + (jnp.real(jnp.vdot(update, Sv))
+            - 2 * jnp.real(jnp.vdot(update, - self.rhsPrefactor  * self._F0)))
+            / (self.o_loc.var + 1e-14)
         )
     
     def _get_lhs_dense(self, grad_log_psi: SampledObs | LazySampledObs):
@@ -481,7 +489,7 @@ class Evolution(AbstractOptimizer):
         if self._params_pad_size != 0:
             grad_log_psi.transform(lambda x: x[:,:-self._params_pad_size])
 
-        self._S0 = S[:-self._params_pad_size, :-self._params_pad_size]
+        self._S0 = S
         S = self._lhs_trans_fn(S)
 
         if self.diag_scale > 1e-15:

@@ -7,7 +7,10 @@ import math
 import jaxmg
 
 from jVMC_exp.global_defs import USE_DISTRIBUTED
-from jVMC_exp.sharding_config import MESH, MESH_2D, DEVICE_SHARDING_2D
+from jVMC_exp.sharding_config import (
+    MESH, MESH_2D,
+    DEVICE_SHARDING, DEVICE_SHARDING_2D
+)
 
 def _eigh_numpy(S):
     e, V = np.linalg.eigh(np.array(S))
@@ -143,6 +146,8 @@ def diagonalize(
             T_A = math.gcd((A.shape[0]) // p_rows, (A.shape[0]) // p_cols)
 
         ev, V = jaxmg.syevd(A, T_A, MESH_2D)
+
+        V = jax.device_put(V, DEVICE_SHARDING)
 
     else:
         raise ValueError(

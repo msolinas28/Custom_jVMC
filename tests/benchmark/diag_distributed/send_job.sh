@@ -16,8 +16,8 @@ module load Python/3.13.5
 module load cuDNN/9.19.0.56-CUDA-13
 module load NCCL/default-CUDA-13
 
-source "$SCRATCH"/env/jaxmg_test/bin/activate
+source "$SCRATCH"/env/jVMC/bin/activate
 
 export JVMC_USE_DISTRIBUTED=true
 
-srun python -u test_on_gpu.py 256
+srun python -u test_on_gpu.py
