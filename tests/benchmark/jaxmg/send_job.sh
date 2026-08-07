@@ -20,4 +20,4 @@ source "$SCRATCH"/env/jVMC/bin/activate
 
 export JVMC_USE_DISTRIBUTED=true
 
-srun python -u test_on_gpu.py
+srun python -u minsr.py

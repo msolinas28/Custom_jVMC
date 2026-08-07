@@ -7,7 +7,7 @@ n_samples = 2**12
 n_chains = n_samples // 4
 batch_size = n_samples
 
-net = jVMC_exp.nets.RBM(256)
+net = jVMC_exp.nets.CpxRBM(256)
 psi = jVMC_exp.vqs.NQS(net, L, batch_size, seed=123)
 sampler = jVMC_exp.sampler.MCSampler(
     psi, 
