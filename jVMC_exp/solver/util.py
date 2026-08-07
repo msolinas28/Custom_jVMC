@@ -4,7 +4,11 @@ import warnings
 import numpy as np
 from typing import Literal
 import math
-import jaxmg
+
+try:
+    import jaxmg
+except ImportError:
+    jaxmg = None
 
 from jVMC_exp.global_defs import USE_DISTRIBUTED
 from jVMC_exp.sharding_config import (
@@ -13,7 +17,16 @@ from jVMC_exp.sharding_config import (
 )
 
 def _distributed_warning(A, mode):
-    if mode.lower() == "distributed": 
+    if mode.lower() == "distributed":
+        if jaxmg is None:
+            if jax.process_index() == 0:
+                warnings.warn(
+                    "mode='distributed' requires the 'jaxmg' package, which is not installed "
+                    "(install it via a CUDA extra, e.g. `pip install jVMC_exp[cuda13]`). "
+                    "Falling back to mode='device'."
+                )
+            mode = "device"
+
         if jax.default_backend() != "gpu":
             if jax.process_index() == 0:
                 warnings.warn(
