@@ -127,6 +127,18 @@ def diagonalize(
     device. 
     """
     if not jnp.allclose(A, A.conjugate().T):
+        defect = A - A.conjugate().T
+        max_defect = jnp.max(jnp.abs(defect))
+        i, j = jnp.unravel_index(jnp.argmax(jnp.abs(defect)), defect.shape)
+        print(
+            f"[diagonalize] Hermiticity check failed: "
+            f"max|A - A^H| = {max_defect:.3e} at index ({int(i)}, {int(j)}), "
+            f"A[i,j] = {A[i, j]}, A[j,i] = {A[j, i]}, "
+            f"max|A| = {jnp.max(jnp.abs(A)):.3e}, "
+            f"NaN entries = {int(jnp.sum(jnp.isnan(A)))}, "
+            f"Inf entries = {int(jnp.sum(jnp.isinf(A)))}",
+            flush=True,
+        )
         raise ValueError(
             "The given matrix is not Hermitian, "
             "thus can not be diagonalized with this method"

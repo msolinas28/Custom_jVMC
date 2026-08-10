@@ -473,8 +473,10 @@ class Evolution(AbstractOptimizer):
                 lambda x: jnp.pad(x, ((0, 0), (0, self._params_pad_size)), mode="constant")
             )
         
+        G = None
         if isinstance(grad_log_psi, SampledObs):
-            S = self._get_qgt(grad_log_psi._normalized_obs, batch_size=None)
+            G = grad_log_psi._normalized_obs
+            S = self._get_qgt(G, batch_size=None)
         else:
             mean = 0
             S = 0
@@ -483,8 +485,29 @@ class Evolution(AbstractOptimizer):
                 mean += batch_mean
                 S += self._get_qgt(batch, batch_size=None)
             del batch
-    
+
             S = S - jnp.tensordot(jnp.conj(mean), mean, axes=0)
+
+        hermitian_defect = jnp.max(jnp.abs(S - S.conj().T))
+        nan_in_S = jnp.any(jnp.isnan(S))
+        inf_in_S = jnp.any(jnp.isinf(S))
+        if hermitian_defect > 1e-6 or nan_in_S or inf_in_S:
+            print(
+                f"[QGT diagnostic] Hermitian defect = {hermitian_defect:.3e}, "
+                f"max|S| = {jnp.max(jnp.abs(S)):.3e}, "
+                f"NaN in S: {bool(nan_in_S)}, Inf in S: {bool(inf_in_S)}",
+                flush=True,
+            )
+            if G is not None:
+                nan_or_inf_G = jnp.isnan(G) | jnp.isinf(G)
+                per_sample_max = jnp.max(jnp.abs(G), axis=1)
+                worst_sample = jnp.argmax(per_sample_max)
+                print(
+                    f"[QGT diagnostic] grad_log_psi: max|G| = {jnp.max(jnp.abs(G)):.3e} "
+                    f"at sample {int(worst_sample)}, median|G| = {jnp.median(jnp.abs(G)):.3e}, "
+                    f"NaN/Inf entries in G: {int(jnp.sum(nan_or_inf_G))}",
+                    flush=True,
+                )
 
         if self._params_pad_size != 0:
             grad_log_psi.transform(lambda x: x[:,:-self._params_pad_size])
