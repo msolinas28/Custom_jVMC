@@ -36,7 +36,7 @@ def host_max_rss_bytes():
 
 def compute(grad_log_psi, o_loc):
     if args.quantity == "force":
-        return grad_log_psi.get_covar_and_covar_var(o_loc)
+        return grad_log_psi.get_covar(o_loc)
     return grad_log_psi.get_covar()
 
 num_hidden = 512
