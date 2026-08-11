@@ -206,8 +206,9 @@ class SampledObs():
         """
         if other is None:
             return _get_self_covar(self._normalized_obs)
-
-        return _get_covar(self._normalized_obs, other._normalized_obs)
+        
+        weighted = _normalize_no_center(self.observations, self.weights)
+        return _get_covar(weighted, other._normalized_obs)
 
     def get_covar_obs(self, other: SampledObs | None = None) -> SampledObs:
         """
