@@ -35,6 +35,8 @@ class AbstractOptimizer(ABC):
         self._elapsed = 0
         self._sampler_out = (None,) * 3
 
+        self._importance_weights = 1
+
     @property
     def output_manager(self):
         return self._output_manager
@@ -82,6 +84,16 @@ class AbstractOptimizer(ABC):
             return self.output_manager.stop_timing(name)
 
         # Get sample
+        ####
+        if intStep != 0:
+            weights = jnp.exp(
+                2 * jnp.real(self.psi(self.sampler.samples) - self.sampler.logPsi)
+            )
+            print("intStep", intStep, flush=True)
+            print("Mean importance w:", jnp.mean(weights), flush=True)
+            w = weights / jnp.sum(weights)
+            print("Effective number of samples", 1.0 / jnp.sum(w ** 2), flush=True)
+        ####
         if self._resample or intStep == 0:
             self.output_manager.start_timing("sampling")
             sampler_out = self.sampler.sample(numSamples=numSamples)
@@ -91,6 +103,7 @@ class AbstractOptimizer(ABC):
             self.sampler._weights = jnp.exp(
                 2 * jnp.real(self.psi(self.sampler.samples) - self.sampler.logPsi)
             )
+            self._importance_weights = jnp.mean(self.sampler._weights)
 
         # Evaluate local observables and their gradient
         self.output_manager.start_timing("compute objective function and gradient")
@@ -474,7 +487,27 @@ class Evolution(AbstractOptimizer):
             )
         
         if isinstance(grad_log_psi, SampledObs):
-            S = self._get_qgt(grad_log_psi._normalized_obs, batch_size=None)
+            G = grad_log_psi._normalized_obs
+            S = self._get_qgt(G, batch_size=None)
+
+            G_ref = G[:, :-self._params_pad_size] if self._params_pad_size else G
+            S_ref = jnp.tensordot(jnp.conj(G_ref), G_ref, axes=(0, 0))
+            S_cmp = S[:-self._params_pad_size, :-self._params_pad_size] if self._params_pad_size else S
+
+            if not jnp.allclose(S_ref, S_cmp):
+                from flax import serialization
+                from pathlib import Path
+
+                dump_dir = Path("/e/scratch/neuquass/solinas1/Graphene_Time_Evolution/Script")
+                dump_dir.mkdir(parents=True, exist_ok=True)
+                dump_path = dump_dir / f"qgt_divergence"
+                binary_data = serialization.to_bytes(self.psi.parameters)
+                with open(f"{dump_path}.mpack", "wb") as outfile:
+                    outfile.write(binary_data)
+                raise RuntimeError(
+                    f"QGT cross-check triggered stop"
+                )
+
         else:
             mean = 0
             S = 0
@@ -483,7 +516,7 @@ class Evolution(AbstractOptimizer):
                 mean += batch_mean
                 S += self._get_qgt(batch, batch_size=None)
             del batch
-    
+
             S = S - jnp.tensordot(jnp.conj(mean), mean, axes=0)
 
         if self._params_pad_size != 0:
