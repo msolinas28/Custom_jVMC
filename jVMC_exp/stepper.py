@@ -287,10 +287,10 @@ class AdaptiveHeun(AbstractAdaptiveStepper):
 
     def step(self, t, f, y, *, normFunction=_rms_norm, **rhsArgs):
         converged = False
-        y_norm = normFunction(y)
         k0 = f(y, t, **rhsArgs, intStep=0)
-        
-        while not converged:    
+        y_norm = normFunction(y)
+
+        while not converged:
             dy0, _ = _get_rk_step(
                 self._butcher_tableau, 
                 t, f, y, self.dt, k0, **rhsArgs
@@ -362,10 +362,10 @@ class RK23(AbstractAdaptiveStepper):
             New value of :math:`y` and time step used :math:`\\Delta t`.
         """
         converged = False
-        y_norm = normFunction(y)
         # k0 = self._k0 if self._k0 is not None else f(y, t, **rhsArgs, intStep=0)
         # TODO: at the moment this is needed to trigger intStep=0, but the above line saves a step
         k0 = f(y, t, **rhsArgs, intStep=0)
+        y_norm = normFunction(y)
 
         while not converged:
             dy_high, K = _get_rk_step(
@@ -441,10 +441,10 @@ class RK45(AbstractAdaptiveStepper):
             New value of :math:`y` and time step used :math:`\\Delta t`.
         """
         converged = False
-        y_norm = normFunction(y)
         # k0 = self._k0 if self._k0 is not None else f(y, t, **rhsArgs, intStep=0)
         # TODO: at the moment this is needed to trigger intStep=0, but the above line saves a step
         k0 = f(y, t, **rhsArgs, intStep=0)
+        y_norm = normFunction(y)
 
         while not converged:
             dy_high, K = _get_rk_step(
