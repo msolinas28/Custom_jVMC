@@ -260,6 +260,6 @@ def s_norm_fn(opt: TDVP):
         Sv = jnp.dot(opt._S0, jnp.pad(v, (0, opt._params_pad_size)))
         Sv = Sv[:-opt._params_pad_size] if opt._params_pad_size else Sv
 
-        return jnp.abs(jnp.real(jnp.vdot(v, Sv)))
+        return jnp.sqrt(jnp.abs(jnp.real(jnp.vdot(v, Sv))))
     
     return _norm_fn

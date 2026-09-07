@@ -2,6 +2,9 @@ from abc import ABC, abstractmethod
 from typing import Callable
 import jax.numpy as jnp
 
+def _clip(x, c_min, c_max):
+    return max(min(x, c_max), c_min)
+
 def _get_rk_step(butcher_tableau, t, f, y0, dt, k0=None, start_step=0, **rhs_kwargs):
     '''
     The Butcher tableau of the explicit Runge-Kutta scheme has to be given as a tuple
@@ -43,40 +46,84 @@ def _get_rk_step(butcher_tableau, t, f, y0, dt, k0=None, start_step=0, **rhs_kwa
 
     return dt * step, K
 
-def _adaptive_step_control(dy_low, dy_high, tolerance, max_step, norm_function, dt, order):
-    update_diff = norm_function(dy_low - dy_high)
-    if not jnp.isfinite(update_diff):
-        raise RuntimeError(
-            f"Adaptive step control got a non-finite error estimate ({update_diff}). "
-            "The right-hand side of the ODE is NaN or inf -- check the solver "
-        )
-    fe = tolerance / update_diff
-
-    if 0.2 > 0.9 * fe**(1 / (order + 1)):
-        tmp = 0.2
-    else:
-        tmp = 0.9 * fe**(1 / (order + 1))
-    dt_new = dt * min(2, tmp)
-
-    return fe > 1., min(dt_new, max_step)
-
 class AbstractStepper(ABC):
+    def __init__(self, time_step: float):
+        if time_step < 0:
+            raise ValueError(
+                f'The value of time_step has to be positive. Got {time_step}'
+            )
+        self.dt = time_step
+        super().__init__()
+
     @abstractmethod
     def step(self, t, f, yInitial, **kwargs):
         pass
+
+class AbstractAdaptiveStepper(AbstractStepper):
+    def __init__(
+            self, order, time_step, rtol, atol, min_step: float | None, max_step: float | None
+        ):
+        super().__init__(time_step)
+        self._order = order
+        self.rtol = rtol
+        self.atol = atol
+        self.max_step = max_step
+        self.min_step = min_step
+
+    @property
+    def order(self):
+        return self._order
+
+    @property
+    def min_step(self):
+        return self._min_step
+
+    @min_step.setter
+    def min_step(self, value):
+        self._min_step = -1 if value is None else value
+
+    @property
+    def max_step(self):
+        return self._max_step
+
+    @max_step.setter
+    def max_step(self, value):
+        self._max_step = 1e10 if value is None else value
+
+    def _adaptive_step_control(self, y_norm, dy_low, dy_high, norm_function):
+        N = jnp.size(dy_low)
+        update_diff = norm_function(dy_low - dy_high)
+        if not jnp.isfinite(update_diff):
+            raise RuntimeError(
+                f"Adaptive step control got a non-finite error estimate ({update_diff}). "
+                "The right-hand side of the ODE is NaN or inf -- check the solver"
+            )
+
+        scaled_diff = update_diff / (jnp.sqrt(N) * self.atol + y_norm * self.rtol)
+        exponent = -1 / (self.order + 1)
+        dt_rescale = _clip(
+            scaled_diff**exponent * 0.95,
+            c_min=0.2,
+            c_max=2
+        )
+        dt_new = self.dt * dt_rescale
+
+        converged = scaled_diff < 1 or dt_new > self.max_step or dt_new < self.min_step 
+
+        return converged, _clip(dt_new, self.min_step, self.max_step)
 
 class Euler(AbstractStepper):
     ''' 
     This class implements Euler integration
     '''
-
     def __init__(self, timeStep: float | Callable=1e-3):
         self._scheduler = None
         if isinstance(timeStep, Callable):
             self._scheduler = timeStep
-            self.dt = timeStep(0)
+            dt = timeStep(0)
         else:
-            self.dt = timeStep
+            dt = timeStep
+        super().__init__(dt)
 
     def update_dt(self, step: int):
         if self._scheduler is not None:
@@ -105,7 +152,6 @@ class Euler(AbstractStepper):
         Returns:
             New value of :math:`y` and time step used :math:`\\Delta t`.
         """
-
         dy = f(yInitial, t, **rhsArgs, intStep=0)
 
         return yInitial + self.dt * dy, self.dt
@@ -116,9 +162,8 @@ class Heun(AbstractStepper):
     Initializer arguments:
         * ``timeStep``: Initial time step (will be adapted automatically)
     """
-
     def __init__(self, timeStep=1e-3):
-        self.dt = timeStep
+        super().__init__(timeStep)
 
         self._butcher_tableau = (
                 jnp.array([[0, 0], [1, 0]]),
@@ -147,7 +192,6 @@ class Heun(AbstractStepper):
         Returns:
             New value of :math:`y` and time step used :math:`\\Delta t`.
         """
-
         dy0, _ = _get_rk_step(
             self._butcher_tableau, 
             t, f, yInitial, self.dt, **rhsArgs
@@ -155,7 +199,7 @@ class Heun(AbstractStepper):
 
         return yInitial + dy0, self.dt
 
-class AdaptiveHeun(AbstractStepper):
+class AdaptiveHeun(AbstractAdaptiveStepper):
     """ This class implements an adaptive second order consistent integration scheme.
 
     Initializer arguments:
@@ -163,11 +207,8 @@ class AdaptiveHeun(AbstractStepper):
         * ``tol``: Tolerance for integration errors.
         * ``maxStep``: Maximal allowed time step.
     """
-
-    def __init__(self, timeStep=1e-3, tol=1e-8, maxStep=1):
-        self.dt = timeStep
-        self.tolerance = tol
-        self.maxStep = maxStep
+    def __init__(self, timeStep=1e-3, rtol=1e-5, atol=1e-8, min_step=1e-4, max_step=1):
+        super().__init__(2, timeStep, rtol, atol, min_step, max_step)
 
         self._butcher_tableau = (
             jnp.array([[0, 0], [1, 0]]),
@@ -203,8 +244,8 @@ class AdaptiveHeun(AbstractStepper):
             New value of :math:`y` and time step used :math:`\\Delta t`.
         """
         converged = False
-
-        k0 = f(y, t, **rhsArgs, intStep=0) # TODO: this was inside the loop before
+        y_norm = normFunction(y)
+        k0 = f(y, t, **rhsArgs, intStep=0)
         
         while not converged:    
             dy0, _ = _get_rk_step(
@@ -222,11 +263,11 @@ class AdaptiveHeun(AbstractStepper):
             dy1 += dy1_half
 
             current_dt = self.dt
-            converged, self.dt = _adaptive_step_control(dy0, dy1, self.tolerance, self.maxStep, normFunction, self.dt, order=2)
+            converged, self.dt = self._adaptive_step_control(y_norm, dy0, dy1, normFunction)
 
         return y + dy1, current_dt
     
-class RK23(AbstractStepper):
+class RK23(AbstractAdaptiveStepper):
     """ 
     This class implements the explicit Runge-Kutta method of order 2(3) by Bogacki and Shampine.
 
@@ -235,11 +276,8 @@ class RK23(AbstractStepper):
         * ``tol``: Tolerance for integration errors.
         * ``maxStep``: Maximal allowed time step.
     """
-
-    def __init__(self, timeStep=1e-3, tol=1e-8, maxStep=1):
-        self.dt = timeStep
-        self.tolerance = tol
-        self.maxStep = maxStep
+    def __init__(self, timeStep=1e-3, rtol=1e-5, atol=1e-8, min_step=1e-4, max_step=1):
+        super().__init__(3, timeStep, rtol, atol, min_step, max_step)
         self._k0 = None
 
         self._butcher_tableau = (
@@ -250,6 +288,7 @@ class RK23(AbstractStepper):
 
     def step(self, t, f, y, normFunction=jnp.linalg.norm, **rhsArgs):
         converged = False
+        y_norm = normFunction(y)
         # k0 = self._k0 if self._k0 is not None else f(y, t, **rhsArgs, intStep=0) 
         # TODO: at the moment this is needed to trigger intStep=0, but the above line saves a step
         k0 = f(y, t, **rhsArgs, intStep=0)
@@ -264,12 +303,12 @@ class RK23(AbstractStepper):
             dy_low = self.dt * (7/24 * K[0] + 1/4 * K[1] + 1/3 * K[2] + 1/8 * K[3])
 
             current_dt = self.dt
-            converged, self.dt = _adaptive_step_control(dy_low, dy_high, self.tolerance, self.maxStep, normFunction, self.dt, order=3)
+            converged, self.dt = self._adaptive_step_control(y_norm, dy_low, dy_high, normFunction)
             self._k0 = K[-1] if converged else None
 
         return y_new, current_dt
     
-class RK45(AbstractStepper):
+class RK45(AbstractAdaptiveStepper):
     """ 
     This class implements the explicit Runge-Kutta method of order 4(5) by Dormand and Prince.
 
@@ -278,11 +317,8 @@ class RK45(AbstractStepper):
         * ``tol``: Tolerance for integration errors.
         * ``maxStep``: Maximal allowed time step.
     """
-
-    def __init__(self, timeStep=1e-3, tol=1e-8, maxStep=1):
-        self.dt = timeStep
-        self.tolerance = tol
-        self.maxStep = maxStep
+    def __init__(self, timeStep=1e-3, rtol=1e-5, atol=1e-8, min_step=1e-4, max_step=1):
+        super().__init__(5, timeStep, rtol, atol, min_step, max_step)
         self._k0 = None
 
         self._butcher_tableau = (
@@ -300,6 +336,7 @@ class RK45(AbstractStepper):
 
     def step(self, t, f, y, normFunction=jnp.linalg.norm, **rhsArgs):
         converged = False
+        y_norm = normFunction(y)
         # k0 = self._k0 if self._k0 is not None else f(y, t, **rhsArgs, intStep=0) 
         # TODO: at the moment this is needed to trigger intStep=0, but the above line saves a step
         k0 = f(y, t, **rhsArgs, intStep=0)
@@ -314,7 +351,7 @@ class RK45(AbstractStepper):
             dy_low = self.dt * (5179/57600 * K[0] + 7571/16695 * K[2] + 393/640 * K[3] - 92097/339200 * K[4] + 187/2100 * K[5] + 1/40 * K[6])
 
             current_dt = self.dt
-            converged, self.dt = _adaptive_step_control(dy_low, dy_high, self.tolerance, self.maxStep, normFunction, self.dt, order=5)
+            converged, self.dt = self._adaptive_step_control(y_norm, dy_low, dy_high, normFunction)
             self._k0 = K[-1] if converged else None
 
         return y_new, current_dt
