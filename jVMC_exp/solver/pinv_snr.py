@@ -1,5 +1,4 @@
 import jax.numpy as jnp
-import warnings
 import jax
 from typing import Literal
 
@@ -231,15 +230,9 @@ class PinvSNR(AbstractSolver):
         invEv = jnp.where(jnp.abs(ev / ev[-1]) > 1e-14, 1. / ev, 0.)
 
         b_norm = jnp.linalg.norm(b) 
-        residual = 1.0
-        cutoff = 1e-2
-        first = True
-        while (residual > self.pinv_tol and cutoff > self.pinv_cutoff) or first:
-            residual, cutoff, pinvEv, effective_rank = self._regularizer_step(
-                cutoff, snr, ev, invEv, Vtb, b_norm, exact_sampler
-            )
-
-            first = False
+        residual, cutoff, pinvEv, effective_rank = self._regularize(
+            snr, ev, invEv, Vtb, b_norm, exact_sampler
+        )
 
         x = _unpad(
             jnp.dot(V, jnp.pad((pinvEv * Vtb), (0, pad_size))),
@@ -257,19 +250,23 @@ class PinvSNR(AbstractSolver):
         )
 
         return x, info
-    
-    @jax.jit(static_argnums=(0, 7))
-    def _regularizer_step(self, cutoff, snr, eigenvalues, invEv, Vtb, b_norm, exact_sampler):
-        # Set regularizer for singular value cutoff
-        cutoff = jnp.max(jnp.array([0.8 * cutoff, self.pinv_cutoff]))
-        regularizer = smooth_cutoff_fn(jnp.abs(eigenvalues / eigenvalues[-1]), cutoff)
 
-        # Construct a soft cutoff based on the SNR
-        if not exact_sampler and snr is not None:
-            regularizer *= smooth_cutoff_fn(snr, self.snr_tol)
+    @jax.jit(static_argnums=(0, 6))
+    def _regularize(self, snr, eigenvalues, invEv, Vtb, b_norm, exact_sampler):
+        def _step(cutoff):
+            cutoff = jnp.maximum(0.8 * cutoff, self.pinv_cutoff)
+            regularizer = smooth_cutoff_fn(jnp.abs(eigenvalues / eigenvalues[-1]), cutoff)
 
-        pinvEv = invEv * regularizer
-        residual = jnp.linalg.norm((pinvEv * eigenvalues - 1) * Vtb) / b_norm
-        effective_rank = jnp.mean(regularizer)
+            if not exact_sampler and snr is not None:      # resolved at trace time
+                regularizer = regularizer * smooth_cutoff_fn(snr, self.snr_tol)
+            
+            pinvEv = invEv * regularizer
+            residual = jnp.linalg.norm((pinvEv * eigenvalues - 1) * Vtb) / b_norm
 
-        return residual, cutoff, pinvEv, effective_rank
+            return residual, cutoff, pinvEv, jnp.mean(regularizer)
+
+        def _cond(state):
+            residual, cutoff, _, _ = state
+            return (residual > self.pinv_tol) & (cutoff > self.pinv_cutoff)
+
+        return jax.lax.while_loop(_cond, lambda s: _step(s[1]), _step(1e-2))

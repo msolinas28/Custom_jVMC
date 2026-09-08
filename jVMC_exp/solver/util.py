@@ -126,11 +126,6 @@ def diagonalize(
     axis would force a reshard, gathering it and replicating it onto every
     device. 
     """
-    if not jnp.allclose(A, A.conjugate().T):
-        raise ValueError(
-            "The given matrix is not Hermitian, "
-            "thus can not be diagonalized with this method"
-        )
     mode = _distributed_warning(A, mode)
 
     if pad_size !=0:
@@ -208,11 +203,6 @@ def pinvert(
     jax.Array
         The (regularized) pseudo-inverse of `A`, with the same shape as `A`.
     """
-    if not jnp.allclose(A, A.conjugate().T):
-        raise ValueError(
-            "The given matrix is not Hermitian, "
-            "thus can not be inverted with this method"
-        )
     mode = _distributed_warning(A, mode)
 
     if mode.lower() == "device":
