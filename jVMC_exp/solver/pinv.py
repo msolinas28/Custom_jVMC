@@ -74,7 +74,89 @@ def _snr_step(
 
     return _get_snr(Vtb, Vtb_var, o_loc.effective_num_samples)
 
-class PinvSNR(AbstractSolver):
+class Pinv(AbstractSolver):
+    """
+    Pseudo-inverse solver based on an eigenvalue decomposition of `A`.
+
+    Solves ``A @ x = b`` as ``V (ev^-1 * (V^H b))``, i.e. without ever assembling
+    ``A^+`` itself. Besides saving the extra ``V diag(ev^-1) V^H`` product, this keeps
+    the eigenvectors in whatever (possibly sharded, possibly padded) layout the
+    diagonalization produced them in; see :func:`jVMC_exp.solver.util.diagonalize`.
+
+    Parameters
+    ----------
+    pinv_cutoff : float, default=1e-14
+        Relative eigenvalue cutoff. Eigenvalues with
+        :math:`|\\lambda_i / \\lambda_{max}| \\leq` `pinv_cutoff` are treated as zero
+        and dropped from the pseudo-inverse. Note that :class:`PinvSNR` uses this same
+        name for the *minimum* of its adaptively lowered cutoff, and reserves
+        ``pinv_tol`` for a target residual -- the two classes' ``pinv_tol`` are not
+        interchangeable.
+
+    diagonalization_mode : {"device", "distributed", "host"}, default="device"
+        Backend used to diagonalize `A`; forwarded to
+        :func:`jVMC_exp.solver.util.diagonalize`.
+
+    T_A : int, optional
+        Tile size forwarded to :func:`jVMC_exp.solver.util.diagonalize`
+        for ``diagonalization_mode="distributed"``. If not given, a tile
+        size is chosen automatically.
+    """
+    def __init__(
+            self, pinv_cutoff=1e-14,
+            diagonalization_mode: Literal["device", "distributed", "host"] = "device",
+            T_A: int | None = None
+        ):
+        self._pinv_cutoff = pinv_cutoff
+        self._diagonalization_mode = diagonalization_mode
+        self._T_A = T_A
+
+    @property
+    def pinv_cutoff(self):
+        return self._pinv_cutoff
+    
+    @property
+    def _needs_dense_matrix(self) -> bool:
+        return True
+
+    def _diagonalize(self, A, b, pad_size):
+        ev, V = diagonalize(
+            A, pad_size, mode=self._diagonalization_mode, T_A=self._T_A
+        )
+        ev = _unpad(ev, pad_size)
+        if jnp.max(jnp.abs(ev)) < 1e-14:
+            raise RuntimeError(
+                f"Largest eigenvalue of the matrix A to invert is {jnp.max(jnp.abs(ev))}. "
+                "A is most likely highly ill-conditioned/zero "
+            )
+        
+        Vtb = _unpad(
+            jnp.dot(jnp.transpose(jnp.conj(V)), jnp.pad(b, (0, pad_size))),
+            pad_size
+        )
+
+        return ev, V, Vtb
+
+    def __call__(self, A, b, *, pad_size=0, **kwargs):
+        ev, V, Vtb = self._diagonalize(A, b, pad_size)
+        
+        inv_ev = jnp.where(jnp.abs(ev / ev[-1]) > self.pinv_cutoff, 1. / ev, 0.)
+        b_norm = jnp.linalg.norm(b) 
+        residual = jnp.linalg.norm((inv_ev * ev - 1) * Vtb) / b_norm
+
+        x = _unpad(
+            jnp.dot(V, jnp.pad((inv_ev * Vtb), (0, pad_size))),
+            pad_size
+        )
+
+        info = dict(
+            condition_number=(ev[-1] / jnp.min(jnp.abs(ev))).item(),
+            residual=residual.item(),
+        )
+
+        return x, info
+
+class PinvSNR(Pinv):
     """
     Pseudo-inverse solver based on an eigenvalue decomposition of the covariance
     matrix.
@@ -126,12 +208,11 @@ class PinvSNR(AbstractSolver):
             diagonalization_mode: Literal["device", "distributed", "host"] = "device",
             T_A: int | None = None
         ):
+        super().__init__(pinv_cutoff, diagonalization_mode, T_A)
+
         self._snr_tol = snr_tol
         self._pinv_tol = pinv_tol
-        self._pinv_cutoff = pinv_cutoff
-        self._diagonalization_mode = diagonalization_mode
-        self._T_A = T_A
-    
+
     @property
     def snr_tol(self):
         return self._snr_tol
@@ -140,19 +221,11 @@ class PinvSNR(AbstractSolver):
     def pinv_tol(self):
         return self._pinv_tol
 
-    @property
-    def pinv_cutoff(self):
-        return self._pinv_cutoff
-    
-    @property
-    def _needs_dense_matrix(self) -> bool:
-        return True
-
     def __call__(
             self, A, b,
             *,
             grad_log_psi: None | SampledObs = None, o_loc: None | SampledObs = None,
-            transformation=None, pad_size, exact_sampler, holomorphic,
+            transformation=None, pad_size=0, exact_sampler=False,
             **kwargs
         ):
         """
@@ -189,8 +262,6 @@ class PinvSNR(AbstractSolver):
             see :func:`jVMC_exp.solver.util.diagonalize`.
         exact_sampler : bool
             If True, disables the SNR-based regularization.
-        holomorphic : bool
-            If False, only the real part of the update is returned.
         **kwargs
             Ignored; accepted for interface compatibility with other
             solvers.
@@ -205,20 +276,7 @@ class PinvSNR(AbstractSolver):
             (eigenvalues of `A`), and ``effective_rank``.
         """
         # Keep V padded so that it doesn't get replicated on devices
-        ev, V = diagonalize(
-            A, pad_size, mode=self._diagonalization_mode, T_A=self._T_A
-        )
-        ev = _unpad(ev, pad_size)
-        if jnp.max(jnp.abs(ev)) < 1e-14:
-            raise RuntimeError(
-                f"Largest eigenvalue of the QGT is {jnp.max(jnp.abs(ev))}. "
-                "QGT is most likely highly ill-conditioned/zero "
-            )
-
-        Vtb = _unpad(
-            jnp.dot(jnp.transpose(jnp.conj(V)), jnp.pad(b, (0, pad_size))),
-            pad_size
-        )
+        ev, V, Vtb = self._diagonalize(A, b, pad_size)
 
         snr = None
         if not exact_sampler and self.snr_tol:
@@ -238,7 +296,6 @@ class PinvSNR(AbstractSolver):
             jnp.dot(V, jnp.pad((pinvEv * Vtb), (0, pad_size))),
             pad_size
         )
-        x = x if holomorphic else jnp.real(x)
 
         info = dict(
             residual=residual.item(),
@@ -257,7 +314,7 @@ class PinvSNR(AbstractSolver):
             cutoff = jnp.maximum(0.8 * cutoff, self.pinv_cutoff)
             regularizer = smooth_cutoff_fn(jnp.abs(eigenvalues / eigenvalues[-1]), cutoff)
 
-            if not exact_sampler and snr is not None:      # resolved at trace time
+            if not exact_sampler and snr is not None:
                 regularizer = regularizer * smooth_cutoff_fn(snr, self.snr_tol)
             
             pinvEv = invEv * regularizer
