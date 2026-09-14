@@ -19,6 +19,14 @@ class Operator(AbstractOperator):
     @property
     def ldim(self):
         return self._ldim
+
+    @property
+    def batch_size(self):
+        return self._batch_size
+
+    @batch_size.setter
+    def batch_size(self, value):
+        self._batch_size = value or jnp.inf
     
     def __add__(self, other) -> Operator:
         if isinstance(other, (int, float, complex)):
@@ -78,37 +86,14 @@ class Operator(AbstractOperator):
             return self._create_scaled(self, 1 / other)
         else:
             return NotImplemented
-        
-    def get_O_loc(self, s, psi: NQS, *, logPsiS=None, **kwargs):
-        s_p, matEls = self.get_conn_elements(s, psi.batchSize, **kwargs)
 
-        if psi.eval_ratio:
-            logPsi_ratio = psi.call_ratio(
-                jnp.repeat(s, matEls.shape[1], axis=0), s_p.reshape((-1, *psi.sampleShape))
-            ).reshape(matEls.shape)
-
-            return self._get_O_loc_ratio(logPsi_ratio, matEls, batch_size=psi.batchSize) 
-        
-        logPsiS = psi(s) if logPsiS is None else logPsiS
-        logPsiS_p = psi(s_p.reshape((-1, *psi.sampleShape))).reshape(matEls.shape)
-
-        return self._get_O_loc(logPsiS, logPsiS_p, matEls, batch_size=psi.batchSize)
-
-    @property
-    def batch_size(self):
-        return self._batch_size
-
-    @batch_size.setter
-    def batch_size(self, value):
-        self._batch_size = value or jnp.inf
-
-    def get_O_loc_new(self, s, psi: NQS, *, logPsiS=None, **kwargs): 
+    def get_O_loc(self, s, psi: NQS, *, logPsiS=None, **kwargs): 
         logPsiS = psi(s) if logPsiS is None else logPsiS
 
         if not self._is_compiled:
             self._compile()
 
-        return self._get_O_loc_new(
+        return self._get_O_loc(
             s,
             logPsiS,
             parameters=psi.eval_parameters,
@@ -118,7 +103,7 @@ class Operator(AbstractOperator):
         )
 
     @sharded(static_kwarg_names=("psi",))
-    def _get_O_loc_new(self, s, log_psi_s, *, parameters, psi: NQS, batch_size, **kwargs):
+    def _get_O_loc(self, s, log_psi_s, *, parameters, psi: NQS, batch_size, **kwargs):
         s_p, mat_els = self._get_conn_elements(s, kwargs)
 
         if psi.eval_ratio:
@@ -131,14 +116,6 @@ class Operator(AbstractOperator):
             psi_ratio = jnp.exp(log_psi_s_p - log_psi_s)
 
         return jnp.sum(psi_ratio * mat_els)
-    
-    @sharded(use_vmap=False)
-    def _get_O_loc(self, logPsiS, logPsiS_p, matEls, *, batch_size):
-        return jnp.sum(jnp.exp(logPsiS_p - logPsiS[:, None]) * matEls, axis=1)
-
-    @sharded(use_vmap=False)
-    def _get_O_loc_ratio(self, logPsi_ratio, matEls, *, batch_size):
-        return jnp.sum(logPsi_ratio * matEls, axis=1)
 
     def get_conn_elements(self, s, batch_size, **kwargs):
         if not self._is_compiled:
