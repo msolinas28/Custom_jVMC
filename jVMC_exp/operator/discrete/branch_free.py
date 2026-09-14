@@ -270,7 +270,7 @@ class Operator(BaseOperator):
         s_p_nondiag = s_p[self.nondiagC]
         mat_els_nondiag = mat_els[self.nondiagC]
 
-        s_p_out = jnp.concatenate([s[None], s_p_nondiag], axis=0)
+        s_p_out = jnp.concatenate([s.reshape(1, *sampleShape), s_p_nondiag], axis=0)
         mat_els_out = jnp.concatenate([mat_els_diag[None], mat_els_nondiag], axis=0)
 
         return s_p_out, mat_els_out
