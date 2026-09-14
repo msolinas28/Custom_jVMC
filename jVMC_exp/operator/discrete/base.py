@@ -111,12 +111,13 @@ class Operator(AbstractOperator):
         return self._get_O_loc_new(
             s,
             logPsiS,
-            parameters=psi.parameters,
+            parameters=psi.eval_parameters,
             psi=psi,
-            batch_size=min(psi.batchSize, self.batch_size) # TODO: define operator batch size
-        ).sum(axis=1)
+            batch_size=min(psi.batchSize, self.batch_size),
+            **kwargs
+        )
 
-    @sharded
+    @sharded(static_kwarg_names=("psi",))
     def _get_O_loc_new(self, s, log_psi_s, *, parameters, psi: NQS, batch_size, **kwargs):
         s_p, mat_els = self._get_conn_elements(s, kwargs)
 
@@ -125,11 +126,11 @@ class Operator(AbstractOperator):
                 partial(psi.apply_fun, method=psi.net.eval_ratio),
                 in_axes=(None, None, 0)
             )(parameters, s, s_p)
+        else:
+            log_psi_s_p = jax.vmap(psi.apply_fun, in_axes=(None, 0))(parameters, s_p)
+            psi_ratio = jnp.exp(log_psi_s_p - log_psi_s)
 
-        log_psi_s_p = jax.vmap(psi.apply_fun, in_axes=(None, 0))(parameters, s_p)
-        psi_ratio = jnp.exp(log_psi_s_p - log_psi_s[:, None])
-
-        return jnp.sum(psi_ratio * mat_els, axis=1)
+        return jnp.sum(psi_ratio * mat_els)
     
     @sharded(use_vmap=False)
     def _get_O_loc(self, logPsiS, logPsiS_p, matEls, *, batch_size):
