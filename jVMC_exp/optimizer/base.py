@@ -94,7 +94,6 @@ class AbstractOptimizer(ABC):
                 2 * jnp.real(self.sampler.logPsi - logPsi0)
             )
 
-
         # Evaluate local observables and their gradient
         self.output_manager.start_timing("compute objective function and gradient")
         objective_fn_out = objective_function.value_and_grad(
