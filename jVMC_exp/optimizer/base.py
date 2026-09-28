@@ -88,9 +88,12 @@ class AbstractOptimizer(ABC):
             self._elapsed += stop_timing("sampling", wait_for=sampler_out[0])
         # Importance sampling
         elif not self._resample and intStep != 0:
-            self.sampler._weights = jnp.exp(
-                2 * jnp.real(self.psi(self.sampler.samples) - self.sampler.logPsi)
+            _, logPsi0, w0 = self._sampler_out
+            self.sampler._logPsi = self.psi(self.sampler.samples)
+            self.sampler._weights = w0 * jnp.exp(
+                2 * jnp.real(self.sampler.logPsi - logPsi0)
             )
+
 
         # Evaluate local observables and their gradient
         self.output_manager.start_timing("compute objective function and gradient")
