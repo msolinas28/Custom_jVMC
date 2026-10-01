@@ -3,7 +3,6 @@ from abc import abstractmethod
 import jax
 import jax.numpy as jnp
 from scipy.sparse import coo_matrix
-from functools import partial
 
 from jVMC_exp.vqs import NQS
 from jVMC_exp.sharding_config import sharded, MESH
@@ -84,28 +83,25 @@ class Operator(AbstractOperator):
         if not self._is_compiled:
             self._compile()
 
-        # Samples per batch such that at most psi.batchSize network evaluations
-        # run at once, rounded down to a multiple of the number of devices
-        sample_batch_size = (psi.batchSize // max(self.n_conn, 1)) // MESH.size * MESH.size
-        if sample_batch_size > 0:
-            return self._get_O_loc_fused(
-                s,
-                logPsiS,
-                parameters=psi.eval_parameters,
-                psi=psi,
-                batch_size=sample_batch_size,
-                **kwargs
-            )
+        # Bound the number of simultaneous network evaluations by psi.batchSize,
+        # i.e. by B = psi.batchSize / n_devices on each device:
+        #   - B >= n_conn: all connected configurations of a sample fit at once,
+        #     so each device processes B // n_conn samples per call.
+        #   - B < n_conn: each device processes a single sample per call and
+        #     evaluates its connected configurations in chunks of B (lax.map).
+        evals_per_device = psi.batchSize // MESH.size
+        chunk_size = max(1, min(self.n_conn, evals_per_device))
+        batch_size = MESH.size * (evals_per_device // chunk_size)
 
-        s_p, mat_els, mat_el_diag = self._get_conn_elements_no_concat_sh(
-            s, batch_size=psi.batchSize, **kwargs
+        return self._get_O_loc(
+            s,
+            logPsiS,
+            parameters=psi.eval_parameters,
+            psi=psi,
+            chunk_size=chunk_size,
+            batch_size=batch_size,
+            **kwargs
         )
-        logPsiSp = psi(jnp.concatenate(s_p)).reshape(s_p.shape[:-1])
-        non_diag = jnp.sum(
-            mat_els * jnp.exp(logPsiSp - logPsiS[:, None]), axis=-1
-        )
-
-        return mat_el_diag + non_diag
 
     def get_conn_elements(self, s, batch_size, **kwargs):
         """
@@ -264,8 +260,11 @@ class Operator(AbstractOperator):
 
         return matrix
 
-    @sharded(static_kwarg_names=("psi",))
-    def _get_O_loc_fused(self, s, log_psi_s, *, parameters, psi: NQS, batch_size, **kwargs):
+    @sharded(static_kwarg_names=("psi", "chunk_size"))
+    def _get_O_loc(
+        self, s, log_psi_s, *, 
+        parameters, psi: NQS, chunk_size, batch_size, **kwargs
+    ):
         s_p, mat_els, mat_el_diag = self._get_conn_elements(s, kwargs)
 
         # Purely diagonal operator: no network evaluation needed
@@ -273,12 +272,14 @@ class Operator(AbstractOperator):
             return mat_el_diag
 
         if psi.eval_ratio:
-            psi_ratio = jax.vmap(
-                partial(psi.apply_fun, method=psi.net.eval_ratio),
-                in_axes=(None, None, 0)
-            )(parameters, s, s_p)
+            psi_ratio = jax.lax.map(
+                lambda x: psi.apply_fun(parameters, s, x, method=psi.net.eval_ratio),
+                s_p, batch_size=chunk_size
+            )
         else:
-            log_psi_s_p = jax.vmap(psi.apply_fun, in_axes=(None, 0))(parameters, s_p)
+            log_psi_s_p = jax.lax.map(
+                lambda x: psi.apply_fun(parameters, x), s_p, batch_size=chunk_size
+            )
             psi_ratio = jnp.exp(log_psi_s_p - log_psi_s)
 
         return mat_el_diag + jnp.sum(psi_ratio * mat_els)
@@ -291,10 +292,6 @@ class Operator(AbstractOperator):
             jnp.concatenate([s[None], s_p], axis=0),
             jnp.concatenate([mat_el_diag[None], mat_els], axis=0)
         )
-
-    @sharded()
-    def _get_conn_elements_no_concat_sh(self, s, *, batch_size, **kwargs):
-        return self._get_conn_elements(s, kwargs)
 
     @property
     @abstractmethod
