@@ -1,5 +1,7 @@
 import unittest
+import jax
 import jax.numpy as jnp
+import flax.linen as nn
 import numpy as np
 
 import jVMC_exp
@@ -56,7 +58,7 @@ class TestGsSearchBatchedJacobian(unittest.TestCase):
         hx = -0.3
         exE = -4.09296160
 
-        batch_size = 6
+        batch_size = 3 * jax.device_count()
         learning_rate = 1e-2
         num_steps = 300
 
@@ -79,6 +81,45 @@ class TestGsSearchBatchedJacobian(unittest.TestCase):
         E = exact_sampler(H)
         eps_rel = jnp.abs((E.mean.item() - exE) / exE)
         self.assertTrue(eps_rel < 1e-3)
+
+class _RealParamsComplexOut(nn.Module):
+    """Real parameters and a complex output, i.e. a non-holomorphic network"""
+    @nn.compact
+    def __call__(self, s):
+        x = nn.Dense(3)(2 * s.ravel() - 1)
+        return jnp.sum(jnp.log(jnp.cosh(x))) + 1j * jnp.sum(nn.Dense(1)(x))
+
+class TestUpdateBatchedJacobian(unittest.TestCase):
+    """
+    A single MinSR update from a batched (lazy) Jacobian must equal the update from the
+    dense Jacobian. The batches are uneven and, on more than one device, do not consist of
+    consecutive samples, so this checks that the tangent kernel, the local energies and the
+    solution are lined up sample by sample, for real, holomorphic and non-holomorphic networks.
+    """
+    def test_update_matches_dense(self):
+        L = 4
+        H = 0
+        for l in range(L):
+            H += -1.0 * op.SigmaZ(l) * op.SigmaZ((l + 1) % L) - 0.7 * op.SigmaX(l)
+
+        for name, net in (
+            ("real", nets.RBM(numHidden=3, bias=True)),
+            ("holomorphic", nets.CpxRBM(numHidden=3, bias=True)),
+            ("non-holomorphic", _RealParamsComplexOut()),
+        ):
+            with self.subTest(net=name):
+                psi = NQS(net, L, 3 * jax.device_count(), seed=1234)
+                exact_sampler = sampler.ExactSampler(psi)
+                opt = jVMC_exp.optimizer.MinSR(
+                    exact_sampler, psi, solver=jVMC_exp.solver.Pinv(pinv_cutoff=1e-8), diagonalShift=1e-3
+                )
+
+                updates = []
+                for batched_jacobian in (False, True):
+                    loss_function = jVMC_exp.objective_function.Observable(H, batched_jacobian=batched_jacobian)
+                    updates.append(opt.get_update(loss_function.value_and_grad(exact_sampler)))
+
+                self.assertTrue(np.allclose(updates[0], updates[1], atol=1e-10), name)
 
 class TestPinvSolve(unittest.TestCase):
     """

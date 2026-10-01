@@ -155,12 +155,15 @@ class TestGradients(unittest.TestCase):
     def test_lazy_gradients_matches_gradients(self):
         """
         lazy_gradients (batched_jacobian's backend) must reproduce the
-        dense gradients(), batch by batch. batch_size=4 over 10 samples is
-        deliberately uneven ([4, 4, 2]) to hit the padding/trimming logic.
+        dense gradients(), batch by batch. 4 samples per device and batch over
+        10 samples per device is deliberately uneven ([4, 4, 2] per device) to
+        hit the padding/trimming logic. On more than one device a batch does
+        not consist of consecutive samples, so the dense gradients are split
+        with the layout of the lazy iterable.
         """
         L = 3
-        num_samples = 10
-        batch_size = 4
+        num_samples = 10 * jax.device_count()
+        batch_size = 4 * jax.device_count()
 
         rbm = nets.CpxRBM(numHidden=3, bias=True)
         psi = NQS(rbm, L, batch_size, seed=42)
@@ -169,10 +172,14 @@ class TestGradients(unittest.TestCase):
         s = jax.random.randint(key, (num_samples, L), 0, 2).astype(global_defs.DT_SAMPLES)
 
         dense = psi.gradients(s)
-        lazy = jnp.concatenate(list(psi.lazy_gradients(s)), axis=0)
+        lazy = psi.lazy_gradients(s)
+        pieces = list(lazy)
 
-        self.assertEqual(lazy.shape, dense.shape)
-        self.assertTrue(jnp.allclose(lazy, dense))
+        self.assertEqual(len(pieces), lazy.layout.n_batches)
+        for piece, expected in zip(pieces, lazy.layout.split(dense)):
+            self.assertEqual(piece.shape, expected.shape)
+            self.assertTrue(jnp.allclose(piece, expected))
+        self.assertTrue(jnp.allclose(jnp.concatenate(pieces)[lazy.layout.batch_positions()], dense))
 
     def test_gradient_dict(self):
         L = 3

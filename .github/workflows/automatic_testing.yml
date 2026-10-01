@@ -23,3 +23,10 @@ jobs:
  
       - name: Run tests
         run: mpirun -n 2 python -m pytest --with-mpi tests/ #pytest tests/ #
+
+      # On a single device every batch consists of consecutive samples, so bugs in how
+      # batches are lined up across devices only show up with several devices
+      - name: Run tests on 4 simulated devices
+        env:
+          XLA_FLAGS: --xla_force_host_platform_device_count=4
+        run: python -m pytest tests/
