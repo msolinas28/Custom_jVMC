@@ -4,7 +4,6 @@ import numpy as np
 from jax.sharding import Mesh, NamedSharding
 from jax.experimental import mesh_utils, multihost_utils
 from jax.sharding import PartitionSpec as P
-import functools
 from functools import wraps
 from dataclasses import dataclass
 from typing import Iterator, ParamSpec, TypeVar, Callable
@@ -48,64 +47,66 @@ MESH_2D = make_2d_mesh(axis_names=("row", "col"))
 DEVICE_SPEC_2D = P("row", "col")
 DEVICE_SHARDING_2D = NamedSharding(MESH_2D, DEVICE_SPEC_2D)
 
-@functools.lru_cache(maxsize=None)
-def _local_batch_fns(n, b, n_batches, last):
-    """
-    Compiled helpers of a `BatchLayout` with ``n`` rows per device, ``b`` rows per device
-    in a batch and ``last`` rows per device in the last batch. They only touch the local
-    shard of each device, so no data moves between devices.
-    """
-    pad = n_batches * b - n
+def pad_to_devices(x):
+    pad = (-x.shape[0]) % MESH.size
+    if pad == 0:
+        return x
 
-    def take(a, i):
-        if pad:
-            a = jnp.pad(a, [(0, pad)] + [(0, 0)] * (a.ndim - 1))
-        return jax.lax.dynamic_slice_in_dim(a, i * b, b, axis=0)
+    return jnp.pad(x, [(0, pad)] + [(0, 0)] * (x.ndim - 1))
 
-    def trim_last(p):
-        return p[:last]
+def _per_device(x):
+    return x.reshape((MESH.size, -1) + x.shape[1:])
 
-    def put(out, p, i):
-        return jax.lax.dynamic_update_slice_in_dim(out, p, i * b, axis=0)
+@jax.jit(static_argnames=("b", "n_batches"))
+def _take_batch(x, i, *, b, n_batches):
+    x_dev = _per_device(x)
+    pad = n_batches * b - x_dev.shape[1]
+    if pad:
+        x_dev = jnp.pad(x_dev, [(0, 0), (0, pad)] + [(0, 0)] * (x.ndim - 1))
 
-    def put_last(out, p):
-        return jax.lax.dynamic_update_slice_in_dim(out, p[:last], (n_batches - 1) * b, axis=0)
+    return jax.lax.dynamic_slice_in_dim(
+        x_dev, i * b, b, axis=1
+    ).reshape((MESH.size * b,) + x.shape[1:])
 
-    def local(fn, in_specs):
-        return jax.shard_map(fn, mesh=MESH, in_specs=in_specs, out_specs=DEVICE_SPEC)
+@jax.jit(static_argnames=("rows",))
+def _trim_batch(piece, *, rows):
+    return _per_device(piece)[:, :rows].reshape((MESH.size * rows,) + piece.shape[1:])
 
-    return {
-        "take": jax.jit(local(take, (DEVICE_SPEC, REPLICATED_SPEC))),
-        "trim_last": jax.jit(local(trim_last, (DEVICE_SPEC,))),
-        "put": jax.jit(local(put, (DEVICE_SPEC, DEVICE_SPEC, REPLICATED_SPEC)), donate_argnums=0),
-        "put_last": jax.jit(local(put_last, (DEVICE_SPEC, DEVICE_SPEC)), donate_argnums=0),
-    }
+@jax.jit(static_argnames=("b", "rows"), donate_argnums=0)
+def _put_batch(out, piece, i, *, b, rows):
+    piece_dev = _per_device(piece)[:, :rows]
 
-@functools.lru_cache(maxsize=None)
-def _alloc_fn(shape, dtype):
-    return jax.jit(lambda: jnp.zeros(shape, dtype), out_shardings=DEVICE_SHARDING)
+    return jax.lax.dynamic_update_slice_in_dim(
+        _per_device(out), piece_dev, i * b, axis=1
+    ).reshape(out.shape)
 
 @dataclass(frozen=True)
 class BatchLayout:
     """
     Splits ``num_samples`` samples, sharded across devices along the first axis, into
-    batches of ``batch_size`` samples.
+    batches of ``batch_size`` samples. ``num_samples`` has to be divisible by the number
+    of devices, see `pad_to_devices`.
 
     Batch ``i`` is made of the ``i``-th block of ``batch_size // n_devices`` rows of every
     device's shard, so taking a batch out of an array, or writing the result of a batch
     back into one, never moves data between devices. The last batch holds the remaining
-    rows of every device. Hence, on more than one device a batch does not consist of
-    consecutive samples: any full-length array that has to line up with the batches
-    must be split with `split` of the same layout.
+    rows of every device, padded to ``batch_size`` rows when it is taken. Hence, on more
+    than one device a batch does not consist of consecutive samples: any full-length
+    array that has to line up with the batches must be split with `split` of the same layout.
     """
     num_samples: int
     batch_size: int
 
     def __post_init__(self):
-        for name, value in (("number of samples", self.num_samples), ("batch size", self.batch_size)):
+        to_check = [
+            ("number of samples", self.num_samples), ("batch size", self.batch_size)
+        ]
+
+        for name, value in to_check:
             if value <= 0 or value % MESH.size != 0:
                 raise ValueError(
-                    f"The {name} ({value}) has to be a positive multiple of the number of devices ({MESH.size})"
+                    f"The {name} ({value}) has to be a positive "
+                    f"multiple of the number of devices ({MESH.size})"
                 )
 
     @property
@@ -124,13 +125,6 @@ class BatchLayout:
     def _last_local_size(self):
         return self._local_size - (self.n_batches - 1) * self._local_batch_size
 
-    @property
-    def _fns(self):
-        return _local_batch_fns(self._local_size, self._local_batch_size, self.n_batches, self._last_local_size)
-
-    def _is_padded(self, i):
-        return i == self.n_batches - 1 and self._last_local_size < self._local_batch_size
-
     def take(self, x, i):
         """
         Batch ``i`` of the row-sharded array ``x``, with ``batch_size`` rows.
@@ -138,21 +132,25 @@ class BatchLayout:
         """
         if self._local_size == self._local_batch_size:
             return x
-        return self._fns["take"](x, i)
+        return _take_batch(x, i, b=self._local_batch_size, n_batches=self.n_batches)
 
     def trim(self, piece, i):
         """
         Removes the padding rows from the result of batch ``i``.
         """
-        return self._fns["trim_last"](piece) if self._is_padded(i) else piece
+        if i == self.n_batches - 1 and self._last_local_size < self._local_batch_size:
+            return _trim_batch(piece, rows=self._last_local_size)
+
+        return piece
 
     def split(self, x):
         """
-        All batches of ``x``, the last one without padding.
+        Split x in batches so that it matches the layout.
         """
         if x.shape[0] != self.num_samples:
             raise ValueError(
-                f"Expected an array with {self.num_samples} rows to split, got shape {x.shape}"
+                f"Expected an array with {self.num_samples} rows to split, "
+                f"got shape {x.shape}"
             )
         x = jax.device_put(x, DEVICE_SHARDING)
 
@@ -160,18 +158,25 @@ class BatchLayout:
 
     def alloc(self, piece):
         """
-        Row-sharded zeros with ``num_samples`` rows and the trailing shape and dtype of ``piece``.
+        Zeros with ``num_samples`` rows and the trailing shape, dtype and sharding of ``piece``.
         """
-        return _alloc_fn((self.num_samples,) + tuple(piece.shape[1:]), piece.dtype)()
+        return jnp.zeros(
+            (self.num_samples,) + piece.shape[1:], piece.dtype, device=piece.sharding
+        )
 
     def put(self, out, piece, i):
         """
         Writes the result of batch ``i`` (with or without padding) into ``out``, in place:
         ``out`` is donated and must not be used afterwards.
         """
-        if i == self.n_batches - 1:
-            return self._fns["put_last"](out, piece)
-        return self._fns["put"](out, piece, i)
+        original_rows = (
+            self._last_local_size if i == self.n_batches - 1 
+            else self._local_batch_size
+        )
+
+        return _put_batch(
+            out, piece, i, b=self._local_batch_size, rows=original_rows
+        )
 
     def scaled(self, k):
         """
@@ -206,13 +211,6 @@ class SizedIterable:
 
 P = ParamSpec('P')
 R = TypeVar('R')
-
-def is_on_device(args, target_sharding=DEVICE_SHARDING):
-    return any(jax.tree_util.tree_map(lambda x: x.sharding == target_sharding, args))
-
-def _row_sharded(x):
-    # No-op if x is already sharded along its first axis
-    return jax.device_put(x, DEVICE_SHARDING)
 
 def distribute(global_size: int, label: str | None=None):
     """
@@ -299,14 +297,24 @@ def broadcast_split_key(key, n_out_keys: int):
 
     return out_keys.astype(jnp.uint32)
 
-def create_batches(configs, b):
-    append = b * ((configs.shape[0] + b - 1) // b) - configs.shape[0]
-    pads = [(0, append), ] + [(0, 0)] * (len(configs.shape) - 1)
-
-    return jnp.pad(configs, pads).reshape((-1, b) + configs.shape[1:])
-    
 class sharded:
-    """Decorator to automatically create sharded versions of methods."""
+    """
+    Decorator to automatically create sharded versions of methods.
+
+    The decorated method is written for a single sample: it is vmapped (if ``use_vmap``)
+    and sharded across devices. It is called with a ``batch_size`` keyword argument.
+    With a batch size, the samples are evaluated in batches of ``batch_size`` (see
+    `BatchLayout`), which bounds how much is computed at once and fixes the input shape
+    of the compiled function, whatever the number of samples. With ``batch_size=None``
+    all samples are evaluated in a single call.
+
+    A batched call assumes that
+        * every positional argument holds one entry per sample along its first axis, and
+          is split into batches along that axis;
+        * every leaf of the output holds one entry per sample along its first axis.
+    Therefore ``in_specs``, ``out_specs`` and ``vmap_in_axes`` can only be customised
+    for methods that are called with ``batch_size=None``.
+    """
     def __init__(
             self,
             static_argnums=None,
@@ -328,48 +336,63 @@ class sharded:
         self.automatic_sharding = automatic_sharding
         self.donate_argnums = donate_argnums
         self.yield_iter = yield_iter
+        self._customised_specs = [
+            name for name, customised in (
+                ("in_specs", in_specs is not None),
+                ("out_specs", out_specs != DEVICE_SPEC),
+                ("vmap_in_axes", vmap_in_axes is not None),
+            ) if customised
+        ]
 
     def __call__(self, method: Callable[P, R]) -> Callable[P, R]:
         @wraps(method)
         def wrapper(instance, *args, **kwargs):
             jsh_fn = self._get_jsh(instance, method, args, kwargs)
-            batch_size, kwargs = self._split_batch_size(kwargs)
+            batch_size = kwargs['batch_size']
+            kwargs = {k: v for k, v in kwargs.items() if k not in self.static_kwarg_names}
             num_samples = args[0].shape[0]
 
             if batch_size is None and not self.yield_iter:
-                args = tuple(jax.device_put(a, self.in_sharding[i]) for i, a in enumerate(args))
+                args = tuple(
+                    jax.device_put(a, self.in_sharding[i]) for i, a in enumerate(args)
+                )
+
                 return jsh_fn(kwargs, *args)
 
-            if num_samples % MESH.size != 0:
-                if self.yield_iter:
-                    raise ValueError(
-                        f"Lazy evaluation requires the number of samples ({num_samples}) "
-                        f"to be divisible by the number of devices ({MESH.size})"
-                    )
-                return self._call_contiguous(batch_size, kwargs, args, jsh_fn)
+            if self._customised_specs:
+                raise ValueError(
+                    f"{', '.join(self._customised_specs)} can only be customised for calls "
+                    "without a batch size: batched calls split every argument and every "
+                    "output along the first axis."
+                )
 
-            if REPLICATED_SPEC in self.in_specs:
-                raise NotImplementedError("Batched evaluation of replicated arguments is not supported")
+            # Padding to a multiple of the number of devices makes the samples shardable,
+            # the last batch of every device is then padded to the batch size by BatchLayout.take
+            args = tuple(jax.device_put(pad_to_devices(a), DEVICE_SHARDING) for a in args)
+            num_padded = args[0].shape[0]
+            layout = BatchLayout(
+                num_padded, num_padded if batch_size is None else batch_size
+            )
 
-            layout = BatchLayout(num_samples, num_samples if batch_size is None else batch_size)
-            args = tuple(jax.device_put(a, DEVICE_SHARDING) for a in args)
             if self.yield_iter:
                 return SizedIterable(
-                    reusable_iterable=lambda: self._iter_local_batches(layout, kwargs, args, jsh_fn),
+                    reusable_iterable=lambda: self._iter_local_batches(
+                        layout, kwargs, args, jsh_fn
+                    ),
                     n_iterations=layout.n_batches,
                     batch_size=layout.batch_size,
                     layout=layout
                 )
 
-            return self._call_local(layout, kwargs, args, jsh_fn)
+            out = self._call_local(layout, kwargs, args, jsh_fn)
+            if num_padded != num_samples:
+                # This will remplicate the output, but it's not a problem, 
+                # since the input was not divisible by the number of devices anyways.
+                out = jax.tree_util.tree_map(lambda x: x[:num_samples], out)
+
+            return out
 
         return wrapper
-
-    def _split_batch_size(self, kwargs):
-        batch_size = kwargs['batch_size']
-        kwargs = {k: v for k, v in kwargs.items() if k not in self.static_kwarg_names}
-        
-        return batch_size, kwargs
 
     def _get_jsh(self, instance, method, args, kwargs):
         if not hasattr(instance, '_sharded_cache'):
@@ -400,11 +423,11 @@ class sharded:
                                  f"has to be divisible by the number of devices ({MESH.size})")
 
             base_fn = lambda kw, *a: method(instance, *a, **kw, **static_kwargs)
-            instance._sharded_cache[cache_key] = self._create_sharded_versions(base_fn)
+            instance._sharded_cache[cache_key] = self._create_sharded_fn(base_fn)
 
-        return instance._sharded_cache[cache_key]['jsh']
+        return instance._sharded_cache[cache_key]
 
-    def _create_sharded_versions(self, base_fn):
+    def _create_sharded_fn(self, base_fn):
         vmapd_fn = jax.vmap(
             base_fn, in_axes=(None,) + self.vmap_in_axes
         ) if self.use_vmap else base_fn
@@ -427,18 +450,18 @@ class sharded:
                 donate_argnums=self.donate_argnums
             )
 
-        return {'single': base_fn, 'vmapd': vmapd_fn, 'jsh': jsh_fn}
+        return jsh_fn
 
-    def _iter_local_batches(self, layout, kwargs, args, jsh_fn):
+    def _iter_local_batches(self, layout: BatchLayout, kwargs, args, jsh_fn):
         """
         Generator yielding the result of one batch of ``layout`` at a time, without padding.
         """
         for i in range(layout.n_batches):
             result = jsh_fn(kwargs, *(layout.take(a, i) for a in args))
 
-            yield jax.tree_util.tree_map(lambda x: layout.trim(_row_sharded(x), i), result)
+            yield jax.tree_util.tree_map(lambda x: layout.trim(x, i), result)
 
-    def _call_local(self, layout, kwargs, args, jsh_fn):
+    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
         """
         Evaluates all batches of ``layout`` and writes their results in place into
         preallocated outputs, which keep the order of the input samples.
@@ -449,57 +472,10 @@ class sharded:
         out = None
         for i in range(layout.n_batches):
             result = jsh_fn(kwargs, *(layout.take(a, i) for a in args))
-            result = jax.tree_util.tree_map(_row_sharded, result)
             if out is None:
+                # The output is allocated once and every batch result is written into it and
+                # then freed, so at most the output and one batch result exist at a time
                 out = jax.tree_util.tree_map(layout.alloc, result)
             out = jax.tree_util.tree_map(lambda o, r: layout.put(o, r, i), out, result)
 
         return out
-
-    def _call_contiguous(self, batch_size, kwargs, args, jsh_fn):
-        """
-        Fallback for a number of samples that is not divisible by the number of devices:
-        batches of consecutive samples, concatenated at the end. Unlike the local batches,
-        this moves data between devices.
-        """
-        results = list(self._iter_contiguous_batches(batch_size, kwargs, *args, jsh_fn=jsh_fn))
-        if len(results) == 1:
-            return results[0]
-
-        return jax.tree_util.tree_map(lambda *xs: jnp.concatenate(xs, axis=0), *results)
-
-    def _iter_contiguous_batches(self, batch_size, kwargs, *args, jsh_fn):
-        """
-        Generator yielding one (trimmed) chunk result at a time.
-        Assumes batch_size is divisible by number of devices.
-        """
-        num_samples = args[0].shape[0]
-        append = (-num_samples) % batch_size
-        total_samples = num_samples + append
-
-        if (total_samples > batch_size) and is_on_device(args):
-            args = tuple(jax.device_put(a, REPLICATED_SHARDING) for a in args)
-
-        num_batches = total_samples // batch_size
-        for batch_idx in range(num_batches):
-            start = batch_idx * batch_size
-            batch = tuple(a[start:start + batch_size] for a in args)
-            if batch_idx == num_batches - 1 and append:
-                batch = tuple(
-                    jnp.pad(b, [(0, append),] + [(0, 0)] * (b.ndim - 1)) 
-                    for b in batch
-                )
-
-            result = jsh_fn(
-                kwargs,
-                *tuple(
-                    jax.device_put(b, self.in_sharding[arg_idx]) 
-                    for arg_idx, b in enumerate(batch)
-                )
-            )
-
-            if batch_idx == num_batches - 1 and append:
-                trim = batch_size - append
-                result = jax.tree_util.tree_map(lambda x: x[:trim], result)
-
-            yield result

@@ -3,7 +3,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from jVMC_exp.sharding_config import BatchLayout, DEVICE_SHARDING, MESH, sharded
+from jVMC_exp.sharding_config import (
+    BatchLayout, DEVICE_SHARDING, DEVICE_SPEC, REPLICATED_SHARDING, sharded, pad_to_devices,
+    _take_batch, _trim_batch, _put_batch,
+)
 
 D = jax.device_count()
 COLLECTIVES = ("all-to-all", "all-gather", "collective-permute", "all-reduce", "reduce-scatter")
@@ -72,17 +75,28 @@ class TestBatchLayout(unittest.TestCase):
         layout = BatchLayout(10 * D, 4 * D)
         x = _data(10 * D)
         piece = layout.take(x, 0)
-        fns = layout._fns
         compiled = {
-            "take": fns["take"].lower(x, 0),
-            "trim_last": fns["trim_last"].lower(piece),
-            "put": fns["put"].lower(x, piece, 0),
-            "put_last": fns["put_last"].lower(x, piece),
+            "take": _take_batch.lower(x, 0, b=4, n_batches=layout.n_batches),
+            "trim": _trim_batch.lower(piece, rows=2),
+            "put": _put_batch.lower(x, piece, 0, b=4, rows=4),
+            "put last": _put_batch.lower(x, piece, 2, b=4, rows=2),
         }
         for name, lowered in compiled.items():
             hlo = lowered.compile().as_text()
             with self.subTest(helper=name):
                 self.assertFalse([c for c in COLLECTIVES if c in hlo])
+
+    def test_replicated_results_stay_replicated(self):
+        layout = BatchLayout(10 * D, 4 * D)
+        x = _data(10 * D)
+        out = None
+        for i in range(layout.n_batches):
+            piece = jax.device_put(layout.take(x, i), REPLICATED_SHARDING)
+            out = layout.alloc(piece) if out is None else out
+            out = layout.put(out, piece, i)
+
+        self.assertTrue(jnp.array_equal(out, x))
+        self.assertTrue(out.sharding.is_equivalent_to(REPLICATED_SHARDING, out.ndim))
 
     def test_invalid_sizes_raise(self):
         with self.assertRaises(ValueError):
@@ -104,6 +118,10 @@ class _Model:
 
     @sharded(yield_iter=True)
     def lazy_double(self, x, *, batch_size):
+        return 2 * x
+
+    @sharded(in_specs=(DEVICE_SPEC,))
+    def double_custom_specs(self, x, *, batch_size):
         return 2 * x
 
 class TestShardedDecorator(unittest.TestCase):
@@ -136,11 +154,13 @@ class TestShardedDecorator(unittest.TestCase):
         self.assertTrue(np.array_equal(model.double(x, batch_size=4 * D), 2 * x))
 
     @unittest.skipIf(D == 1, "Every number of samples is divisible by one device")
-    def test_indivisible_number_of_samples_falls_back(self):
+    def test_indivisible_number_of_samples_is_padded(self):
         model = _Model()
         x = jax.random.normal(jax.random.PRNGKey(0), (10 * D + 1, 3))
+        out = model.double(x, batch_size=4 * D)
 
-        self.assertTrue(jnp.array_equal(model.double(x, batch_size=4 * D), 2 * x))
+        self.assertEqual(out.shape, x.shape)
+        self.assertTrue(jnp.array_equal(out, 2 * x))
 
     def test_lazy_batches_line_up_with_layout(self):
         model = _Model()
@@ -162,12 +182,23 @@ class TestShardedDecorator(unittest.TestCase):
         self.assertEqual(len(pieces), 1)
         self.assertTrue(jnp.array_equal(pieces[0], 2 * x))
 
+    def test_customised_specs_only_without_batch_size(self):
+        model = _Model()
+        x = _data(10 * D)
+
+        self.assertTrue(jnp.array_equal(model.double_custom_specs(x, batch_size=None), 2 * x))
+        with self.assertRaises(ValueError):
+            model.double_custom_specs(x, batch_size=4 * D)
+
     @unittest.skipIf(D == 1, "Every number of samples is divisible by one device")
-    def test_lazy_indivisible_number_of_samples_raises(self):
+    def test_lazy_indivisible_number_of_samples_is_padded(self):
         model = _Model()
         x = jax.random.normal(jax.random.PRNGKey(0), (10 * D + 1, 3))
-        with self.assertRaises(ValueError):
-            model.lazy_double(x, batch_size=4 * D)
+        iterable = model.lazy_double(x, batch_size=4 * D)
+
+        self.assertEqual(iterable.layout, BatchLayout(len(pad_to_devices(x)), 4 * D))
+        for piece, expected in zip(iterable, iterable.layout.split(pad_to_devices(2 * x))):
+            self.assertTrue(jnp.array_equal(piece, expected))
 
 if __name__ == "__main__":
     unittest.main()

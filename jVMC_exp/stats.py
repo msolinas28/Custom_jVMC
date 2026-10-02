@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial, cached_property
 
-from jVMC_exp.sharding_config import DEVICE_SHARDING, MESH, SizedIterable
+from jVMC_exp.sharding_config import DEVICE_SHARDING, MESH, SizedIterable, pad_to_devices
 
 @jax.jit
 def _get_mean(data, weights):
@@ -306,7 +306,10 @@ class LazySampledObs():
         if not isinstance(observations, SizedIterable) or observations.layout is None:
             raise ValueError("Observations must be a SizedIterable with a BatchLayout")
         self._layout = observations.layout
-        if len(weights) != self._layout.num_samples or len(observations) != self._layout.n_batches:
+        # Like the observations, the weights are padded to a multiple of the number of devices.
+        # The padding samples get zero weight and do not contribute to any estimate.
+        num_padded = len(pad_to_devices(weights))
+        if num_padded != self._layout.num_samples or len(observations) != self._layout.n_batches:
             raise ValueError(
                 f"Got {len(weights)} weights and {len(observations)} batches of observations, "
                 f"but the layout describes {self._layout.num_samples} samples "
@@ -316,7 +319,7 @@ class LazySampledObs():
         self._num_samples = len(weights)
         self._batch_size = observations.batch_size
 
-        self._full_weights = jax.device_put(weights, DEVICE_SHARDING)
+        self._full_weights = jax.device_put(pad_to_devices(weights), DEVICE_SHARDING)
         self._weights = self._layout.split(self._full_weights)
         self.observations = observations
 

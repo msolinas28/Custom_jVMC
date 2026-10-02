@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 
 from jVMC_exp.stats import SampledObs, LazySampledObs
-from jVMC_exp.sharding_config import SizedIterable, BatchLayout
+from jVMC_exp.sharding_config import SizedIterable, BatchLayout, pad_to_devices
 
 # 3 samples per device and batch: over 20 samples the last batch is never full
 BATCH_SIZE = 3 * jax.device_count()
@@ -207,9 +207,11 @@ class TestStats(unittest.TestCase):
 def _make_lazy(observations, weights, batch_size):
     """
     Build a `LazySampledObs` the same way `sharded(..., yield_iter=True)`
-    would: batches of `batch_size` laid out by a `BatchLayout` (last one
-    trimmed), re-iterable from scratch on every pass.
+    would: samples padded to a multiple of the number of devices, batches of
+    `batch_size` laid out by a `BatchLayout` (last one trimmed), re-iterable
+    from scratch on every pass.
     """
+    observations = pad_to_devices(observations)
     layout = BatchLayout(observations.shape[0], batch_size)
     batches = layout.split(observations)
     iterable = SizedIterable(
@@ -347,6 +349,24 @@ class TestLazySampledObs(unittest.TestCase):
         lazy2 = _make_lazy(obs2, weights, batch_size=2 * BATCH_SIZE)
         with self.assertRaises(ValueError):
             lazy1.get_covar(lazy2)
+
+    @unittest.skipIf(jax.device_count() == 1, "Every number of samples is divisible by one device")
+    def test_indivisible_number_of_samples_matches_sampled_obs(self):
+        """
+        Samples that are not divisible by the number of devices are padded, and
+        the padding samples get zero weight, like in SampledObs.
+        """
+        obs1, weights = self._make_data(seed=0, n=20 * jax.device_count() + 1)
+        obs2, _ = self._make_data(seed=1, n=20 * jax.device_count() + 1)
+        dense1, dense2 = SampledObs(obs1, weights), SampledObs(obs2, weights)
+        lazy1 = _make_lazy(obs1, weights, batch_size=BATCH_SIZE)
+        lazy2 = _make_lazy(obs2, weights, batch_size=BATCH_SIZE)
+
+        self.assertTrue(jnp.allclose(lazy1.mean, dense1.mean))
+        self.assertTrue(jnp.allclose(lazy1.var, dense1.var))
+        self.assertTrue(jnp.allclose(lazy1.get_covar(), dense1.get_covar(), atol=1e-10))
+        self.assertTrue(jnp.allclose(lazy1.get_covar(dense2), dense1.get_covar(dense2), atol=1e-10))
+        self.assertTrue(jnp.allclose(lazy1.get_covar(lazy2), dense1.get_covar(dense2), atol=1e-10))
 
     def test_batches_line_up_with_weights(self):
         """

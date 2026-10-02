@@ -9,6 +9,8 @@ import jVMC_exp.nets as nets
 from jVMC_exp.vqs import NQS
 import jVMC_exp.operator.discrete as op
 import jVMC_exp.sampler as sampler
+from jVMC_exp.stats import SampledObs, LazySampledObs
+from jVMC_exp.objective_function.base import ObjectiveFunctionOutput
 
 class TestGsSearch(unittest.TestCase):
     def test_gs_search_cpx(self):
@@ -120,6 +122,30 @@ class TestUpdateBatchedJacobian(unittest.TestCase):
                     updates.append(opt.get_update(loss_function.value_and_grad(exact_sampler)))
 
                 self.assertTrue(np.allclose(updates[0], updates[1], atol=1e-10), name)
+
+    @unittest.skipIf(jax.device_count() == 1, "Every number of samples is divisible by one device")
+    def test_update_matches_dense_indivisible_samples(self):
+        """
+        A number of samples that is not divisible by the number of devices is padded with
+        zero-weight samples, both by SampledObs and by the batched Jacobian.
+        """
+        L = 4
+        num_samples = 5 * jax.device_count() + 1
+        k1, k2, k3, k4 = jax.random.split(jax.random.PRNGKey(0), 4)
+        s = jax.random.randint(k1, (num_samples, L), 0, 2).astype(jVMC_exp.global_defs.DT_SAMPLES)
+        weights = jax.random.uniform(k2, (num_samples,))
+        o_loc = SampledObs(jax.random.normal(k3, (num_samples,)) + 1j * jax.random.normal(k4, (num_samples,)), weights)
+
+        for name, net in (("holomorphic", nets.CpxRBM(numHidden=3, bias=True)), ("non-holomorphic", _RealParamsComplexOut())):
+            with self.subTest(net=name):
+                psi = NQS(net, L, 2 * jax.device_count(), seed=1234)
+                opt = jVMC_exp.optimizer.MinSR(
+                    sampler.ExactSampler(psi), psi, solver=jVMC_exp.solver.Pinv(pinv_cutoff=1e-8), diagonalShift=1e-3
+                )
+                dense = ObjectiveFunctionOutput(o_loc=o_loc, grad_log_psi=SampledObs(psi.gradients(s), weights))
+                lazy = ObjectiveFunctionOutput(o_loc=o_loc, grad_log_psi=LazySampledObs(psi.lazy_gradients(s), weights))
+
+                self.assertTrue(np.allclose(opt.get_update(dense), opt.get_update(lazy), atol=1e-10), name)
 
 class TestPinvSolve(unittest.TestCase):
     """
