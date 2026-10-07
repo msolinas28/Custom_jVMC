@@ -399,8 +399,6 @@ class LazySampledObs():
             return covar.squeeze()
 
         elif isinstance(other, LazySampledObs):
-            # TODO: is this asking if the two are associated to the same instance of the class?
-            #       If so, isn't this risky, and not required? They only have to share some of the properties of the layout class 
             if other._layout != self._layout:
                 raise ValueError(
                     f"Both LazySampledObs must be batched with the same layout, "
