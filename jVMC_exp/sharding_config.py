@@ -182,6 +182,7 @@ class BatchLayout:
         """
         Layout of arrays holding ``k`` consecutive rows per sample.
         """
+        # TODO: Why are we also scaling the batchsize?
         return BatchLayout(k * self.num_samples, k * self.batch_size)
 
     def batch_positions(self):

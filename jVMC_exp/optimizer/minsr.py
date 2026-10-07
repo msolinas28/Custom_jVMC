@@ -16,8 +16,7 @@ from jVMC_exp.solver import Pinv
 def _interleave_re_im(arr):
     """
     Real array of shape (2N, ...) with the real and imaginary part of each row of ``arr`` next
-    to each other. Unlike stacking the real and imaginary parts along the first axis, every row
-    stays on the device that holds it.
+    to each other to reduce device communication.
     """
     return jnp.stack([jnp.real(arr), jnp.imag(arr)], axis=1).reshape((2 * arr.shape[0],) + arr.shape[1:])
 
@@ -165,6 +164,7 @@ class MinSR(AbstractOptimizer):
             T = T.at[idx, idx].add(self.diag_shift)
 
         solution, self._additional_info = self.solver(T, o_loc, **self.solver_state)
+        del T
 
         if isinstance(objective_function_output.grad_log_psi, SampledObs):
             update = - jnp.conj(jnp.transpose(grad)) @ solution

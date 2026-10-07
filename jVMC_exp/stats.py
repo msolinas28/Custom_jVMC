@@ -306,6 +306,7 @@ class LazySampledObs():
         if not isinstance(observations, SizedIterable) or observations.layout is None:
             raise ValueError("Observations must be a SizedIterable with a BatchLayout")
         self._layout = observations.layout
+        
         # Like the observations, the weights are padded to a multiple of the number of devices.
         # The padding samples get zero weight and do not contribute to any estimate.
         num_padded = len(pad_to_devices(weights))
@@ -398,6 +399,8 @@ class LazySampledObs():
             return covar.squeeze()
 
         elif isinstance(other, LazySampledObs):
+            # TODO: is this asking if the two are associated to the same instance of the class?
+            #       If so, isn't this risky, and not required? They only have to share some of the properties of the layout class 
             if other._layout != self._layout:
                 raise ValueError(
                     f"Both LazySampledObs must be batched with the same layout, "
