@@ -1,0 +1,31 @@
+W1008 14:45:39.807916  636207 cuda_vmm_allocator.cc:80] [3] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 14:45:39.810719  636207 cuda_vmm_allocator.cc:80] [3] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 14:45:39.811364  636198 cuda_vmm_allocator.cc:80] [0] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 14:45:39.812136  636198 cuda_vmm_allocator.cc:80] [0] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 14:45:39.812671  636201 cuda_vmm_allocator.cc:80] [1] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 14:45:39.813351  636201 cuda_vmm_allocator.cc:80] [1] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 14:45:39.814021  636204 cuda_vmm_allocator.cc:80] [2] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 14:45:39.814704  636204 cuda_vmm_allocator.cc:80] [2] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+Running in single-node mode (JVMC_USE_DISTRIBUTED not set)
+jax 0.10.1 | jaxlib 0.10.1 | jVMC_exp from /e/scratch/neuquass/solinas1/Custom_jVMC/jVMC_exp
+devices: [CudaDevice(id=0), CudaDevice(id=1), CudaDevice(id=2), CudaDevice(id=3)]
+XLA_FLAGS: --xla_gpu_autotune_level=0
+N=4096, batch=1024, parameters=40400, Jacobian per device 631.2 MiB
+
+1) In-place assembly of the batched output (branch only)
+  no BatchLayout: this is master, skipped
+
+2) One dense minSR step, phase by phase (the first call also compiles)
+  before the step                    in use       1.1 MiB   peak so far       5.3 MiB   (max over devices)
+  after psi.gradients                in use    1263.6 MiB   peak so far    3788.6 MiB   (max over devices)
+  psi.gradients output               NamedSharding NamedSharding(mesh=Mesh('devices': 4, axis_types=(Auto,)), spec=P('devices',), memory_kind=device)
+                                     == DEVICE_SHARDING: True | device_put(x, DEVICE_SHARDING): same object True, same buffer True
+  after SampledObs(...)              in use    1265.0 MiB   peak so far    3788.6 MiB   (max over devices)
+  SampledObs._observations           NamedSharding NamedSharding(mesh=Mesh('devices': 4, axis_types=(Auto,)), spec=P('devices',), memory_kind=device)
+                                     == DEVICE_SHARDING: True | device_put(x, DEVICE_SHARDING): same object True, same buffer True
+  SampledObs kept the same array     True
+  after del of the gradients         in use    1265.0 MiB   peak so far    3788.6 MiB   (max over devices)
+  after _normalized_obs              in use    1269.7 MiB   peak so far    3788.6 MiB   (max over devices)
+  normalized Jacobian                NamedSharding NamedSharding(mesh=Mesh('devices': 4, axis_types=(Auto,)), spec=P('devices',), memory_kind=device)
+                                     == DEVICE_SHARDING: True | device_put(x, DEVICE_SHARDING): same object True, same buffer True
+  after get_update                   in use    1270.9 MiB   peak so far    5121.2 MiB   (max over devices)
