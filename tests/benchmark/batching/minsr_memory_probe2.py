@@ -12,18 +12,21 @@ benchmark's step and loop, prints the memory after every call and can add synchr
     --sync obs    wait for SampledObs (observations and mean) before get_update (dense only)
     --sync step   wait for every tangent kernel and for the solver inside get_update
     --sync all    grad + obs + step
+    --sync batches  wait for every gradient batch as it is produced (lazy only)
+    --sync norm     wait for every normalized gradient batch inside get_update (lazy only)
 
 The peak memory counter cannot be reset, so every setting needs its own process,
 see minsr_memory_probe2.sh.
 """
 import argparse
+import dataclasses
 import os
 import sys
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--case", choices=("dense", "lazy"), default="dense")
-    parser.add_argument("--sync", choices=("none", "grad", "obs", "step", "all"), default="none")
+    parser.add_argument("--sync", choices=("none", "grad", "obs", "step", "all", "batches", "norm"), default="none")
     parser.add_argument("--lib", default=None, help="Directory containing the jVMC_exp package to use (default: the installed one)")
     parser.add_argument("--samples-per-device", type=int, default=1024)
     parser.add_argument("--batch-per-device", type=int, default=256)
@@ -33,6 +36,8 @@ def main():
     args = parser.parse_args()
     if args.case == "lazy" and args.sync in ("grad", "obs", "all"):
         parser.error(f"--sync {args.sync} needs the dense Jacobian")
+    if args.case == "dense" and args.sync in ("batches", "norm"):
+        parser.error(f"--sync {args.sync} needs the batched Jacobian")
 
     if args.lib:
         # Bypass the import hook of an editable install, so that `lib` is used
@@ -43,6 +48,7 @@ def main():
     import jaxlib
     import jVMC_exp
     import jVMC_exp.nets as nets
+    import jVMC_exp.optimizer.minsr as minsr_module
     from jVMC_exp.vqs import NQS
     from jVMC_exp.stats import SampledObs, LazySampledObs
     from jVMC_exp.sharding_config import DEVICE_SHARDING
@@ -77,10 +83,17 @@ def main():
         kernel, solver = opt._get_tangent_kernel, opt._solver
         opt._get_tangent_kernel = lambda *a: jax.block_until_ready(kernel(*a))
         opt._solver = lambda *a, **kw: jax.block_until_ready(solver(*a, **kw))
+    if args.sync == "norm":
+        normalize = minsr_module._normalize_batch
+        minsr_module._normalize_batch = lambda *a: jax.block_until_ready(normalize(*a))
 
     def fn():
         if args.case == "lazy":
-            grad = LazySampledObs(psi.lazy_gradients(s), weights)
+            lazy = psi.lazy_gradients(s)
+            if args.sync == "batches":
+                produce = lazy.reusable_iterable
+                lazy = dataclasses.replace(lazy, reusable_iterable=lambda: map(jax.block_until_ready, produce()))
+            grad = LazySampledObs(lazy, weights)
         else:
             g = psi.gradients(s)
             # Waiting returns the same array, so no extra reference to the Jacobian is kept
