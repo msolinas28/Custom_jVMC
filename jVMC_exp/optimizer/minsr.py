@@ -142,12 +142,14 @@ class MinSR(AbstractOptimizer):
             layout = grad.layout.scaled(2 if self._concat else 1)
             positions = jax.device_put(layout.batch_positions(), REPLICATED_SHARDING)
             T = None
-            for l, (batch_l, weights_l) in enumerate(zip(grad.observations, grad._weights)):
-                batch_l = _normalize_batch(batch_l, weights_l, grad.mean, self._concat)
+            batches_l = iter(grad.observations)
+            for l, weights_l in enumerate(grad._weights):
+                batch_l = _normalize_batch(next(batches_l), weights_l, grad.mean, self._concat)
 
                 T_row = []
-                for batch_r, weights_r in zip(grad.observations, grad._weights):
-                    batch_r = _normalize_batch(batch_r, weights_r, grad.mean, self._concat)
+                batches_r = iter(grad.observations)
+                for weights_r in grad._weights:
+                    batch_r = _normalize_batch(next(batches_r), weights_r, grad.mean, self._concat)
                     T_row.append(self._get_tangent_kernel(batch_l, batch_r))
                 # The columns come in batch order: move them to the original sample order
                 T_row = _take_columns(jnp.concatenate(T_row, axis=1), positions)
@@ -170,8 +172,9 @@ class MinSR(AbstractOptimizer):
             update = - jnp.conj(jnp.transpose(grad)) @ solution
         else:
             update = 0
-            for grad_batch, weights, solution_batch in zip(grad.observations, grad._weights, layout.split(solution)):
-                grad_batch = _normalize_batch(grad_batch, weights, grad.mean, self._concat)
+            batches = iter(grad.observations)
+            for weights, solution_batch in zip(grad._weights, layout.split(solution)):
+                grad_batch = _normalize_batch(next(batches), weights, grad.mean, self._concat)
                 update -= jnp.conj(jnp.transpose(grad_batch)) @ solution_batch
 
         if self._params_pad_size != 0:
