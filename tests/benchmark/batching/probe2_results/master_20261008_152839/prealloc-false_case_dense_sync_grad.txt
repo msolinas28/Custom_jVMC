@@ -1,0 +1,27 @@
+Running in single-node mode (JVMC_USE_DISTRIBUTED not set)
+jax 0.10.1 | jaxlib 0.10.1 | jVMC_exp from /e/scratch/neuquass/solinas1/Custom_jVMC/jVMC_exp (master)
+devices: [CudaDevice(id=0), CudaDevice(id=1), CudaDevice(id=2), CudaDevice(id=3)]
+XLA_FLAGS: --xla_gpu_autotune_level=0
+XLA_PYTHON_CLIENT_PREALLOCATE: false
+XLA_PYTHON_CLIENT_ALLOCATOR: None
+XLA_PYTHON_CLIENT_MEM_FRACTION: None
+case dense, sync grad
+N=4096, batch=1024, Jacobian columns=80800; per device: Jacobian J = 1262.5 MiB, batch b = 315.6 MiB, kernel T = 64.0 MiB
+before the loop: in use 1.1 MiB, setup peak 6.0 MiB
+
+W1008 15:29:08.948713  642674 cuda_vmm_allocator.cc:80] [3] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 15:29:08.949453  642674 cuda_vmm_allocator.cc:80] [3] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 15:29:08.950166  642665 cuda_vmm_allocator.cc:80] [0] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 15:29:08.950833  642665 cuda_vmm_allocator.cc:80] [0] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 15:29:08.951448  642668 cuda_vmm_allocator.cc:80] [1] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 15:29:08.952171  642668 cuda_vmm_allocator.cc:80] [1] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 15:29:08.952834  642671 cuda_vmm_allocator.cc:80] [2] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+W1008 15:29:08.953545  642671 cuda_vmm_allocator.cc:80] [2] VMM cuMemCreate with FABRIC+POSIX_FD handle types failed: INTERNAL: CUDA error: : CUDA_ERROR_NOT_PERMITTED: operation not permitted; will retry with simpler handle types.
+rep 0 (compiles)  in use      1.2 MiB   peak   5115.7 MiB =  4.05 J   <- new peak
+rep 1             in use      1.2 MiB   peak   5115.8 MiB =  4.05 J   <- new peak
+rep 2             in use      1.2 MiB   peak   5115.8 MiB =  4.05 J
+rep 3             in use      1.2 MiB   peak   5115.8 MiB =  4.05 J
+rep 4             in use      1.2 MiB   peak   5115.8 MiB =  4.05 J
+rep 5             in use      1.2 MiB   peak   5115.8 MiB =  4.05 J
+
+RESULT case=dense sync=grad prealloc=false peak=5115.8MiB (4.05J, (peak-T)/J=4.00) set_in_rep=1
