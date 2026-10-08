@@ -5,19 +5,24 @@ code paths, to compare two versions of jVMC_exp (e.g. master and a branch) on th
 Every case runs in its own process, so that the peak memory of one case does not leak into
 the next and a case that runs out of memory is recorded instead of stopping the benchmark.
 
-Usage (single node, all visible GPUs are used):
+Usage (single node, all visible GPUs are used). Write the results outside the repository,
+so that they survive switching branches:
 
-    # The other version, e.g. master, as a separate checkout
-    git worktree add ../jvmc_master master
+    # on the branch
+    python batching_benchmark.py run --label branch --out ~/bench/branch.json
+    # switch to master (this script exists on both)
+    python batching_benchmark.py run --label master --out ~/bench/master.json
+    python batching_benchmark.py compare ~/bench/master.json ~/bench/branch.json
 
-    python batching_benchmark.py run --label branch --out branch.json
-    python batching_benchmark.py run --label master --lib ../jvmc_master --out master.json
-    python batching_benchmark.py compare master.json branch.json
+Instead of switching branches, ``--lib`` imports jVMC_exp from another checkout, e.g. one
+made with ``git worktree add ../jvmc_master master``.
 
-The sizes scale with the number of devices (``--samples-per-device`` etc.), so the same
-command stresses every device equally on 1, 2, 4 or 8 GPUs. Pass the same size arguments
-to both runs.
+Each run records a hash of the source of the jVMC_exp package it imported, and ``compare``
+refuses to compare two runs of the same code. The sizes scale with the number of devices
+(``--samples-per-device`` etc.), so the same command stresses every device equally on 1,
+2, 4 or 8 GPUs. Pass the same size arguments to both runs.
 """
+import hashlib
 import argparse
 import json
 import os
@@ -63,7 +68,38 @@ def _import_jvmc(lib):
     import jVMC_exp
     return jVMC_exp
 
-def _memory_in_use():
+def _version(jvmc_dir):
+    """
+    Hash of the source of the imported jVMC_exp package, and the git branch and commit
+    of its checkout (if any).
+    """
+    digest = hashlib.sha256()
+    for root, dirs, files in sorted(os.walk(jvmc_dir)):
+        dirs.sort()
+        for name in sorted(files):
+            if name.endswith(".py"):
+                path = os.path.join(root, name)
+                digest.update(os.path.relpath(path, jvmc_dir).encode())
+                with open(path, "rb") as f:
+                    digest.update(f.read())
+
+    def git(*cmd):
+        try:
+            return subprocess.run(
+                ["git", "-C", jvmc_dir, *cmd], capture_output=True, text=True, check=True
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
+
+    branch, commit = git("rev-parse", "--abbrev-ref", "HEAD"), git("rev-parse", "--short", "HEAD")
+    dirty = bool(git("status", "--porcelain", "--", "."))
+
+    return {
+        "jvmc_hash": digest.hexdigest()[:16],
+        "git": f"{branch}@{commit}{' (uncommitted changes)' if dirty else ''}" if commit else None,
+    }
+
+def _memory_stats():
     import jax
     stats = [d.memory_stats() for d in jax.local_devices()]
     if any(s is None for s in stats):
@@ -130,7 +166,9 @@ def _run_case(case, args):
             return opt.get_update(ObjectiveFunctionOutput(o_loc=o_loc, grad_log_psi=grad))
         summary = lambda out: out
 
-    baseline, _ = _memory_in_use()
+    # The peak memory counter cannot be reset, so the peak reached during the setup is kept
+    # to tell whether the case itself reached a higher one
+    baseline, setup_peak = _memory_stats()
     times = []
     for rep in range(args.repeats + 1):                  # the first call compiles
         start = time.perf_counter()
@@ -138,7 +176,7 @@ def _run_case(case, args):
         times.append(time.perf_counter() - start)
         if rep < args.repeats:
             del out
-    _, peak = _memory_in_use()
+    _, peak = _memory_stats()
 
     os.makedirs(args.save_dir, exist_ok=True)
     np.save(os.path.join(args.save_dir, f"{case}.npy"), np.asarray(summary(out)))
@@ -147,6 +185,7 @@ def _run_case(case, args):
         "devices": D,
         "device_kind": jax.devices()[0].device_kind,
         "jvmc_path": os.path.dirname(jVMC_exp.__file__),
+        **_version(os.path.dirname(jVMC_exp.__file__)),
         "num_samples": N,
         "batch_size": B,
         "num_parameters": int(psi.numParameters),
@@ -157,8 +196,11 @@ def _run_case(case, args):
     }
     if baseline is not None:
         extra = [p - b for p, b in zip(peak, baseline)]
-        result["peak_extra_mib_max"] = max(extra) / 2 ** 20
+        worst = max(range(len(extra)), key=extra.__getitem__)
+        result["peak_extra_mib_max"] = extra[worst] / 2 ** 20
         result["peak_extra_mib_mean"] = sum(extra) / len(extra) / 2 ** 20
+        # If the case never exceeded the setup's peak, its own peak is unknown: at most this value
+        result["peak_is_upper_bound"] = peak[worst] <= setup_peak[worst]
     print("RESULT " + json.dumps(result), flush=True)
 
 # ----------------------------------------------------------------------------------------
@@ -176,7 +218,10 @@ def _run(args):
         if proc.returncode == 0 and lines:
             results["cases"][case] = json.loads(lines[-1][len("RESULT "):])
             r = results["cases"][case]
-            mem = f", peak +{r['peak_extra_mib_max']:.0f} MiB/device" if "peak_extra_mib_max" in r else ""
+            if case == args.cases[0]:
+                print(f"    jVMC_exp from {r['jvmc_path']}, {r['git'] or 'not a git checkout'}, "
+                      f"source hash {r['jvmc_hash']}", flush=True)
+            mem = f", peak +{_format_memory(r)}/device" if "peak_extra_mib_max" in r else ""
             print(f"    {r['median_s'] * 1e3:.1f} ms{mem}", flush=True)
         else:
             error = (proc.stderr.strip().splitlines() or ["exit code %d" % proc.returncode])[-1]
@@ -185,6 +230,19 @@ def _run(args):
         with open(args.out, "w") as f:
             json.dump(results, f, indent=2)
 
+def _format_memory(r):
+    if "peak_extra_mib_max" not in r:
+        return "n/a"
+    return ("≤" if r.get("peak_is_upper_bound") else "") + f"{r['peak_extra_mib_max']:.0f} MiB"
+
+def _version_of(results):
+    versions = {(r["jvmc_hash"], r["git"]) for r in results["cases"].values() if "jvmc_hash" in r}
+    if not versions:
+        sys.exit(f"Run '{results['label']}' has no version information: rerun it with this version of the script")
+    if len(versions) != 1:
+        sys.exit(f"Run '{results['label']}' has no consistent jVMC_exp version: {versions}")
+    return versions.pop()
+
 def _compare(args):
     import numpy as np
     with open(args.baseline) as f:
@@ -192,6 +250,15 @@ def _compare(args):
     with open(args.candidate) as f:
         cand = json.load(f)
     a, b = base["label"], cand["label"]
+
+    (hash_a, git_a), (hash_b, git_b) = _version_of(base), _version_of(cand)
+    if hash_a == hash_b:
+        sys.exit(
+            f"'{a}' and '{b}' ran the same jVMC_exp source (hash {hash_a}, {git_a} and {git_b}): "
+            "nothing to compare. Check the branch or --lib of one of the runs."
+        )
+    print(f"{a}: {git_a or 'not a git checkout'}, source hash {hash_a}")
+    print(f"{b}: {git_b or 'not a git checkout'}, source hash {hash_b}\n")
     print(f"{'case':22s} {'time ' + a:>13s} {'time ' + b:>13s} {'speedup':>8s} "
           f"{'mem/dev ' + a:>15s} {'mem/dev ' + b:>15s} {'ratio':>7s}  max rel. diff")
     for case in CASES:
@@ -203,18 +270,19 @@ def _compare(args):
             print(f"{case:22s} {status(rb):>13s} {status(rc):>13s}")
             continue
         speedup = rb["median_s"] / rc["median_s"]
-        mem = lambda r: f"{r['peak_extra_mib_max']:.0f} MiB" if "peak_extra_mib_max" in r else "n/a"
+        exact = lambda r: "peak_extra_mib_max" in r and not r.get("peak_is_upper_bound")
         ratio = (f"{rc['peak_extra_mib_max'] / max(rb['peak_extra_mib_max'], 1e-9):.2f}"
-                 if "peak_extra_mib_max" in rb and "peak_extra_mib_max" in rc else "n/a")
+                 if exact(rb) and exact(rc) else "n/a")
         xa = np.load(os.path.join(base["save_dir"], f"{case}.npy"))
         xb = np.load(os.path.join(cand["save_dir"], f"{case}.npy"))
         diff = np.max(np.abs(xa - xb)) / max(np.max(np.abs(xa)), 1e-300) if xa.shape == xb.shape else float("nan")
         print(f"{case:22s} {rb['median_s'] * 1e3:10.1f} ms {rc['median_s'] * 1e3:10.1f} ms {speedup:8.2f} "
-              f"{mem(rb):>15s} {mem(rc):>15s} {ratio:>7s}  {diff:.1e}")
+              f"{_format_memory(rb):>15s} {_format_memory(rc):>15s} {ratio:>7s}  {diff:.1e}")
     first = next(iter(cand["cases"].values()))
     if "devices" in first:
         print(f"\n{first['devices']} x {first['device_kind']}; memory = peak device memory above the level "
-              "before the first call, maximum over devices.")
+              "before the first call, maximum over devices. '≤' marks cases that stayed below the peak of "
+              "their setup, whose own peak is only bounded.")
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
