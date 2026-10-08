@@ -426,10 +426,12 @@ class LazySampledObs():
             raise NotImplementedError(
                 "A linear map can't be applied without materializing all the observables"
             )
-        
+
         jitted_fn = jax.jit(element_wise_fn)
         iterable = self._observations
-        transormed_iterable = lambda: (jitted_fn(batch) for batch in iterable)
         self.observations = SizedIterable(
-            transormed_iterable, iterable.n_iterations, iterable.batch_size, iterable.layout
+            lambda: map(jitted_fn, iterable), 
+            iterable.n_iterations, 
+            iterable.batch_size, 
+            iterable.layout
         )

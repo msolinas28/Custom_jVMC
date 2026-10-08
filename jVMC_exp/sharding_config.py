@@ -458,9 +458,10 @@ class sharded:
         Generator yielding the result of one batch of ``layout`` at a time, without padding.
         """
         for i in range(layout.n_batches):
-            result = jsh_fn(kwargs, *(layout.take(a, i) for a in args))
-
-            yield jax.tree_util.tree_map(lambda x: layout.trim(x, i), result)
+            yield jax.tree_util.tree_map(
+                lambda x: layout.trim(x, i), 
+                jsh_fn(kwargs, *(layout.take(a, i) for a in args))
+            )
 
     def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
         """
