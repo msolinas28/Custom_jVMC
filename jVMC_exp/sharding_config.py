@@ -480,4 +480,4 @@ class sharded:
                 out = jax.tree_util.tree_map(layout.alloc, result)
             out = jax.tree_util.tree_map(lambda o, r: layout.put(o, r, i), out, result)
 
-        return out
+        return jax.block_until_ready(out)
