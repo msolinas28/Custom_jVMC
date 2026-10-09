@@ -436,7 +436,11 @@ class Evolution(AbstractOptimizer):
             objective_fn_out_2.grad = self._remove_double_fn(objective_fn_out_2.grad)
         F2 = self._get_rhs(objective_fn_out_2.grad)
         S2 = self._get_lhs(objective_fn_out_2.grad_log_psi)
-        Sv = S2(update_1) if callable(S2) else S2.dot(update_1)
+        if callable(S2):
+            Sv = S2(update_1)
+        else:
+            Sv = S2.dot(jnp.pad(update_1, (0, self._params_pad_size)))
+            Sv = Sv[:-self._params_pad_size] if self._params_pad_size else Sv
         validation_residual = (jnp.linalg.norm(Sv - F2) / jnp.linalg.norm(F2)) / residual
 
         crossValidationFactor_residual = validation_residual
