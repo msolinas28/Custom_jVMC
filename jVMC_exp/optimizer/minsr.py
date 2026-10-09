@@ -84,13 +84,11 @@ def _blockwise_tangent_kernel(grad_l, grad_r=None):
         # conj(grad_l) @ grad_r.T is the complex conjugate of the kernel: conjugating the
         # reduced block, instead of grad_r, avoids a copy of grad_r
         local = jax.lax.dot_general(jnp.conj(block_rows(j)), grad_r, (((1,), (1,)), ((), ())))
-        # Every device receives the sum over all parameter shards of its own block j
         local = jnp.conj(jax.lax.psum_scatter(local, 'devices', scatter_dimension=0, tiled=True))
 
         return jax.lax.dynamic_update_slice_in_dim(T, local, j * block, axis=0)
 
     T = jnp.zeros((n_local_rows, grad_r.shape[0]), dtype)
-    # The zeros are the same on every device, the loop makes them device dependent
     T = jax.lax.pcast(T, ('devices',), to='varying')
 
     return jax.lax.fori_loop(0, n_blocks, add_block, T)
