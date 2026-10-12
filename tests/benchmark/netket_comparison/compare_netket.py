@@ -167,20 +167,25 @@ def save(out_dir, name, result):
 # jVMC_exp
 # ----------------------------------------------------------------------------------------
 
+def jvmc_hamiltonian(L, g):
+    import jVMC_exp.operator.discrete as op
+
+    hamiltonian = 0
+    for i in range(L):
+        hamiltonian += -1.0 * op.SigmaZ(i) * op.SigmaZ((i + 1) % L) - g * op.SigmaX(i)
+
+    return hamiltonian
+
 def run_jvmc(cfg, out_dir):
     from flax.traverse_util import flatten_dict
     import jVMC_exp
-    import jVMC_exp.operator.discrete as op
     from jVMC_exp.nets import CpxRBM
     from jVMC_exp.sampler import MCSampler
     from jVMC_exp.sampler.propose import SpinFlip
     from jVMC_exp.vqs import NQS
 
     L = cfg["L"]
-
-    hamiltonian = 0
-    for i in range(L):
-        hamiltonian += -1.0 * op.SigmaZ(i) * op.SigmaZ((i + 1) % L) - cfg["g"] * op.SigmaX(i)
+    hamiltonian = jvmc_hamiltonian(L, cfg["g"])
 
     batch_size = cfg['batch_size'] or cfg["n_chains"]
     net = CpxRBM(numHidden=cfg["num_hidden"], bias=cfg["bias"])
@@ -238,12 +243,13 @@ def run_jvmc(cfg, out_dir):
 # NetKet
 # ----------------------------------------------------------------------------------------
 
-def netket_rbm(num_hidden, bias):
+def netket_rbm(num_hidden, bias, dtype="complex128"):
     """
-    ``jVMC_exp.nets.CpxRBM`` acting on a batch of configurations.
+    ``jVMC_exp.nets.CpxRBM`` (or ``jVMC_exp.nets.RBM`` with ``dtype="float64"``) acting on
+    a batch of configurations.
 
     NetKet spins are already +-1, which is ``2 * s - 1`` of the 0/1 jVMC_exp spins.
-    The layer has the same name as in CpxRBM, so the two have the same parameter tree.
+    The layer has the same name as in jVMC_exp, so the two have the same parameter tree.
     """
     import jax
     import jax.numpy as jnp
@@ -255,17 +261,37 @@ def netket_rbm(num_hidden, bias):
         x = x * sgn_x
         return x + jnp.log1p(jnp.exp(-two * x)) - jnp.log(two)
 
-    class CpxRBM(nn.Module):
+    class RBM(nn.Module):
         @nn.compact
         def __call__(self, x):
             x = nn.Dense(
-                num_hidden, use_bias=bias, param_dtype=jnp.complex128,
+                num_hidden, use_bias=bias, param_dtype=jnp.dtype(dtype),
                 kernel_init=jax.nn.initializers.normal(1e-2), bias_init=jax.nn.initializers.zeros,
             )(x)
 
             return jnp.sum(log_cosh(x), axis=-1)
 
-    return CpxRBM()
+    return RBM()
+
+def netket_operator(kind, L, g):
+    import netket as nk
+
+    hilbert = nk.hilbert.Spin(0.5, L)
+    graph = nk.graph.Chain(L, pbc=True)
+    if kind.startswith("ising"):
+        # -h sum_i sx_i + J sum_<ij> sz_i sz_j
+        operator = nk.operator.IsingJax(hilbert, graph, h=g, J=-1.0)
+    else:
+        sz, sx = nk.operator.spin.sigmaz, nk.operator.spin.sigmax
+        operator = -g * sx(hilbert, 0)
+        for i in range(1, L):
+            operator -= g * sx(hilbert, i)
+        for i, j in graph.edges():
+            operator -= sz(hilbert, i) @ sz(hilbert, j)
+        if not isinstance(operator, nk.operator.DiscreteJaxOperator):
+            operator = operator.to_jax_operator()
+
+    return operator.to_numba_operator() if kind.endswith("numba") else operator
 
 def run_netket(cfg, out_dir):
     import jax
@@ -281,24 +307,6 @@ def run_netket(cfg, out_dir):
         ))
     L = cfg["L"]
     hilbert = nk.hilbert.Spin(0.5, L)
-    graph = nk.graph.Chain(L, pbc=True)
-
-    def build_operator(kind):
-        if kind.startswith("ising"):
-            # -h sum_i sx_i + J sum_<ij> sz_i sz_j
-            operator = nk.operator.IsingJax(hilbert, graph, h=cfg["g"], J=-1.0)
-        else:
-            sz, sx = nk.operator.spin.sigmaz, nk.operator.spin.sigmax
-            operator = -cfg["g"] * sx(hilbert, 0)
-            for i in range(1, L):
-                operator -= cfg["g"] * sx(hilbert, i)
-            for i, j in graph.edges():
-                operator -= sz(hilbert, i) @ sz(hilbert, j)
-            if not isinstance(operator, nk.operator.DiscreteJaxOperator):
-                operator = operator.to_jax_operator()
-
-        return operator.to_numba_operator() if kind.endswith("numba") else operator
-
     sampler = nk.sampler.MetropolisLocal(hilbert, n_chains=cfg["n_chains"], sweep_size=L)
     with warnings.catch_warnings():
         # The batch size is the same as in jVMC_exp, power of two or not
@@ -331,7 +339,7 @@ def run_netket(cfg, out_dir):
         # As in MCState.expect: matrix elements on the CPU, then moved to the device
         return jax.device_put(operator.get_conn_padded(np.asarray(samples).reshape(-1, L)))
 
-    operators = {kind: build_operator(kind) for kind in cfg["netket_operators"]}
+    operators = {kind: netket_operator(kind, L, cfg["g"]) for kind in cfg["netket_operators"]}
     stages = [("sampling", vstate.sample)]
     for kind, operator in operators.items():
         conn = conn_numba if kind.endswith("numba") else conn_jax
