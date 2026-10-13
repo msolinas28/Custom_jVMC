@@ -68,7 +68,7 @@ parser.add_argument("--L", type=int, default=80, help="Number of spins")
 parser.add_argument("--g", type=float, default=1.0, help="Transverse field")
 parser.add_argument("--num-hidden", type=int, default=None, help="Hidden units of the RBM (default: L)")
 parser.add_argument("--bias", action="store_true", help="Use the bias of the hidden units")
-parser.add_argument("--n-samples", type=int, nargs="+", default=[2**k for k in range(10, 16)])
+parser.add_argument("--n-samples", type=int, nargs="+", default=[2**k for k in range(10, 14)])
 parser.add_argument("--batch-size", type=int, default=2**14,
                     help="Network evaluations per call for the local energies, samples per block of the Jacobian")
 parser.add_argument("--diag-shift", type=float, default=1e-3)
