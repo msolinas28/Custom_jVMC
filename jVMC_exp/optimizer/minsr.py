@@ -31,6 +31,21 @@ def _normalize_batch(batch, weights, mean, concat):
     return batch
 
 @jax.jit
+def _adjoint_dot(O, x):
+    """
+    conj(O).T @ x without copies of O: the conjugate is applied to x, 
+    and a real O is never converted to complex.
+    """
+    if jnp.iscomplexobj(O):
+        return jnp.conj(jnp.conj(x) @ O)
+    
+    if jnp.iscomplexobj(x):
+        r = jnp.stack([x.real, x.imag]) @ O
+        return r[0] + 1j * r[1]
+    
+    return x @ O
+
+@jax.jit
 def _take_columns(matrix, positions):
     return jnp.take(matrix, positions, axis=1)
 
@@ -228,13 +243,13 @@ class MinSR(AbstractOptimizer):
         del T
 
         if isinstance(objective_function_output.grad_log_psi, SampledObs):
-            update = - jnp.conj(jnp.transpose(grad)) @ solution
+            update = - _adjoint_dot(grad, solution)
         else:
             update = 0
             batches = iter(grad.observations)
             for weights, solution_batch in zip(grad._weights, layout.split(solution)):
                 grad_batch = _normalize_batch(next(batches), weights, grad.mean, self._concat)
-                update -= jnp.conj(jnp.transpose(grad_batch)) @ solution_batch
+                update -= _adjoint_dot(grad_batch, solution_batch)
 
         if self._params_pad_size != 0:
             objective_function_output.grad_log_psi.transform(
