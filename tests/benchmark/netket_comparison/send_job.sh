@@ -20,5 +20,5 @@ module load NCCL/default-CUDA-13
 # both libraries run with the same JAX
 source "$SCRATCH"/env/jVMC/bin/activate
 
-# Usage: sbatch send_job.sh [compare_netket.py | compare_netket_sr.py] [options of the script]
+# Usage: sbatch send_job.sh [compare_netket.py | compare_netket_sr.py | compare_netket_minsr.py] [options of the script]
 srun python -u "${1:-compare_netket.py}" "${@:2}"
