@@ -1,0 +1,34 @@
+{
+  "series": "netket",
+  "n_samples": 2048,
+  "device": "CPU: cpu",
+  "n_devices": 1,
+  "host": "Mac.fritz.box",
+  "versions": {
+    "python": "3.11.14",
+    "jax": "0.10.2",
+    "jaxlib": "0.10.2",
+    "flax": "0.12.8",
+    "netket": "3.22.4"
+  },
+  "n_parameters": 6400,
+  "first_call": {
+    "local_energies": 0.16958358295960352,
+    "sr_step": 19.630578334035818
+  },
+  "times": {
+    "local_energies": [
+      0.02976116701029241,
+      0.029704292013775557,
+      0.029720290971454233
+    ],
+    "sr_step": [
+      19.51900733303046,
+      19.53139920794638,
+      19.508621042012237
+    ]
+  },
+  "peak_bytes": 2263711744,
+  "bytes_limit": null,
+  "memory": "process"
+}

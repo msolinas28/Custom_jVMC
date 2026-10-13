@@ -344,7 +344,6 @@ def plot(out_dir):
         n = [p["n_samples"] for p in ok]
 
         ax_time.plot(n, [np.median(p["times"]["sr_step"]) for p in ok], "o-", color=color, lw=2, ms=6, label=label)
-        ax_time.plot(n, [np.median(p["times"]["local_energies"]) for p in ok], ":", color=color, lw=1.5)
         if has_memory:
             ax_mem.plot(n, [p["peak_bytes"] / 1e9 for p in ok], "o-", color=color, lw=2, ms=6, label=label)
             if failed is not None and ok and ok[-1].get("bytes_limit"):
@@ -352,9 +351,7 @@ def plot(out_dir):
 
     n_all = np.array(sorted({p["n_samples"] for pts in points.values() for p in pts}))
     if has_memory:
-        # Size of the Jacobian itself, and of the memory JAX can use
-        jacobian = n_all * info["n_parameters"] * 8 / 1e9
-        ax_mem.plot(n_all, jacobian, "--", color=INK_MUTED, lw=1, label="Jacobian, float64")
+        # Memory JAX can use
         limit = next((p["bytes_limit"] for p in measured if p.get("bytes_limit")), None)
         if limit:
             ax_mem.axhline(limit / 1e9, color=INK_MUTED, lw=1)
@@ -371,7 +368,7 @@ def plot(out_dir):
 
     ax_time.set_yscale("log")
     ax_time.set_ylabel("Time [s]")
-    ax_time.set_title("(b) Time of one SR step (dotted: local energies alone)", loc="left", fontsize=11)
+    ax_time.set_title("(b) Time of one SR step", loc="left", fontsize=11)
     ax_time.legend(frameon=False, fontsize=9, loc="upper left")
 
     for ax in (ax_mem, ax_time):
@@ -381,6 +378,9 @@ def plot(out_dir):
         ax.set_axisbelow(True)
         ax.spines[["top", "right"]].set_visible(False)
         ax.tick_params(length=0)
+        # Plain numbers on the log y axes, which can span less than a decade
+        ax.yaxis.set_major_formatter(matplotlib.ticker.LogFormatter(labelOnlyBase=False))
+        ax.yaxis.set_minor_formatter(matplotlib.ticker.LogFormatter(labelOnlyBase=False, minor_thresholds=(2, 0.5)))
 
     versions = sorted({f"{k} {v}" for p in measured for k, v in p["versions"].items() if k in ("jVMC_exp", "netket", "jax")})
     check = (f" Same update in both libraries up to {max(differences.values()):.0e} (relative)." if differences else "")
