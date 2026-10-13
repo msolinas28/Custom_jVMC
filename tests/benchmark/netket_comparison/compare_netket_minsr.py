@@ -75,7 +75,7 @@ NETKET_UPDATE_FACTOR = -2
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument("--L", type=int, default=80, help="Number of spins")
 parser.add_argument("--g", type=float, default=1.0, help="Transverse field")
-parser.add_argument("--num-hidden", type=int, nargs="+", default=[2**k for k in range(4, 15)],
+parser.add_argument("--num-hidden", type=int, nargs="+", default=[2**k for k in range(4, 10)],
                     help="Hidden units of the RBM, one point each")
 parser.add_argument("--bias", action="store_true", help="Use the bias of the hidden units")
 parser.add_argument("--n-samples", type=int, default=4096)

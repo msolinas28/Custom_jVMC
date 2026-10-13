@@ -1,0 +1,34 @@
+{
+  "series": "jvmc-batched",
+  "num_hidden": 16,
+  "n_parameters": 1280,
+  "device": "CPU: cpu",
+  "n_devices": 1,
+  "host": "Mac.fritz.box",
+  "versions": {
+    "python": "3.11.14",
+    "jax": "0.10.2",
+    "jaxlib": "0.10.2",
+    "flax": "0.12.8",
+    "jVMC_exp": "1.5.8"
+  },
+  "first_call": {
+    "local_energies": 0.4285970829660073,
+    "minsr_step": 7.469816041004378
+  },
+  "times": {
+    "local_energies": [
+      0.059293625003192574,
+      0.05902450002031401,
+      0.05964858300285414
+    ],
+    "minsr_step": [
+      6.876530084002297,
+      6.858883875014726,
+      6.867268959002104
+    ]
+  },
+  "peak_bytes": 1433468928,
+  "bytes_limit": null,
+  "memory": "process"
+}
