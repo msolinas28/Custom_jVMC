@@ -1,0 +1,34 @@
+{
+  "series": "jvmc-dense",
+  "num_hidden": 32,
+  "n_parameters": 2560,
+  "device": "CPU: cpu",
+  "n_devices": 1,
+  "host": "Mac.fritz.box",
+  "versions": {
+    "python": "3.11.14",
+    "jax": "0.10.2",
+    "jaxlib": "0.10.2",
+    "flax": "0.12.8",
+    "jVMC_exp": "1.5.8"
+  },
+  "first_call": {
+    "local_energies": 0.4498386249761097,
+    "minsr_step": 7.501564667036291
+  },
+  "times": {
+    "local_energies": [
+      0.07423445803578943,
+      0.07454866700572893,
+      0.07358591695083305
+    ],
+    "minsr_step": [
+      7.075680832960643,
+      7.060040750016924,
+      7.046753459027968
+    ]
+  },
+  "peak_bytes": 1513930752,
+  "bytes_limit": null,
+  "memory": "process"
+}

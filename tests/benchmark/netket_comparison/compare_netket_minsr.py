@@ -79,7 +79,7 @@ parser.add_argument("--num-hidden", type=int, nargs="+", default=[2**k for k in 
                     help="Hidden units of the RBM, one point each")
 parser.add_argument("--bias", action="store_true", help="Use the bias of the hidden units")
 parser.add_argument("--n-samples", type=int, default=4096)
-parser.add_argument("--batch-size", type=int, default=1024,
+parser.add_argument("--batch-size", type=int, default=None,
                     help="Network evaluations per call for the local energies, samples per block of the Jacobian")
 parser.add_argument("--diag-shift", type=float, default=1e-3)
 parser.add_argument("--pinv-cutoff", type=float, default=1e-14, help="Relative eigenvalue cutoff of the solver")
@@ -142,12 +142,13 @@ def run_jvmc(cfg, num_hidden, out_dir, batched):
 
     check_single_device()
     L, n_samples = cfg["L"], cfg["n_samples"]
+    batch_size = cfg["batch_size"] or n_samples
     params, samples = load_inputs(cfg, num_hidden, out_dir)
     samples = jnp.asarray(samples, dtype=jVMC_exp.global_defs.DT_SAMPLES)
     weights = jnp.full(n_samples, 1 / n_samples)
 
     hamiltonian = jvmc_hamiltonian(L, cfg["g"])
-    psi = NQS(RBM(numHidden=num_hidden, bias=cfg["bias"]), L, batchSize=cfg["batch_size"], seed=cfg["seed"])
+    psi = NQS(RBM(numHidden=num_hidden, bias=cfg["bias"]), L, batchSize=batch_size, seed=cfg["seed"])
     psi.parameters = jax.tree_util.tree_map(jnp.asarray, params)
     # Never samples: the samples are set below, where MinSR sets the ones it draws
     sampler = MCSampler(psi, SpinFlip(), key=cfg["seed"], numChains=1, numSamples=n_samples)
@@ -343,7 +344,6 @@ def plot(out_dir):
         n = [p["n_parameters"] for p in ok]
 
         ax_time.plot(n, [np.median(p["times"]["minsr_step"]) for p in ok], "o-", color=color, lw=2, ms=6, label=label)
-        ax_time.plot(n, [np.median(p["times"]["local_energies"]) for p in ok], ":", color=color, lw=1.5)
         if has_memory:
             ax_mem.plot(n, [p["peak_bytes"] / 1e9 for p in ok], "o-", color=color, lw=2, ms=6, label=label)
             if failed is not None and ok and ok[-1].get("bytes_limit"):
@@ -351,9 +351,7 @@ def plot(out_dir):
 
     n_all = np.array(sorted({p["n_parameters"] for pts in points.values() for p in pts}))
     if has_memory:
-        # Size of the Jacobian and of the tangent kernel, and of the memory JAX can use
-        ax_mem.plot(n_all, cfg["n_samples"] * n_all * 8 / 1e9, "--", color=INK_MUTED, lw=1, label="Jacobian, float64")
-        ax_mem.axhline(cfg["n_samples"] ** 2 * 8 / 1e9, color=INK_MUTED, lw=1, ls=":", label="Tangent kernel T, float64")
+        # Memory JAX can use
         limit = next((p["bytes_limit"] for p in measured if p.get("bytes_limit")), None)
         if limit:
             ax_mem.axhline(limit / 1e9, color=INK_MUTED, lw=1)
@@ -370,7 +368,7 @@ def plot(out_dir):
 
     ax_time.set_yscale("log")
     ax_time.set_ylabel("Time [s]")
-    ax_time.set_title("(b) Time of one MinSR step (dotted: local energies alone)", loc="left", fontsize=11)
+    ax_time.set_title("(b) Time of one MinSR step", loc="left", fontsize=11)
     ax_time.legend(frameon=False, fontsize=9, loc="upper left")
 
     for ax in (ax_mem, ax_time):
@@ -380,6 +378,9 @@ def plot(out_dir):
         ax.set_axisbelow(True)
         ax.spines[["top", "right"]].set_visible(False)
         ax.tick_params(length=0)
+        # Plain numbers on the log y axes, which can span less than a decade
+        ax.yaxis.set_major_formatter(matplotlib.ticker.LogFormatter(labelOnlyBase=False))
+        ax.yaxis.set_minor_formatter(matplotlib.ticker.LogFormatter(labelOnlyBase=False, minor_thresholds=(2, 0.5)))
 
     versions = sorted({f"{k} {v}" for p in measured for k, v in p["versions"].items() if k in ("jVMC_exp", "netket", "jax")})
     check = (f" Same update in all series up to {max(differences.values()):.0e} (relative)." if differences else "")
