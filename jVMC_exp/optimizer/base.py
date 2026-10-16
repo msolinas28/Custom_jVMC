@@ -7,6 +7,7 @@ import warnings
 from typing import Callable
 from functools import partial
 
+from jVMC_exp import global_defs
 from jVMC_exp.stats import LazySampledObs, SampledObs
 from jVMC_exp.vqs import NQS
 from jVMC_exp.sampler.base import AbstractSampler
@@ -487,15 +488,31 @@ class Evolution(AbstractOptimizer):
         n_samples, n_params = grad_log_psi.shape
         block = n_params // n_devices**2
         grad_blocks = grad_log_psi.reshape(n_samples, n_devices, n_devices, block)
+        # The products are summed over chunks of at most global_defs.MATMUL_CHUNK_BYTES of samples: XLA
+        # autotunes a matrix product on its own copies of the operands, which would otherwise be as
+        # large as grad_log_psi
+        row_bytes = n_params * grad_log_psi.dtype.itemsize
+        chunk = max(1, min(n_samples, (global_defs.MATMUL_CHUNK_BYTES or n_samples * row_bytes) // row_bytes))
 
         def add_block(j, S):
             # Block j of the rows of every device, in device order
-            rows = jax.lax.dynamic_index_in_dim(grad_blocks, j, axis=2, keepdims=False)
-            local = jnp.tensordot(
-                jnp.conj(rows.reshape(n_samples, n_devices * block)), 
-                grad_log_psi, 
-                axes=(0, 0)
-            )
+            rows = jax.lax.dynamic_index_in_dim(
+                grad_blocks, j, axis=2, keepdims=False
+            ).reshape(n_samples, n_devices * block)
+
+            def add_chunk(k, local, size=chunk):
+                r, g = (
+                    jax.lax.dynamic_slice_in_dim(x, k * chunk, size) 
+                    for x in (rows, grad_log_psi)
+                )
+                # Materialized: XLA would otherwise fuse the slices 
+                # into the product and autotune it on whole operands
+                r, g = jax.lax.optimization_barrier((r, g))
+                return local + jnp.tensordot(jnp.conj(r), g, axes=(0, 0))
+
+            local = jax.lax.fori_loop(1, n_samples // chunk, add_chunk, add_chunk(0, 0))
+            if n_samples % chunk:
+                local = add_chunk(n_samples // chunk, local, n_samples % chunk)
             local = jax.lax.psum_scatter(local, "devices", scatter_dimension=0, tiled=True)
             S_block = jax.lax.dynamic_slice_in_dim(S, j * block, block, axis=0)
 

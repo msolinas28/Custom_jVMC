@@ -1,0 +1,8 @@
+{
+  "series": "exp-dense",
+  "n": 8192,
+  "num_hidden": 8192,
+  "n_parameters": 655360,
+  "oom": true,
+  "error": "RESOURCE_EXHAUSTED: Autotuning failed for HLO: %gemm_fusion_dot_general.3 = f64[4096,4096]{1,0} fusion(%a_0_.1, %a_0_.1), kind=kCustom, calls=%gemm_fusion_dot_general.3_computation, metadata={op_name=\"jit(<lambda>)/while/body/closed_call/dot_general\" stack_frame_id=34}, backend_config={\"operation_queue_id\":\"0\",\"fusion_backend_config\":{\"kind\":\"__triton_gemm\"},\"force_earliest_schedule\":false,\"reification_cost\":[],\"device_type\":\"DEVICE_TYPE_INVALID\"}. Failed to profile configs: Out of memory while "
+}

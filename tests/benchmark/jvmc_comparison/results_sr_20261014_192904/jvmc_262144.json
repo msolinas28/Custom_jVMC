@@ -1,0 +1,7 @@
+{
+  "series": "jvmc",
+  "n": 262144,
+  "n_samples": 262144,
+  "oom": true,
+  "error": "RESOURCE_EXHAUSTED: Out of memory while trying to allocate 25.05GiB. [executable_name='jit_broadcast_in_dim'] [tf-allocator-allocation-error='']"
+}

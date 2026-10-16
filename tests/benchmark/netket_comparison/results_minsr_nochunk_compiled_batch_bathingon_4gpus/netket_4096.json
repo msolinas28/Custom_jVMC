@@ -1,0 +1,40 @@
+{
+  "series": "netket",
+  "num_hidden": 4096,
+  "n_parameters": 327680,
+  "device": "GPU: NVIDIA GH200 120GB",
+  "n_devices": 4,
+  "host": "jpbo-087-24.jupiter.internal",
+  "versions": {
+    "python": "3.13.5",
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "flax": "0.12.10",
+    "netket": "3.22.4"
+  },
+  "first_call": {
+    "local_energies": 0.7795608990127221,
+    "minsr_step": 5.43964632198913
+  },
+  "times": {
+    "local_energies": [
+      0.0046446979977190495,
+      0.00455618801061064,
+      0.0045018200180493295
+    ],
+    "minsr_step": [
+      0.20818873203825206,
+      0.20744007697794586,
+      0.20671673299511895
+    ]
+  },
+  "peak_bytes": 14242159872,
+  "peak_bytes_per_device": [
+    14242159872,
+    14242159872,
+    14242159872,
+    14242159872
+  ],
+  "bytes_limit": 76504104960,
+  "memory": "device"
+}

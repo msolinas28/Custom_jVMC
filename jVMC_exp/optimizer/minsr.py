@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from typing import Callable
 
+from jVMC_exp import global_defs
 from jVMC_exp.sampler.base import AbstractSampler
 from jVMC_exp.sampler import ExactSampler
 from jVMC_exp.stats import SampledObs
@@ -95,10 +96,28 @@ def _blockwise_tangent_kernel(grad_l, grad_r=None):
             jax.lax.dynamic_index_in_dim(grad_blocks, j, axis=0, keepdims=False)
         )
 
+    # The products are summed over chunks of at most global_defs.MATMUL_CHUNK_BYTES of parameters: XLA
+    # autotunes a matrix product on its own copies of the operands, which would otherwise be as
+    # large as grad_r
+    n_cols = grad_r.shape[1]
+    col_bytes = grad_r.shape[0] * grad_r.dtype.itemsize
+    chunk = max(1, min(n_cols, (global_defs.MATMUL_CHUNK_BYTES or n_cols * col_bytes) // col_bytes))
+
     def add_block(j, T):
-        # conj(grad_l) @ grad_r.T is the complex conjugate of the kernel: conjugating the
-        # reduced block, instead of grad_r, avoids a copy of grad_r
-        local = jax.lax.dot_general(jnp.conj(block_rows(j)), grad_r, (((1,), (1,)), ((), ())))
+        rows = block_rows(j)
+
+        def add_chunk(k, local, size=chunk):
+            l, r = (jax.lax.dynamic_slice_in_dim(x, k * chunk, size, axis=1) for x in (rows, grad_r))
+            # Materialized: XLA would otherwise fuse the slices
+            # into the product and autotune it on whole operands
+            l, r = jax.lax.optimization_barrier((l, r))
+            # conj(grad_l) @ grad_r.T is the complex conjugate of the kernel: conjugating the
+            # reduced block, instead of grad_r, avoids a copy of grad_r
+            return local + jax.lax.dot_general(jnp.conj(l), r, (((1,), (1,)), ((), ())))
+
+        local = jax.lax.fori_loop(1, n_cols // chunk, add_chunk, add_chunk(0, 0))
+        if n_cols % chunk:
+            local = add_chunk(n_cols // chunk, local, n_cols % chunk)
         local = jnp.conj(jax.lax.psum_scatter(local, 'devices', scatter_dimension=0, tiled=True))
 
         return jax.lax.dynamic_update_slice_in_dim(T, local, j * block, axis=0)
@@ -222,7 +241,11 @@ class MinSR(AbstractOptimizer):
 
                 T_row = []
                 batches_r = iter(grad.observations)
-                for weights_r in grad._weights:
+                for r, weights_r in enumerate(grad._weights):
+                    if r == l:
+                        next(batches_r)
+                        T_row.append(self._get_tangent_kernel(batch_l))
+                        continue
                     batch_r = _normalize_batch(next(batches_r), weights_r, grad.mean, self._concat)
                     T_row.append(self._get_tangent_kernel(batch_l, batch_r))
                 # The columns come in batch order: move them to the original sample order

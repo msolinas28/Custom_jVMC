@@ -1,0 +1,28 @@
+{
+  "L": 80,
+  "g": 1.0,
+  "num_hidden": [
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+    1024,
+    2048,
+    4096,
+    8192,
+    16384
+  ],
+  "bias": false,
+  "n_samples": 4096,
+  "batch_size": 1024,
+  "all_devices": true,
+  "diag_shift": 0.001,
+  "pinv_cutoff": 1e-14,
+  "repeats": 3,
+  "warmup": 1,
+  "seed": 1234,
+  "netket_operator": "ising",
+  "date": "2026-10-16T17:23:18"
+}

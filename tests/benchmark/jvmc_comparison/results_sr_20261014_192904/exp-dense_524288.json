@@ -1,0 +1,7 @@
+{
+  "series": "exp-dense",
+  "n": 524288,
+  "n_samples": 524288,
+  "oom": true,
+  "error": "RESOURCE_EXHAUSTED: Failed to get configs for: 2 out of 3 instructions. See logs for all failures. Example failure: "
+}

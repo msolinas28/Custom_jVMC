@@ -1,0 +1,185 @@
+--- a/jVMC_exp/sharding_config.py
++++ b/jVMC_exp/sharding_config.py
+@@ -213,6 +213,46 @@
+ P = ParamSpec('P')
+ R = TypeVar('R')
+ 
++# A batched call of a method decorated with ``group_batches=True`` evaluates up to
++# MAX_BATCHES_PER_CALL batches per dispatch, with at most GROUP_BYTES of arguments per device
++MAX_BATCHES_PER_CALL = 64
++GROUP_BYTES = 2**28
++_N_BATCHES = "_n_batches"
++
++def _loop_over_batches(fn, b):
++    """
++    ``fn`` (vmapped over the first axis of every positional argument after the first one)
++    evaluated on blocks of ``b`` rows, in a loop inside the compiled function, over the first
++    ``kw["_n_batches"]`` blocks of the arguments only: the remaining rows are padding and their
++    results are zero. The number of blocks is an argument of the compiled function, so it is
++    compiled once for a given number of rows of the arguments, whatever the number of samples.
++    """
++    def looped_fn(kw, *args):
++        kw = dict(kw)
++        n_batches = kw.pop(_N_BATCHES)
++
++        def batch(i):
++            return fn(kw, *(jax.lax.dynamic_slice_in_dim(a, i * b, b) for a in args))
++
++        def write(out, piece, i):
++            return jax.tree_util.tree_map(
++                lambda o, p: jax.lax.dynamic_update_slice_in_dim(o, p, i * b, axis=0), out, piece
++            )
++
++        # The output is allocated from the first batch. Zeros are the same on every device,
++        # while the loop carry has to vary across devices like the batch results
++        first = batch(0)
++        out = jax.tree_util.tree_map(
++            lambda p: jax.lax.pcast(
++                jnp.zeros((args[0].shape[0],) + p.shape[1:], p.dtype), MESH.axis_names, to="varying"
++            ),
++            first
++        )
++
++        return jax.lax.fori_loop(1, n_batches, lambda i, out: write(out, batch(i), i), write(out, first, 0))
++
++    return looped_fn
++
+ def distribute(global_size: int, label: str | None=None):
+     """
+     Adjust a global array size to be compatible with device sharding.
+@@ -326,6 +366,7 @@
+             automatic_sharding=False,
+             donate_argnums=None,
+             yield_iter=False,
++            group_batches=False,
+     ):
+         self.static_argnums = static_argnums
+         self.static_kwarg_names = set(static_kwarg_names + ('batch_size',))
+@@ -337,6 +378,7 @@
+         self.automatic_sharding = automatic_sharding
+         self.donate_argnums = donate_argnums
+         self.yield_iter = yield_iter
++        self.group_batches = group_batches
+         self._customised_specs = [
+             name for name, customised in (
+                 ("in_specs", in_specs is not None),
+@@ -385,7 +427,10 @@
+                     layout=layout
+                 )
+ 
+-            out = self._call_local(layout, kwargs, args, jsh_fn)
++            if self._groups_batches(batch_size):
++                out = self._call_grouped(layout, kwargs, args, jsh_fn)
++            else:
++                out = self._call_local(layout, kwargs, args, jsh_fn)
+             if num_padded != num_samples:
+                 # This will remplicate the output, but it's not a problem, 
+                 # since the input was not divisible by the number of devices anyways.
+@@ -424,14 +469,29 @@
+                                  f"has to be divisible by the number of devices ({MESH.size})")
+ 
+             base_fn = lambda kw, *a: method(instance, *a, **kw, **static_kwargs)
+-            instance._sharded_cache[cache_key] = self._create_sharded_fn(base_fn)
++            local_batch = (
++                kwargs['batch_size'] // MESH.size if self._groups_batches(kwargs['batch_size'])
++                else None
++            )
++            instance._sharded_cache[cache_key] = self._create_sharded_fn(base_fn, local_batch)
+ 
+         return instance._sharded_cache[cache_key]
+ 
+-    def _create_sharded_fn(self, base_fn):
++    def _groups_batches(self, batch_size):
++        """
++        Whether a call evaluates groups of batches per dispatch (see `_call_grouped`).
++        """
++        return (
++            self.group_batches and batch_size is not None and self.use_vmap
++            and not (self.yield_iter or self.automatic_sharding)
++        )
++
++    def _create_sharded_fn(self, base_fn, local_batch=None):
+         vmapd_fn = jax.vmap(
+             base_fn, in_axes=(None,) + self.vmap_in_axes
+         ) if self.use_vmap else base_fn
++        if local_batch is not None:
++            vmapd_fn = _loop_over_batches(vmapd_fn, local_batch)
+ 
+         if self.automatic_sharding:
+             jsh_fn = jax.jit(
+@@ -463,6 +523,33 @@
+                 jsh_fn(kwargs, *(layout.take(a, i) for a in args))
+             )
+ 
++    def _call_grouped(self, layout: BatchLayout, kwargs, args, jsh_fn):
++        """
++        As `_call_local`, but every dispatch evaluates a group of up to ``MAX_BATCHES_PER_CALL``
++        consecutive batches of ``layout``, in a loop inside the compiled function (see
++        `_loop_over_batches`). Every dispatch costs a fixed host time, which on a GPU can be
++        longer than the evaluation of a batch. The compiled function always gets a full group
++        of rows, the last group being zero padded, so it is compiled once whatever the number
++        of samples, and the padding batches are not evaluated.
++        """
++        row_bytes = sum(math.prod(a.shape[1:]) * a.dtype.itemsize for a in args)
++        group = max(1, min(
++            MAX_BATCHES_PER_CALL, GROUP_BYTES // max(1, layout._local_batch_size * row_bytes)
++        ))
++        groups = BatchLayout(layout.num_samples, group * layout.batch_size)
++
++        out = None
++        for g in range(groups.n_batches):
++            n_batches = min(group, layout.n_batches - g * group)
++            result = jsh_fn({**kwargs, _N_BATCHES: n_batches}, *(groups.take(a, g) for a in args))
++            if groups.n_batches == 1:
++                return jax.tree_util.tree_map(lambda x: groups.trim(x, 0), result)
++            if out is None:
++                out = jax.tree_util.tree_map(groups.alloc, result)
++            out = jax.tree_util.tree_map(lambda o, r: groups.put(o, r, g), out, result)
++
++        return jax.block_until_ready(out)
++
+     def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
+         """
+         Evaluates all batches of ``layout`` and writes their results in place into
+--- a/jVMC_exp/vqs.py
++++ b/jVMC_exp/vqs.py
+@@ -455,7 +455,7 @@
+             s, parameters=self.eval_parameters, batch_size=self.batchSize
+         ).astype(self.out_dtype)
+     
+-    @sharded()
++    @sharded(group_batches=True)
+     def _apply_fun_sh(self, s, *, parameters, batch_size):
+         return self.apply_fun(parameters, s)
+ 
+@@ -467,7 +467,7 @@
+ 
+         return jnp.exp(self(sp) - self(s))
+     
+-    @sharded()
++    @sharded(group_batches=True)
+     def _apply_ratio_sh(self, s, sp, *, parameters, batch_size):
+         return self.apply_fun(parameters, s, sp, method=self.net.eval_ratio)
+ 
+--- a/jVMC_exp/operator/discrete/base.py
++++ b/jVMC_exp/operator/discrete/base.py
+@@ -260,7 +260,7 @@
+ 
+         return matrix
+ 
+-    @sharded(static_kwarg_names=("psi", "chunk_size"))
++    @sharded(static_kwarg_names=("psi", "chunk_size"), group_batches=True)
+     def _get_O_loc(
+         self, s, log_psi_s, *, 
+         parameters, psi: NQS, chunk_size, batch_size, **kwargs
+--- a/jVMC_exp/operator/continuous/base.py
++++ b/jVMC_exp/operator/continuous/base.py
+@@ -104,7 +104,7 @@
+         self._instructions = instructions
+         self._is_flattened = True
+ 
+-    @sharded(static_kwarg_names=('apply_fun',))
++    @sharded(static_kwarg_names=('apply_fun',), group_batches=True)
+     def _evaluate_flat(self, s, *, batch_size, parameters, apply_fun, **kwargs):
+         stack = []
+ 

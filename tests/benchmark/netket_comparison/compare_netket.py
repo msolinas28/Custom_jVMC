@@ -1,54 +1,3 @@
-"""
-jVMC_exp vs NetKet, in the spirit of Fig. 4 of arXiv:2108.03409: time spent in the
-stages of the Monte Carlo estimate of <H> for the transverse-field Ising chain
-
-    H = - sum_i sz_i sz_{i+1} - g sum_i sx_i      (periodic boundaries)
-
-with a complex RBM (``jVMC_exp.nets.CpxRBM``), on the same hardware.
-
-    python compare_netket.py                         # runs both libraries, then plots
-    python compare_netket.py --batch-size 65536      # change the memory budget
-    python compare_netket.py --plot results_<date>   # only re-plots a finished run
-
-The defaults are those of the paper, apart from the network (a CNN in the paper): N=80,
-10^4 samples from 350 Markov chains, sweeps of N single spin flips and 20 thermalization
-sweeps. The RBM has N hidden units and no bias by default.
-
-Stages (as in the paper):
-    * Sampling:        MCMC, thermalization included.
-    * Matrix elements: connected configurations s' and <s|H|s'> of all the samples.
-    * Evaluation:      network evaluations on s' and the local estimator, i.e. the time
-                       of the full estimate of <H> on the stored samples minus the
-                       matrix-element time, since both libraries compute the matrix
-                       elements inside the same compiled function as the evaluation.
-    * Total:           sampling + full estimate of <H>, both measured.
-
-To make the comparison fair:
-    * Each library runs in its own Python process, one after the other, so they do not
-      share the JAX runtime, compilation caches or device memory. By default only one
-      device is visible to both (``--all-devices`` uses every device, for both).
-    * Both use double precision (complex128 parameters) and the same network: NetKet
-      runs a batched port of ``jVMC_exp.nets.CpxRBM`` with the parameters of the
-      jVMC_exp network, and the run fails if the two give different log(psi) on the
-      same configurations. The energies and acceptance rates are compared as well.
-    * Same Hamiltonian, number of samples, chains, sweep size, thermalization and update
-      (single spin flip Metropolis); the chains are kept between calls in both.
-      jVMC_exp evaluates log(psi) of the samples at the end of the sampling and reuses it
-      for <H>, NetKet evaluates it in the estimate of <H>: the totals include both.
-    * Same memory budget: at most ``--batch-size`` network evaluations per call, which is
-      ``batchSize`` of the jVMC_exp NQS and ``chunk_size`` of the NetKet MCState.
-      The default is the number of samples: with a larger batch size jVMC_exp pads the
-      evaluation of log(psi) of the samples up to the batch size (see ``BatchLayout``),
-      which makes its sampling stage slower.
-    * The first call of every stage (which includes the jit compilation) and the warm-up
-      calls are excluded. The stages are then timed one after the other as in a VMC step,
-      ``--repeats`` times, waiting for the device every time (``jax.block_until_ready``).
-      The figure shows the median and the interquartile range.
-    * NetKet is timed with its default (JAX) ``Ising``, and with the generic
-      ``LocalOperator``, which compares to the generic operators of jVMC_exp. The Numba
-      operators (matrix elements on the CPU, as in the paper) are available with
-      ``--netket-operators``.
-"""
 import sys
 sys.path.append(sys.path[0] + "/../../..")
 import argparse
@@ -187,7 +136,7 @@ def run_jvmc(cfg, out_dir):
     L = cfg["L"]
     hamiltonian = jvmc_hamiltonian(L, cfg["g"])
 
-    batch_size = cfg['batch_size'] or cfg["n_chains"]
+    batch_size = cfg['batch_size'] or cfg["n_samples"]
     net = CpxRBM(numHidden=cfg["num_hidden"], bias=cfg["bias"])
     psi = NQS(net, L, batchSize=batch_size, seed=cfg["seed"])
     sampler = MCSampler(
@@ -568,14 +517,12 @@ def main():
 
     out_dir = args.out_dir or os.path.join(HERE, f"results_{datetime.now():%Y%m%d_%H%M%S}")
     os.makedirs(out_dir, exist_ok=True)
-    # Results of an earlier run in the same folder, so that a failed run can't reuse them
     for name in ("jvmc.json", "netket.json", "reference.npz"):
         if os.path.exists(os.path.join(out_dir, name)):
             os.remove(os.path.join(out_dir, name))
     with open(os.path.join(out_dir, "config.json"), "w") as f:
         json.dump(cfg, f, indent=2)
 
-    # jVMC_exp first: NetKet takes its parameters
     for worker in [w for w in WORKERS if w in args.libraries]:
         python = args.netket_python if worker == "netket" else sys.executable
         print(f"=== {worker} ===", flush=True)

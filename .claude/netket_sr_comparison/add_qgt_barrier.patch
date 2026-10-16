@@ -1,0 +1,11 @@
+--- a/jVMC_exp/optimizer/base.py
++++ b/jVMC_exp/optimizer/base.py
+@@ -498,6 +498,8 @@
+ 
+             def add_chunk(k, local, size=chunk):
+                 r, g = (jax.lax.dynamic_slice_in_dim(x, k * chunk, size) for x in (rows, grad_log_psi))
++                # Materialized: XLA would otherwise fuse the slices into the product and autotune it on whole operands
++                r, g = jax.lax.optimization_barrier((r, g))
+                 return local + jnp.tensordot(jnp.conj(r), g, axes=(0, 0))
+ 
+             local = jax.lax.fori_loop(1, n_samples // chunk, add_chunk, add_chunk(0, 0))

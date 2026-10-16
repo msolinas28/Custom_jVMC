@@ -1,0 +1,16 @@
+{
+  "L": 80,
+  "g": 1.0,
+  "num_hidden": 80,
+  "bias": false,
+  "batch_size": null,
+  "diag_scale": 0.001,
+  "snr_tol": 0.0,
+  "pinv_tol": 1e-14,
+  "pinv_cutoff": 1e-08,
+  "repeats": 3,
+  "warmup": 1,
+  "seed": 1234,
+  "jvmc_path": "/e/scratch/neuquass/solinas1/env/jVMC_original",
+  "date": "2026-10-14T19:29:04"
+}

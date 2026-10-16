@@ -1,0 +1,34 @@
+{
+  "series": "jvmc-dense",
+  "n_samples": 32768,
+  "device": "GPU: NVIDIA GH200 120GB",
+  "n_devices": 1,
+  "host": "jpbo-081-26.jupiter.internal",
+  "versions": {
+    "python": "3.13.5",
+    "jax": "0.11.2",
+    "jaxlib": "0.11.2",
+    "flax": "0.12.10",
+    "jVMC_exp": "1.5.8"
+  },
+  "n_parameters": 6400,
+  "first_call": {
+    "local_energies": 1.698273457994219,
+    "sr_step": 4.726979069993831
+  },
+  "times": {
+    "local_energies": [
+      0.030395740002859384,
+      0.031542757991701365,
+      0.03199260600376874
+    ],
+    "sr_step": [
+      0.4360657620127313,
+      0.43724781897617504,
+      0.4357352699735202
+    ]
+  },
+  "peak_bytes": 6130233600,
+  "bytes_limit": 76504104960,
+  "memory": "device"
+}

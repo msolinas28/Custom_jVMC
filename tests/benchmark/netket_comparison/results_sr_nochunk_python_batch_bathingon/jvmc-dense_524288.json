@@ -1,0 +1,6 @@
+{
+  "series": "jvmc-dense",
+  "n_samples": 524288,
+  "oom": true,
+  "error": "RESOURCE_EXHAUSTED: Out of memory while trying to allocate 25.02GiB with allocator GPU_0_bfc on device 0. [tf-allocator-allocation-error='']"
+}

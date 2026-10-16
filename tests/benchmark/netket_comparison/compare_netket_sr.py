@@ -1,43 +1,3 @@
-"""
-SR step of jVMC_exp and NetKet with a fixed number of parameters and a growing number of
-samples: time and peak device memory as the Jacobian grows, and the largest number of
-samples each library can handle on one device.
-
-    python compare_netket_sr.py                                  # sweep, then plot
-    python compare_netket_sr.py --n-samples 4096 65536 1048576   # chosen numbers of samples
-    python compare_netket_sr.py --plot results_sr_<date>         # only re-plots
-
-What is timed is one SR update from given samples, sampling excluded: log(psi) and local
-energies of the samples, the Jacobian O_k(s) = d log(psi(s)) / d theta_k, the force F,
-S = <O^T O> - <O^T><O> and the solution of (S + diag_shift) x = F. The local energies alone
-are timed as well.
-
-Series:
-    * jVMC_exp, dense Jacobian:   Observable(H) and SR(solver=Pinv), the Jacobian is stored.
-    * jVMC_exp, batched Jacobian: Observable(H, batched_jacobian=True), S is summed over
-                                  batches of samples and the Jacobian is never stored.
-    * NetKet, VMC_SR:             VMC_SR(mode="real", use_ntk=False, on_the_fly=False), the
-                                  mode of VMC_SR that builds S. It stores the Jacobian.
-
-To compare the same computation:
-    * Real-parameter RBM: jVMC_exp.nets.RBM, and the same network in NetKet. Both libraries
-      then build the same (N_s, N_p) float64 Jacobian and the same N_p x N_p matrix S. (With
-      complex parameters, jVMC_exp solves an N_p complex system for holomorphic networks and
-      NetKet a 2 N_p real one.)
-    * Same parameters, same samples (uniformly random configurations: the update is not a
-      physical one, but it costs the same) and the same linear solver, the eigendecomposition
-      pseudo-inverse of jVMC_exp.solver.Pinv with the same diagonal shift and cutoff. The two
-      libraries then give the same update, up to the factor -2 of NetKet's convention, and
-      this is checked.
-    * Same batch size: at most --batch-size network evaluations per call for the local
-      energies and --batch-size samples per block of the Jacobian (batchSize of the NQS, and
-      chunk_size of the MCState, which VMC_SR also uses for the Jacobian).
-    * One device. Every point runs in its own process, since the peak memory of a process
-      can't be reset, and a series stops at the first number of samples that does not fit.
-      JAX has no memory statistics on CPUs, so the peak memory is only measured on GPUs.
-    * The first call (compilation) and --warmup calls are excluded, then the median of
-      --repeats calls.
-"""
 import sys
 sys.path.append(sys.path[0] + "/../../..")
 import argparse
@@ -68,7 +28,7 @@ parser.add_argument("--L", type=int, default=80, help="Number of spins")
 parser.add_argument("--g", type=float, default=1.0, help="Transverse field")
 parser.add_argument("--num-hidden", type=int, default=None, help="Hidden units of the RBM (default: L)")
 parser.add_argument("--bias", action="store_true", help="Use the bias of the hidden units")
-parser.add_argument("--n-samples", type=int, nargs="+", default=[2**k for k in range(10, 14)])
+parser.add_argument("--n-samples", type=int, nargs="+", default=[2**k for k in range(10, 21)])
 parser.add_argument("--batch-size", type=int, default=2**14,
                     help="Network evaluations per call for the local energies, samples per block of the Jacobian")
 parser.add_argument("--diag-shift", type=float, default=1e-3)
@@ -81,6 +41,8 @@ parser.add_argument("--netket-operator", choices=["ising", "local"], default="is
                     help="NetKet operator of the local energies: Ising (JAX) or the generic LocalOperator (JAX)")
 parser.add_argument("--netket-python", default=sys.executable,
                     help="Python interpreter of the NetKet runs, if NetKet lives in another environment")
+parser.add_argument("--all-devices", action="store_true",
+                    help="Run on all visible devices instead of the first one (default: one device)")
 parser.add_argument("--out-dir", default=None, help="Default: a new results_sr_<date> folder next to this script")
 parser.add_argument("--plot", metavar="RESULTS_DIR", default=None, help="Only plot the results in RESULTS_DIR")
 parser.add_argument("--worker", choices=list(SERIES), default=None, help=argparse.SUPPRESS)
@@ -104,19 +66,26 @@ def load_inputs(cfg, n_samples, out_dir):
 
     return params, samples
 
-def check_single_device():
+def check_single_device(cfg):
+    """
+    Number of devices, which has to be one unless the comparison runs on all devices.
+    """
     import jax
 
-    if jax.device_count() != 1:
-        raise SystemExit(f"{jax.device_count()} devices are visible, but the comparison runs on one")
+    if not cfg.get("all_devices") and jax.device_count() != 1:
+        raise SystemExit(f"{jax.device_count()} devices are visible, but the comparison runs on one (see --all-devices)")
+
+    return jax.device_count()
 
 def peak_memory():
     import resource
     import jax
 
-    stats = jax.local_devices()[0].memory_stats()
-    if stats is not None:
-        return {"peak_bytes": stats.get("peak_bytes_in_use"), "bytes_limit": stats.get("bytes_limit"), "memory": "device"}
+    stats = [d.memory_stats() for d in jax.local_devices()]
+    if stats[0] is not None:
+        # The largest peak over the devices, and the peak of every device
+        peaks = [s.get("peak_bytes_in_use") for s in stats]
+        return {"peak_bytes": max(peaks), "peak_bytes_per_device": peaks, "bytes_limit": stats[0].get("bytes_limit"), "memory": "device"}
 
     # No device statistics on CPUs: peak resident memory of the process (bytes on macOS, kB on Linux)
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -145,17 +114,18 @@ def run_jvmc(cfg, n_samples, out_dir, batched):
     from jVMC_exp.solver import Pinv
     from jVMC_exp.vqs import NQS
 
-    check_single_device()
+    check_single_device(cfg)
     L = cfg["L"]
     params, samples = load_inputs(cfg, n_samples, out_dir)
     samples = jnp.asarray(samples, dtype=jVMC_exp.global_defs.DT_SAMPLES)
     weights = jnp.full(n_samples, 1 / n_samples)
+    batch_size = min(cfg["batch_size"] or n_samples, n_samples)
 
     hamiltonian = jvmc_hamiltonian(L, cfg["g"])
-    psi = NQS(RBM(numHidden=cfg["num_hidden"], bias=cfg["bias"]), L, batchSize=cfg["batch_size"], seed=cfg["seed"])
+    psi = NQS(RBM(numHidden=cfg["num_hidden"], bias=cfg["bias"]), L, batchSize=batch_size, seed=cfg["seed"])
     psi.parameters = jax.tree_util.tree_map(jnp.asarray, params)
     # Never samples: the samples are set below, where SR sets the ones it draws
-    sampler = MCSampler(psi, SpinFlip(), key=cfg["seed"], numChains=1, numSamples=n_samples)
+    sampler = MCSampler(psi, SpinFlip(), key=cfg["seed"], numChains=jax.device_count(), numSamples=n_samples)
     objective = Observable(hamiltonian, batched_jacobian=batched)
     with warnings.catch_warnings():
         # Notice about the naming of diagonalShift and diagonalScale
@@ -199,18 +169,27 @@ def run_netket(cfg, n_samples, out_dir):
     import netket as nk
     import optax
 
-    check_single_device()
+    check_single_device(cfg)
     L = cfg["L"]
     params, samples = load_inputs(cfg, n_samples, out_dir)
 
+    batch_size = cfg['batch_size']
+    if (batch_size is not None) and (batch_size >= n_samples):
+        batch_size = None
+
     hamiltonian = netket_operator(cfg["netket_operator"], L, cfg["g"])
-    sampler = nk.sampler.MetropolisLocal(hamiltonian.hilbert, n_chains=1)
+    n_devices = check_single_device(cfg)
+    if n_devices > 1:
+        # NetKet shards the samples over the mesh, if one is set
+        mesh = jax.sharding.Mesh(np.asarray(jax.devices()), ("S",), axis_types=(jax.sharding.AxisType.Auto,))
+        jax.sharding.set_mesh(mesh)
+    sampler = nk.sampler.MetropolisLocal(hamiltonian.hilbert, n_chains=n_devices)
     with warnings.catch_warnings():
         # The batch size is the same as in jVMC_exp, power of two or not
         warnings.filterwarnings("ignore", message=".*power-of-two chunk size")
         vstate = nk.vqs.MCState(
             sampler, netket_rbm(cfg["num_hidden"], cfg["bias"], "float64"),
-            n_samples=n_samples, chunk_size=cfg["batch_size"], seed=cfg["seed"],
+            n_samples=n_samples, chunk_size=batch_size, seed=cfg["seed"],
         )
     vstate.parameters = jax.tree_util.tree_map(jnp.asarray, params)
 
@@ -227,7 +206,9 @@ def run_netket(cfg, n_samples, out_dir):
     )
     # NetKet has no public way to set the samples: these are the ones MCState.sample() would
     # store, with the 0/1 spins of jVMC_exp as +-1
-    vstate._samples = jnp.asarray(2 * samples - 1, dtype=sampler.dtype).reshape(1, n_samples, L)
+    vstate._samples = jnp.asarray(2 * samples - 1, dtype=sampler.dtype).reshape(n_devices, -1, L)
+    if n_devices > 1:
+        vstate._samples = jax.device_put(vstate._samples, jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("S")))
 
     last = {}
 
@@ -357,6 +338,11 @@ def plot(out_dir):
             ax_mem.axhline(limit / 1e9, color=INK_MUTED, lw=1)
             ax_mem.annotate("memory available to JAX", (n_all[0], limit / 1e9), xytext=(0, 4),
                             textcoords="offset points", fontsize=8, color=INK_SECONDARY)
+        if cfg["batch_size"]:
+            # With more samples than this, the batched Jacobian is computed in batches
+            ax_mem.axvline(cfg["batch_size"], color=INK_MUTED, lw=1, ls="--")
+            ax_mem.annotate(f"batch size of the\nbatched Jacobian", (cfg["batch_size"], 0), xycoords=("data", "axes fraction"),
+                            xytext=(4, 4), textcoords="offset points", fontsize=8, color=INK_SECONDARY)
         ax_mem.set_yscale("log")
         ax_mem.set_ylabel("Peak device memory [GB]" if info["memory"] == "device"
                           else "Peak resident memory of the process [GB]")
@@ -389,9 +375,10 @@ def plot(out_dir):
         f"Transverse-field Ising chain, N = {cfg['L']}, g = {cfg['g']}. Real RBM, {cfg['num_hidden']} hidden units"
         f"{' with bias' if cfg['bias'] else ''}, {info.get('n_parameters')} parameters, float64. Uniformly random samples.\n"
         f"Eigendecomposition pseudo-inverse with diagonal shift {cfg['diag_shift']:g} in both.{check}\n"
-        f"Batches of {cfg['batch_size']} network evaluations (local energies) and samples (Jacobian). "
+        + (f"Only the batched Jacobian uses batches: {cfg['batch_size']} samples (Jacobian) and network evaluations (local energies). "
+           if cfg["batch_size"] else "Every series evaluates all samples at once. ") +
         f"Median of {cfg['repeats']} SR steps after compilation and {cfg['warmup']} warm-up steps, sampling excluded.\n"
-        f"One process per point. {info.get('device')}. {' | '.join(versions)}",
+        f"One process per point, {info.get('n_devices', 1)} device(s): {info.get('device')}. {' | '.join(versions)}",
         fontsize=7.5, color=INK_SECONDARY, va="bottom",
     )
     fig.tight_layout(rect=(0, 0.14, 1, 1))
@@ -423,6 +410,9 @@ def main():
     if args.worker is not None:
         with open(os.path.join(args.out_dir, "config.json")) as f:
             cfg = json.load(f)
+        # Only the batched Jacobian uses the batch size: the other series evaluate all samples at once
+        if args.worker != "jvmc-batched":
+            cfg["batch_size"] = None
         run_worker(cfg, args.worker, args.n, args.out_dir)
         return
 
@@ -433,6 +423,7 @@ def main():
     cfg = {
         "L": args.L, "g": args.g, "num_hidden": args.num_hidden or args.L, "bias": args.bias,
         "batch_size": args.batch_size, "diag_shift": args.diag_shift, "pinv_cutoff": args.pinv_cutoff,
+        "all_devices": args.all_devices,
         "repeats": args.repeats, "warmup": args.warmup, "seed": args.seed,
         "netket_operator": args.netket_operator,
         "date": datetime.now().isoformat(timespec="seconds"),
@@ -452,7 +443,8 @@ def main():
     env = dict(os.environ)
     env["JVMC_USE_DISTRIBUTED"] = "false"
     # First of the devices given to this job, or device 0
-    env["CUDA_VISIBLE_DEVICES"] = env.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0]
+    if not args.all_devices:
+        env["CUDA_VISIBLE_DEVICES"] = env.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0]
 
     for series in args.series:
         python = args.netket_python if series == "netket" else sys.executable

@@ -1,0 +1,203 @@
+--- a/jVMC_exp/stats.py
++++ b/jVMC_exp/stats.py
+@@ -1,13 +1,47 @@
+ from __future__ import annotations
++import math
+ import jax
+ import jax.numpy as jnp
+ from functools import partial, cached_property
+ 
+ from jVMC_exp.sharding_config import DEVICE_SHARDING, MESH, SizedIterable, pad_to_devices
+ 
++# Largest block of rows that a sum over the samples gives to XLA at once. When it compiles a
++# matrix product or a reduction, XLA autotunes it on scratch copies of its operands: with the
++# whole (n_samples, n_params) Jacobian as operand, these copies are as large as the Jacobian.
++ROW_BLOCK_BYTES = 2**30
++
++def _sum_over_rows(f, xs, n_groups=1):
++    """
++    ``f(*xs)`` for an ``f`` that sums over the first axis of every array of ``xs``, computed as
++    the sum of ``f`` over blocks of at most ``ROW_BLOCK_BYTES`` of the arrays' rows, in a loop
++    inside the compiled function. The rows are split into ``n_groups`` equal groups that are
++    sliced separately, so that every device slices its own rows when the arrays are sharded
++    across ``n_groups`` devices.
++    """
++    n = xs[0].shape[0] // n_groups
++    row_bytes = max(math.prod(x.shape[1:]) * x.dtype.itemsize for x in xs)
++    block = max(1, min(n, ROW_BLOCK_BYTES // row_bytes))
++    xs = [x.reshape((n_groups, n) + x.shape[1:]) for x in xs]
++
++    def f_block(start, size):
++        return f(*(
++            jax.lax.dynamic_slice_in_dim(x, start, size, axis=1).reshape((n_groups * size,) + x.shape[2:])
++            for x in xs
++        ))
++
++    n_full = n // block
++    out = jax.lax.fori_loop(1, n_full, lambda k, out: out + f_block(k * block, block), f_block(0, block))
++    if n % block:
++        out += f_block(n_full * block, n % block)
++
++    return out
++
+ @jax.jit
+ def _get_mean(data, weights):
+-    return jnp.tensordot(weights, data, axes=(0, 0))
++    return _sum_over_rows(
++        lambda w, d: jnp.tensordot(w, d, axes=(0, 0)), (weights, data), n_groups=MESH.size
++    )
+ 
+ @jax.jit
+ def _get_var(norm_data):
+@@ -21,15 +55,19 @@
+ def _center(data, mean):
+     return data - mean
+ 
+-@jax.jit
+-def _normalize(data, weights, mean):
++def _normalize_fn(data, weights, mean):
+     return jnp.einsum("i, i... -> i...", jnp.sqrt(weights), data - mean)
+ 
+-@jax.jit
+-def _inv_normalize(data, inv_weights, mean, mask):
++def _inv_normalize_fn(data, inv_weights, mean, mask):
+     raw = jnp.einsum("i, i... -> i...", jnp.sqrt(inv_weights), data) + mean
+     return jnp.einsum("i, i... -> i...", mask, raw)
+ 
++_normalize = jax.jit(_normalize_fn)
++_inv_normalize = jax.jit(_inv_normalize_fn)
++# In place: the input buffer is donated
++_normalize_in_place = jax.jit(_normalize_fn, donate_argnums=0)
++_inv_normalize_in_place = jax.jit(_inv_normalize_fn, donate_argnums=0)
++
+ @jax.jit
+ def _get_weighted_covar(data, weights, other_normalized):
+     """
+@@ -39,13 +77,16 @@
+     """
+     v = jnp.einsum("i, i... -> i...", jnp.sqrt(weights), other_normalized)
+     if jnp.iscomplexobj(data):
+-        return jnp.conj(jnp.tensordot(data, jnp.conj(v), axes=(0, 0))).squeeze()
+-    if jnp.iscomplexobj(v):
++        f = lambda d, v: jnp.conj(jnp.tensordot(d, jnp.conj(v), axes=(0, 0)))
++    elif jnp.iscomplexobj(v):
+         k = v.shape[-1]
+-        covar = jnp.tensordot(data, jnp.concatenate([v.real, v.imag], axis=-1), axes=(0, 0))
+-        return (covar[..., :k] + 1j * covar[..., k:]).squeeze()
++        def f(d, v):
++            covar = jnp.tensordot(d, jnp.concatenate([v.real, v.imag], axis=-1), axes=(0, 0))
++            return covar[..., :k] + 1j * covar[..., k:]
++    else:
++        f = lambda d, v: jnp.tensordot(d, v, axes=(0, 0))
+ 
+-    return jnp.tensordot(data, v, axes=(0, 0)).squeeze()
++    return _sum_over_rows(f, (data, v), n_groups=MESH.size).squeeze()
+ 
+ @jax.jit
+ def _mean_and_weighted_no_center(data, weights):
+@@ -85,7 +126,7 @@
+     return tau[window]
+ 
+ class SampledObs():
+-    def __init__(self, observations, weights=None):
++    def __init__(self, observations, weights=None, owned=False):
+         """
+         Initializes SampledObs class.
+ 
+@@ -93,6 +134,9 @@
+             * ``observations``: Observations :math:`O_n` in the sample. This can be the value of an observable `O(s_n)`. \
+                 The array must have a leading batch dimension.
+             * ``weights``: Weights :math:`w_n` associated with observation :math:`O_n`.
++            * ``owned``: Whether this object may overwrite ``observations``. If ``True``, the \
++                observations are normalized and centered in place, and ``observations`` must \
++                not be used after this call. Otherwise they are copied the first time.
+         """
+         if len(observations.shape) == 1:
+             self._num_obs = 1
+@@ -114,6 +158,7 @@
+             pad = ((0, num_pad),) + ((0, 0),) * (observations.ndim - 1)
+             observations = jnp.pad(observations, pad, mode='constant')
+             weights = jnp.pad(weights, (0, num_pad), constant_values=0)
++            owned = True
+         inv_weights = jnp.where(weights != 0, 1 / weights, weights)
+         zero_mask = jnp.where(weights != 0, 1, 0)
+ 
+@@ -122,6 +167,7 @@
+         self._zero_mask = jax.device_put(zero_mask, DEVICE_SHARDING)
+         self._observations = jax.device_put(observations, DEVICE_SHARDING)
+ 
++        self._owned = owned
+         self._state = "o"
+         self._mean = _get_mean(self._observations, self.weights)
+ 
+@@ -137,10 +183,10 @@
+     @property
+     def observations(self):
+         if self._state == "c":
+-            self._observations = _normalize(self._observations, self._zero_mask, -self.mean)
++            self._replace(_normalize_in_place, _normalize, self._zero_mask, -self.mean)
+         elif self._state == "n":
+-            self._observations = _inv_normalize(
+-                self._observations, self._inv_weights, self.mean, self._zero_mask
++            self._replace(
++                _inv_normalize_in_place, _inv_normalize, self._inv_weights, self.mean, self._zero_mask
+             )
+         self._state = "o"
+ 
+@@ -149,9 +195,9 @@
+     @property
+     def _centered_obs(self):
+         if self._state == "o":
+-            self._observations = _normalize(self._observations, self._zero_mask, self.mean)
++            self._replace(_normalize_in_place, _normalize, self._zero_mask, self.mean)
+         elif self._state == "n":
+-            self._observations = _normalize(self._observations, self._inv_weights, 0)
++            self._replace(_normalize_in_place, _normalize, self._inv_weights, 0)
+         self._state = "c"
+ 
+         return self._observations
+@@ -159,12 +205,20 @@
+     @property
+     def _normalized_obs(self):
+         if self._state == "o":
+-            self._observations = _normalize(self._observations, self.weights, self.mean)
++            self._replace(_normalize_in_place, _normalize, self.weights, self.mean)
+         elif self._state == "c":
+-            self._observations = _normalize(self._observations, self.weights, 0)
++            self._replace(_normalize_in_place, _normalize, self.weights, 0)
+         self._state = "n"
+ 
+         return self._observations
++
++    def _replace(self, fn_in_place, fn, *args):
++        """
++        Replaces the observations by ``fn(observations, *args)``, in place if this object owns
++        their buffer, which it does after the first replacement.
++        """
++        self._observations = (fn_in_place if self._owned else fn)(self._observations, *args)
++        self._owned = True
+     
+     @property
+     def weights(self):
+--- a/jVMC_exp/objective_function/base.py
++++ b/jVMC_exp/objective_function/base.py
+@@ -44,7 +44,7 @@
+             )
+         else:
+             grad_log_psi = SampledObs(
+-                sampler.psi.gradients(sampler.samples), sampler.weights
++                sampler.psi.gradients(sampler.samples), sampler.weights, owned=True
+             )
+ 
+         if compute_grad:
+--- a/jVMC_exp/objective_function/infidelity.py
++++ b/jVMC_exp/objective_function/infidelity.py
+@@ -178,7 +178,7 @@
+         if self._batched_jacobian:
+             grad_log_psi = LazySampledObs(sampler.psi.lazy_gradients(sampler.samples), sampler.weights)
+         else:
+-            grad_log_psi = SampledObs(sampler.psi.gradients(sampler.samples), sampler.weights)
++            grad_log_psi = SampledObs(sampler.psi.gradients(sampler.samples), sampler.weights, owned=True)
+ 
+         if compute_grad:
+             f_loc = SampledObs(-2.0 * self._ref_f_loc * self._psi_f_loc, sampler.weights)

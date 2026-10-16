@@ -1,0 +1,8 @@
+{
+  "series": "jvmc",
+  "n": 4096,
+  "num_hidden": 4096,
+  "n_parameters": 327680,
+  "oom": true,
+  "error": "INTERNAL: Autotuning failed for HLO: %wrapped_transpose = f64[327680,8192]{1,0} fusion(%args_0_.1), kind=kInput, calls=%wrapped_transpose_computation, metadata={op_name=\"args[0]\"}. Failed to pick best config: All configs failed during profiling."
+}
