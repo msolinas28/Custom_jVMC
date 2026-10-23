@@ -1,0 +1,19 @@
+{
+  "L": 80,
+  "g": 1.0,
+  "num_hidden": 80,
+  "bias": false,
+  "n_samples": 4096,
+  "n_chains": 1024,
+  "therm_sweeps": 20,
+  "batch_size": 4096,
+  "repeats": 10,
+  "warmup": 2,
+  "seed": 1234,
+  "netket_operators": [
+    "ising",
+    "local"
+  ],
+  "all_devices": false,
+  "date": "2026-10-22T14:05:26"
+}

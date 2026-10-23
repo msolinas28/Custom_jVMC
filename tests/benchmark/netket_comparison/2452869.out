@@ -1,0 +1,24 @@
+Lmod has detected the following error: These module(s) or extension(s) exist
+but cannot be loaded as requested: "Python/3.13.5"
+   Try: "module spider Python/3.13.5" to see how to load the module(s).
+
+
+
+=== jvmc ===
+Running in single-node mode (JVMC_USE_DISTRIBUTED not set)
+=== netket ===
+
+Median over 10 repetitions [s]
+                                      Sampling  Matrix elements       Evaluation            Total   Total/jVMC_exp      first calls
+jVMC_exp                                0.0494           0.0004           0.0043           0.0541             1.00             3.57
+NetKet, Ising (JAX)                     0.0476           0.0002           0.0039           0.0517             0.95             2.83
+NetKet, LocalOperator (JAX)             0.0476           0.0003           0.0072           0.0551             1.02             4.57
+
+Checks
+  samples on 1 device(s) in jVMC_exp, 1 device(s) in NetKet
+  same network: max |delta log(psi)| on 64 configurations = 1.0e-15
+  jVMC_exp                      E/N = -0.998379 +- 0.001714   acceptance = 0.996   network evaluations per sample in <H>: 80
+  NetKet, Ising (JAX)           E/N = -0.997527 +- 0.001699   acceptance = 0.996   network evaluations per sample in <H>: 82   |delta E| = 0.4 sigma
+  NetKet, LocalOperator (JAX)   E/N = -0.997527 +- 0.001699   acceptance = 0.996   network evaluations per sample in <H>: 82   |delta E| = 0.4 sigma
+
+Figure saved to /e/scratch/neuquass/solinas1/Custom_jVMC/tests/benchmark/netket_comparison/results_20261022_135808/netket_comparison.png

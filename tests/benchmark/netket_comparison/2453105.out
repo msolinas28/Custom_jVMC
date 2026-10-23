@@ -1,0 +1,51 @@
+Lmod has detected the following error: The following module(s) are unknown:
+"Python/3.13.5"
+
+Please check the spelling or version number. Also try "module spider ..."
+It is also possible your cache file is out-of-date; it may help to try:
+  $ module --ignore_cache load "Python/3.13.5"
+
+Also make sure that all modulefiles written in TCL start with the string
+#%Module
+
+
+
+=== jvmc ===
+Running in single-node mode (JVMC_USE_DISTRIBUTED not set)
+=== netket ===
+Traceback (most recent call last):
+  File "/e/scratch/neuquass/solinas1/Custom_jVMC/tests/benchmark/netket_comparison/compare_netket.py", line 541, in <module>
+    main()
+    ~~~~^^
+  File "/e/scratch/neuquass/solinas1/Custom_jVMC/tests/benchmark/netket_comparison/compare_netket.py", line 531, in main
+    run = subprocess.run(
+        [python, "-u", os.path.abspath(__file__), "--worker", worker, "--out-dir", out_dir],
+        env=child_env(args),
+    )
+  File "/e/software/default/stages/2026/software/Python/3.13.5-GCCcore-14.3.0/lib/python3.13/subprocess.py", line 554, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/e/software/default/stages/2026/software/Python/3.13.5-GCCcore-14.3.0/lib/python3.13/subprocess.py", line 1039, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                        pass_fds, cwd, env,
+                        ^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+                        gid, gids, uid, umask,
+                        ^^^^^^^^^^^^^^^^^^^^^^
+                        start_new_session, process_group)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/e/software/default/stages/2026/software/Python/3.13.5-GCCcore-14.3.0/lib/python3.13/subprocess.py", line 1857, in _execute_child
+    self._posix_spawn(args, executable, env, restore_signals, close_fds,
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                      p2cread, p2cwrite,
+                      ^^^^^^^^^^^^^^^^^^
+                      c2pread, c2pwrite,
+                      ^^^^^^^^^^^^^^^^^^
+                      errread, errwrite)
+                      ^^^^^^^^^^^^^^^^^^
+  File "/e/software/default/stages/2026/software/Python/3.13.5-GCCcore-14.3.0/lib/python3.13/subprocess.py", line 1801, in _posix_spawn
+    self.pid = os.posix_spawn(executable, args, env, **kwargs)
+               ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotADirectoryError: [Errno 20] Not a directory: '/e/scratch/neuquass/solinas1/env/nk_jvmc/bin/python'
+srun: error: jpbo-040-40: task 0: Exited with exit code 1

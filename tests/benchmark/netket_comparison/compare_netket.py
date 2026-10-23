@@ -3,6 +3,8 @@ sys.path.append(sys.path[0] + "/../../..")
 import argparse
 import json
 import os
+import os
+os.environ.setdefault("JVMC_BATCH_LOOP", "compiled")
 import platform
 import subprocess
 import time
