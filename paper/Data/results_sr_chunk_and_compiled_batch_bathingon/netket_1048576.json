@@ -1,0 +1,6 @@
+{
+  "series": "netket",
+  "n_samples": 1048576,
+  "oom": true,
+  "error": "NOT_FOUND: All configs failed during profiling or were excluded from selection."
+}
