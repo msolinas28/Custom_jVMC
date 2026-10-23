@@ -6,10 +6,10 @@ import numpy as np
 
 import plot_config as cfg
 
-DATA = cfg.DATA_DIR / "results_sr_chunk_and_compiled_batch_bathingon"
+DATA = cfg.DATA_DIR / "compare_netket_sr"
 SERIES = {
-    "jvmc-dense": ("jVMC_exp, dense Jacobian", cfg.COLORS["jvmc_dense"], "o"),
-    "jvmc-batched": ("jVMC_exp, batched Jacobian", cfg.COLORS["jvmc_batched"], "s"),
+    "jvmc-dense": ("jVMC, full Jacobian", cfg.COLORS["jvmc_dense"], "o"),
+    "jvmc-batched": ("jVMC, batched Jacobian", cfg.COLORS["jvmc_batched"], "s"),
     "netket": ("NetKet, VMC_SR", cfg.COLORS["netket"], "^"),
 }
 
@@ -46,9 +46,9 @@ ax_mem.annotate("batch size of the\nbatched Jacobian", (config["batch_size"], 0.
                 xytext=(-4, 0), textcoords="offset points", rotation=90, ha="right", va="center", color=cfg.COLORS["guide"])
 
 ax_mem.set_ylabel("Peak device memory [GB]")
-ax_mem.set_title("(a) Peak memory of the process", loc="left")
+ax_mem.set_title("(a)", loc="left")
 ax_time.set_ylabel("Time [s]")
-ax_time.set_title("(b) Time of one SR step", loc="left")
+ax_time.set_title("(b)", loc="left")
 for ax in (ax_mem, ax_time):
     ax.set_xscale("log", base=2)
     ax.set_xticks(2.0 ** np.arange(10, 21, 2))

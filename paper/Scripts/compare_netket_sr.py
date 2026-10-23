@@ -11,12 +11,12 @@ out-of-memory point. Every point writes <series>_<n_samples>.json (times, peak m
 update as update_<series>_<n_samples>.npy, which checks that both libraries give the same update.
 
 The results in Data/ were made on NVIDIA GH200 GPUs (jVMC_exp 1.5.8, jax 0.11.2, netket 3.22.4) through
-tests/benchmark/netket_comparison/send_job.sh, with 4 GPUs for the second run. The folder names record the
+tests/benchmark/netket_comparison/send_job.sh, with 4 GPUs for the second run. Both runs used these
 library settings: J^T J summed in chunks (JVMC_MATMUL_CHUNK_BYTES, default 1 GiB), compiled batch loop
 (JVMC_BATCH_LOOP=compiled), batched Jacobian on.
 
-    python compare_netket_sr.py --out-dir ../Data/results_sr_chunk_and_compiled_batch_bathingon
-    python compare_netket_sr.py --all-devices --out-dir ../Data/results_sr_chunk_and_compiled_batch_bathingon_4gpus
+    python compare_netket_sr.py --out-dir ../Data/compare_netket_sr
+    python compare_netket_sr.py --all-devices --out-dir ../Data/compare_netket_sr_4gpus
 """
 import sys
 sys.path.append(sys.path[0] + "/../..")

@@ -6,12 +6,11 @@ import numpy as np
 
 import plot_config as cfg
 
-DATA = cfg.DATA_DIR / "results_minsr_chunk_and_compiled_batch_bathingon"
+DATA = cfg.DATA_DIR / "compare_netket_minsr"
 SERIES = {
-    "jvmc-dense": ("jVMC_exp, dense Jacobian", cfg.COLORS["jvmc_dense"], "o"),
-    "jvmc-batched": ("jVMC_exp, batched Jacobian", cfg.COLORS["jvmc_batched"], "s"),
-    "netket": ("NetKet, NTK", cfg.COLORS["netket"], "^"),
-    "netket-onthefly": ("NetKet, NTK on the fly", cfg.COLORS["netket_onthefly"], "D"),
+    "jvmc-dense": ("jVMC, full Jacobian", cfg.COLORS["jvmc_dense"], "o"),
+    "jvmc-batched": ("jVMC, batched Jacobian", cfg.COLORS["jvmc_batched"], "s"),
+    "netket": ("NetKet, VMC_SR", cfg.COLORS["netket"], "^"),
 }
 
 cfg.setup()
@@ -25,7 +24,7 @@ measured = [p for pts in points.values() for p in pts if "times" in p]
 limit = measured[0]["bytes_limit"] / 1e9
 n_min = min(p["n_parameters"] for p in measured)
 
-fig, (ax_mem, ax_time) = plt.subplots(1, 2, figsize=(13, 5.3))
+fig, (ax_mem, ax_time) = plt.subplots(1, 2, figsize=(13, 5))
 
 for series, (label, color, marker) in SERIES.items():
     ok = [p for p in points[series] if "times" in p]
@@ -41,9 +40,9 @@ oom = [p["n_parameters"] for pts in points.values() for p in pts if p.get("oom")
 ax_mem.plot(oom, [limit] * len(oom), "x", color="k", ms=10, mew=2, label="out of memory")
 
 ax_mem.set_ylabel("Peak device memory [GB]")
-ax_mem.set_title("(a) Peak memory of the process", loc="left")
+ax_mem.set_title("(a)", loc="left")
 ax_time.set_ylabel("Time [s]")
-ax_time.set_title("(b) Time of one MinSR step", loc="left")
+ax_time.set_title("(b)", loc="left")
 for ax in (ax_mem, ax_time):
     ax.set_xscale("log", base=2)
     ax.set_xticks(2.0 ** np.arange(10, 21, 2))
@@ -51,7 +50,6 @@ for ax in (ax_mem, ax_time):
     ax.set_xlabel("Number of parameters")
     cfg.plain_log_labels(ax.yaxis)
 
-# Columns: jVMC_exp, NetKet, out of memory
-fig.legend(*ax_mem.get_legend_handles_labels(), loc="upper center", ncol=3, frameon=False)
-fig.tight_layout(rect=(0, 0, 1, 0.88))
+fig.legend(*ax_mem.get_legend_handles_labels(), loc="upper center", ncol=4, frameon=False)
+fig.tight_layout(rect=(0, 0, 1, 0.92))
 cfg.save(fig, "netket_comparison_minsr_1gpu")
