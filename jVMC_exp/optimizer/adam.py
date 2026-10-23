@@ -27,7 +27,7 @@ class Adam(AbstractOptimizer):
         return True
 
     def get_update(self, objective_function_out: ObjectiveFunctionOutput):
-        grad = 2 * jnp.real(objective_function_out.grad)
+        grad = jnp.real(objective_function_out.grad)
         update, self._opt_state = self._adam.update(grad, self._opt_state, self.psi.parameters_flat)
 
         return update
