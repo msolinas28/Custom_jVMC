@@ -31,4 +31,4 @@ class FullConfigurationState(nn.Module):
 		
 		idx = ((self.d**jnp.arange(self.L - 1, -1, -1)).dot(s)).astype(int)
 
-		return jnp.log(kernel[idx])
+		return jnp.log(kernel[idx] + self.delta)
