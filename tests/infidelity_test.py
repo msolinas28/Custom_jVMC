@@ -12,6 +12,7 @@ from jVMC_exp import global_defs
 from jVMC_exp.vqs import NQS
 from jVMC_exp.sampler import ExactSampler, MCSampler
 from jVMC_exp.objective_function import Infidelity
+from jVMC_exp.objective_function.infidelity import MovingAverage
 from jVMC_exp.util.util import matrix_to_jvmc_operator
 
 L = 4
@@ -122,6 +123,21 @@ class TestInfidelityValue(unittest.TestCase):
                     control_variate=control_variate
                 )
 
+    def test_adaptive_moving_average(self):
+        # The coefficient changes from call to call while the moving average fills up
+        sampler = ExactSampler(self.psi)
+        loss = Infidelity(
+            ExactSampler(self.chi), self.U, self.U_dag,
+            control_variate="adaptive", moving_average_width=3
+        )
+        exact = exact_infidelity(self.psi, self.chi, self.U_dense)
+        for _ in range(4):
+            self.assertAlmostEqual(loss(sampler).mean.real.item(), exact, places=10)
+
+    def test_conjugated_operator_without_operator(self):
+        with self.assertRaises(ValueError):
+            Infidelity(ExactSampler(self.chi), conjugated_operator=self.U_dag)
+
     def test_transformed_state(self):
         # A full configuration state holding U|chi> must have zero infidelity with U|chi>
         chi_v = state_vector(self.chi)
@@ -140,6 +156,14 @@ class TestInfidelityValue(unittest.TestCase):
         value = Infidelity(chi_sampler, self.U, self.U_dag)(psi_sampler).mean.real.item()
 
         self.assertAlmostEqual(value, exact_infidelity(self.psi, self.chi, self.U_dense), delta=0.02)
+
+class TestMovingAverage(unittest.TestCase):
+    def test_mean_of_last_values(self):
+        average = MovingAverage(width=3)
+        means = [float(average.update(x)) for x in range(1, 6)]
+
+        # The window starts filled with zeros
+        self.assertTrue(np.allclose(means, [1 / 3, 1, 2, 3, 4]))
 
 class TestInfidelityGradient(unittest.TestCase):
     """
