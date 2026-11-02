@@ -207,8 +207,10 @@ class NQS:
         if logarithmic:
             self.apply_fun = self.net.apply
         else:
-            def apply_fun(parameters, s, method=None):
-                return jnp.log(self.net.apply(parameters, s, method))
+            def apply_fun(parameters, s, *args, method=None, **kwargs):
+                out = self.net.apply(parameters, s, *args, method=method, **kwargs)
+
+                return jnp.log(out) if method is None else out
             self.apply_fun = apply_fun
         
         self.init_net(seed)
@@ -224,12 +226,7 @@ class NQS:
             lambda a, b: jnp.concatenate((a[:, :], 1.j * b[:, :]), axis=1), x, y
         )
         self._append_gradients_dict_jsh = jax.jit(
-            jax.shard_map(
-                self._append_gradients_dict, 
-                mesh=MESH, 
-                in_specs=(DEVICE_SPEC, DEVICE_SPEC), 
-                out_specs=DEVICE_SPEC
-            )
+            self._append_gradients_dict
         )
 
         self._frozen_params = None
@@ -265,6 +262,7 @@ class NQS:
             )
 
         if self._frozen_params is not None:
+            value = tree_map(lambda x: x, value)
             for frozen_path in self._frozen_params:
                 original = reduce(lambda d, key: d[key], frozen_path, self.params)
                 reduce(lambda d, k: d[k], frozen_path[:-1], value['params'])[frozen_path[-1]] = original
@@ -370,15 +368,13 @@ class NQS:
         """Shape of a configuration."""
         return self._sampleShape
 
-    def to_array(self, basis, *, normalize=True, log=True):
+    def to_array(self, basis, *, normalize=True):
         """
         Evaluate the variational state on an ordered computational basis.
 
         Args:
             * ``basis``: Ordered basis with shape ``(dimension, *sampleShape)``.
             * ``normalize``: Normalize the returned vector.
-            * ``log``: If ``True``, interpret the output of the state as logarithmic amplitudes and \
-              exponentiate it. If ``False``, use it as it is.
 
         Returns:
             State vector with shape ``(dimension,)``.
@@ -401,12 +397,9 @@ class NQS:
                 "the basis dimension."
             )
 
-        if log:
-            if normalize:
-                values -= jnp.max(jnp.real(values))
-            statevector = jnp.exp(values)
-        else:
-            statevector = values
+        if normalize:
+            values -= jnp.max(jnp.real(values))
+        statevector = jnp.exp(values)
 
         if normalize:
             norm = jnp.linalg.norm(statevector)
@@ -614,7 +607,9 @@ class NQS:
             iterated more than once.
         """
         if self.gradientBatchSize == self.batchSize:
-            return self._lazy_gradients_sh(s, parameters=self.grad_parameters, batch_size=self.batchSize)
+            return self._lazy_gradients_sh(
+                s, parameters=self.grad_parameters, batch_size=self.batchSize
+            )
 
         s = jax.device_put(pad_to_devices(s), DEVICE_SHARDING)
         layout = BatchLayout(s.shape[0], min(self.gradientBatchSize, s.shape[0]))
@@ -623,13 +618,17 @@ class NQS:
         def blocks():
             for i in range(layout.n_batches):
                 samples = layout.trim(layout.take(s, i), i)
-                yield self._gradients_sh(samples, parameters=parameters, batch_size=self.batchSize)
+                yield self._gradients_sh(
+                    samples, parameters=parameters, batch_size=self.batchSize
+                ).astype(self.out_dtype)
 
         return SizedIterable(blocks, layout.n_batches, layout.batch_size, layout)
     
     @sharded(automatic_sharding=True, yield_iter=True)
     def _lazy_gradients_sh(self, s, *, parameters, batch_size):
-        return self.flat_gradient_function(self.apply_fun, parameters, s)
+        return self.flat_gradient_function(
+            self.apply_fun, parameters, s
+        ).astype(self.out_dtype)
     
     def gradients_dict(self, s):
         """
@@ -670,7 +669,7 @@ class NQS:
             key = format_key(key) 
             if len(key.shape) > 1:
                 key = key[0]
-            keys = jax.device_put(broadcast_split_key(key, numSamples), DEVICE_SHARDING)
+            keys = broadcast_split_key(key, numSamples)
 
             return self._sample(keys, parameters=self.sampler_parameters, batch_size=self.batchSize)
 

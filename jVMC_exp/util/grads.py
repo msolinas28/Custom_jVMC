@@ -57,19 +57,34 @@ def dict_gradient_real(fun, params, arg):
 
     return g
 
+def dict_gradient_nonholo(fun, params, arg):
+    split = lambda x: jnp.concatenate([jnp.real(x.ravel()), -jnp.imag(x.ravel())])
+    gr = tree_map(split, grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"])
+    gi = tree_map(split, grad(lambda p, y: jnp.imag(fun(p, y)))(params, arg)["params"])
+
+    return tree_map(lambda x, y: x + 1.j * y, gr, gi)
+
 def pick_gradient(fn, params, single_input):
     dtypes = [a.dtype for a in tree_flatten(params)[0]]
     if not all(d == dtypes[0] for d in dtypes):
         raise Exception("Network uses different parameter data types. This is not supported.")
 
     real_params = jnp.issubdtype(dtypes[0], jnp.floating)
-
-    def make_flat(t):
-        return jnp.concatenate([p.ravel() for p in tree_flatten(t)[0]])
-    
-    grads_r = make_flat(jax.grad(lambda a, b: jnp.real(fn(a, b)))(params, single_input)["params"])
-    grads_i = make_flat(jax.grad(lambda a, b: jnp.imag(fn(a, b)))(params, single_input)["params"])
-    holomorphic = jnp.isclose(jnp.linalg.norm(grads_r - 1.j * grads_i) / grads_r.shape[0], 0.0, atol=1e-14)
+    if real_params:
+        holomorphic = False
+    else:
+        def make_flat(t):
+            return jnp.concatenate([p.ravel() for p in tree_flatten(t)[0]])
+        
+        grads_r = make_flat(
+            jax.grad(lambda a, b: jnp.real(fn(a, b)))(params, single_input)["params"]
+        )
+        grads_i = make_flat(
+            jax.grad(lambda a, b: jnp.imag(fn(a, b)))(params, single_input)["params"]
+        )
+        holomorphic = jnp.isclose(
+            jnp.linalg.norm(grads_r - 1.j * grads_i) / grads_r.shape[0], 0.0, atol=1e-14
+        )
 
     if holomorphic:
        return real_params, holomorphic, flat_gradient_holo, dict_gradient_real
@@ -81,4 +96,4 @@ def pick_gradient(fn, params, single_input):
 
         return real_params, holomorphic, flat_gradient, dict_gradient
     else:
-        return real_params, holomorphic, flat_gradient_nonholo, dict_gradient_real
+        return real_params, holomorphic, flat_gradient_nonholo, dict_gradient_nonholo
