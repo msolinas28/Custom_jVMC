@@ -28,6 +28,7 @@
     mpi
     stats
     util
+    global_defs
 
 .. toctree::
     :hidden:

@@ -11,16 +11,16 @@ import math
 
 from jVMC_exp import global_defs
 
+if global_defs.USE_DISTRIBUTED and not jax.distributed.is_initialized():
+    jax.distributed.initialize()
+global_defs.USE_DISTRIBUTED = jax.distributed.is_initialized()
+
 if global_defs.USE_DISTRIBUTED:
-    try:
-        jax.distributed.initialize()
-        num_processes = jax.process_count()
-        num_devices = jax.device_count()
-        if jax.process_index() == 0:
-            print(f"JAX distributed initialized: {num_processes} processes and {num_devices} devices.")
-    except Exception as e:
-        if jax.process_index() == 0:
-            print(f"Failed to initialize JAX distributed: {e}")
+    if jax.process_index() == 0:
+        print(
+            f"JAX distributed initialized: {jax.process_count()} processes "
+            f"and {jax.device_count()} devices."
+        )
 else:
     if jax.process_index() == 0:
         print("Running in single-node mode (JVMC_USE_DISTRIBUTED not set)")
