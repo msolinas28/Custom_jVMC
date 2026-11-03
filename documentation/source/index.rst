@@ -23,6 +23,7 @@
 
     vqs
     operator
+    geometry
     sampler
     nets
     mpi

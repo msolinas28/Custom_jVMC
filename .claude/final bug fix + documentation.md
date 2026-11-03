@@ -102,13 +102,14 @@ user fixes needed a correction (e.g. `jnp.prod` on a tuple, a MALA wrap at the w
 | `sampler/` | done, `sampler.rst` rewritten | reported, most fixed | committed (`f61e78f`) |
 | `vqs.py` | done, `vqs.rst` rewritten | reported, most fixed | committed (`f2f67ce`, `76a82fc`) |
 | `global_defs.py` | done, new `global_defs.rst` in the toctree | reported, fixed | committed (`d52b4e9`) |
-| `operator/` | done, `operator.rst` rewritten | reported; transpose bug deferred | **uncommitted** on 2026-11-03 |
+| `operator/` | done, `operator.rst` rewritten | reported; transpose bug deferred | committed (`73c2f1b`) |
+| `geometry.py` | done, new `geometry.rst` in the toctree | reported, 1/2/5/6 fixed, new `tests/geometry_test.py` | **uncommitted** |
 
-Still to do: `geometry.py`, `sharding_config.py`, `stats.py`, `stepper.py`, `nets/`,
+Still to do: `sharding_config.py`, `stats.py`, `stepper.py`, `nets/`,
 `objective_function/`, `optimizer/`, `solver/`, `symmetry/`, `util/`, and the pages `nets.rst`,
 `stats.rst`, `util.rst`, `mpi.rst`, `parallelism.rst`, `index.rst`, `examples.rst`.
 
-### Operator folder, changes of 2026-11-03 (uncommitted)
+### Operator folder, changes of 2026-11-03
 
 - Docstrings for every public class/method/property in `operator/`; `operator.rst` rewritten
   (the old page described `BranchFreeOperator`, `Sx`, `scal_opstr`, POVM, none of which exist).
@@ -118,6 +119,16 @@ Still to do: `geometry.py`, `sharding_config.py`, `stats.py`, `stepper.py`, `net
 - `raise NotImplemented` → `return NotImplemented` (12 places, discrete and continuous `base.py`).
 - By the user: `to_dense` passes `zero_tolerance`; continuous `get_O_loc` uses
   `psi.eval_parameters`.
+
+### Geometry, changes of 2026-11-03 (uncommitted)
+
+- Docstrings for all of `geometry.py`; new `geometry.rst`, added to the toctree after `operator`.
+- `uniform_populate`: `jnp.repeat` → `jnp.tile` (start positions were wrong when extents differ).
+- `__eq__` also compares the class; `__hash__` added.
+- `PBC`: broadcast when `np.ndim(PBC) == 0`, stored as `tuple(bool(p) for p in PBC)`, so lists and
+  NumPy / JAX arrays work (a list used to become a tuple of lists).
+- Abstract `domain` is now an abstract property; abstract `uniform_populate(key, shape, dtype)`.
+- New `tests/geometry_test.py` (4 tests, all fail on the old code).
 
 ## Open items
 
@@ -129,11 +140,15 @@ Still to do: `geometry.py`, `sharding_config.py`, `stats.py`, `stepper.py`, `net
 
 ### Waiting for a decision
 
+
 - `global_defs`: `DT_OUT_REAL = f16 / bf16` fails in `solver/util.py` `diagonalize`
   (`jnp.linalg.eigh` has no LAPACK routine for them; the `except` only catches `ValueError`).
   `CG` works. Suggested: promote to at least `f32` in `diagonalize` (not tested).
 
 ### Still open in folders already done
+
+- `geometry.py` (left by the user): lengths of `PBC` / `extent` not checked against `n_dim`;
+  `count_particles_in_cell` counts particles outside an open domain in the edge cells (documented).
 
 User chose to leave these, or will patch them in a later release:
 
@@ -169,8 +184,6 @@ User chose to leave these, or will patch them in a later release:
 - `optimizer/base.py`: the reweighting between substeps uses a hard-coded factor
   `2 * jnp.real(logPsi - logPsi0)`, i.e. assumes `logProbFactor = 0.5`; also check the weights are
   normalized.
-- `geometry.py`: `HyperRectangle.uniform_populate` uses `jnp.repeat` where `apply_PBC` uses
-  `jnp.tile`, so starting positions are wrong when the extents differ between dimensions.
 - `util/util.py`: `measure()` passes `num_samples` to the sampler; with `ExactSampler` it ends up
   in `get_O_loc` kwargs (ignored by real operators).
 - `solver/util.py` imports `USE_DISTRIBUTED` by name; fine now that it can only change at import
