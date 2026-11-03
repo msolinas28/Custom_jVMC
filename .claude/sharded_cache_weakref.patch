@@ -1,0 +1,132 @@
+--- a/jVMC_exp/sharding_config.py
++++ b/jVMC_exp/sharding_config.py
+@@ -27,6 +27,8 @@
+ from dataclasses import dataclass
+ from typing import Iterator, ParamSpec, TypeVar, Callable
+ import math
++import inspect
++import weakref
+ 
+ from jVMC_exp import global_defs
+ 
+@@ -334,6 +336,22 @@
+     def __iter__(self) -> Iterator:
+         return self.reusable_iterable()
+ 
++def _weak(value):
++    """
++    Weak reference to a static keyword argument, so that the cache of a decorated method does
++    not keep it alive, or the value itself if it has no weak references (numbers, strings, ...).
++    """
++    try:
++        return weakref.WeakMethod(value) if inspect.ismethod(value) else weakref.ref(value)
++    except TypeError:
++        return value
++
++def _drop_cache_entry(instance_ref, cache_key):
++    """Remove an entry of the cache of a decorated method, if the instance still exists."""
++    instance = instance_ref()
++    if instance is not None:
++        instance._sharded_cache.pop(cache_key, None)
++
+ Params = ParamSpec('Params')
+ R = TypeVar('R')
+ 
+@@ -503,7 +521,7 @@
+     def __call__(self, method: Callable[Params, R]) -> Callable[Params, R]:
+         @wraps(method)
+         def wrapper(instance, *args, **kwargs):
+-            jsh_fn = self._get_jsh(instance, method, args, kwargs)
++            jsh_fn, loop_fn = self._get_jsh(instance, method, args, kwargs)
+             batch_size = kwargs['batch_size']
+             kwargs = {k: v for k, v in kwargs.items() if k not in self.static_kwarg_names}
+             num_samples = args[0].shape[0]
+@@ -546,7 +564,7 @@
+                     layout=layout
+                 )
+ 
+-            out = self._call_local(layout, kwargs, args, jsh_fn)
++            out = self._call_local(layout, kwargs, args, jsh_fn, loop_fn)
+             if num_padded != num_samples:
+                 # This will remplicate the output, but it's not a problem, 
+                 # since the input was not divisible by the number of devices anyways.
+@@ -560,9 +578,11 @@
+         if not hasattr(instance, '_sharded_cache'):
+             instance._sharded_cache = {}
+ 
+-        # Static kwargs are baked into the compiled function, so they are part of the key
++        # Static kwargs are baked into the compiled function, so they are part of the key. Objects
++        # are held by weak references, and their entry is removed when they are deleted
+         static_kwargs = {k: v for k, v in kwargs.items() if k in self.static_kwarg_names}
+-        cache_key = (method.__name__, tuple(sorted(static_kwargs.items())))
++        static_refs = {k: _weak(v) for k, v in static_kwargs.items()}
++        cache_key = (method.__name__, tuple(sorted(static_refs.items())))
+ 
+         if cache_key not in instance._sharded_cache:
+             if self.in_specs is None:
+@@ -584,8 +604,24 @@
+                 raise ValueError(f"The batch size ({kwargs['batch_size']}) "
+                                  f"has to be divisible by the number of devices ({MESH.size})")
+ 
+-            base_fn = lambda kw, *a: method(instance, *a, **kw, **static_kwargs)
+-            instance._sharded_cache[cache_key] = self._create_sharded_fn(base_fn)
++            def base_fn(kw, *a):
++                static = {k: r() if isinstance(r, weakref.ref) else r for k, r in static_refs.items()}
++                return method(instance, *a, **kw, **static)
++
++            jsh_fn = self._create_sharded_fn(base_fn)
++            # The compiled loop over the batches is kept with jsh_fn, so that both are freed together.
++            # A closure, not functools.partial: jax.jit keeps the signature of the function in a
++            # global cache, and the signature of a partial holds jsh_fn as a default value
++            @jax.jit(static_argnames=("layout",))
++            def loop_fn(kw, a, *, layout):
++                return _call_local_loop(kw, a, layout=layout, jsh_fn=jsh_fn)
++            instance._sharded_cache[cache_key] = (jsh_fn, loop_fn)
++
++            instance_ref = weakref.ref(instance)
++            for v, r in zip(static_kwargs.values(), static_refs.values()):
++                if isinstance(r, weakref.ref):
++                    owner = v.__self__ if inspect.ismethod(v) else v
++                    weakref.finalize(owner, _drop_cache_entry, instance_ref, cache_key)
+ 
+         return instance._sharded_cache[cache_key]
+ 
+@@ -624,7 +660,7 @@
+                 jsh_fn(kwargs, *(layout.take(a, i) for a in args))
+             )
+ 
+-    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
++    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn, loop_fn):
+         """
+         Evaluates all batches of ``layout`` and writes their results in place into
+         preallocated outputs, which keep the order of the input samples.
+@@ -648,16 +684,13 @@
+     Like ``sharded_python``, but the loop over the batches of a call runs in a single compiled \
+     function, which is compiled once for every decorated method and ``BatchLayout``.
+     """
+-    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
++    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn, loop_fn):
+         if layout.n_batches == 1:
+             return next(self._iter_local_batches(layout, kwargs, args, jsh_fn))
+ 
+-        return jax.block_until_ready(
+-            _jitted_call_local(kwargs, args, layout=layout, jsh_fn=jsh_fn)
+-        )
++        return jax.block_until_ready(loop_fn(kwargs, args, layout=layout))
+ 
+-@jax.jit(static_argnames=("layout", "jsh_fn"))
+-def _jitted_call_local(kwargs, args, *, layout: BatchLayout, jsh_fn):
++def _call_local_loop(kwargs, args, *, layout: BatchLayout, jsh_fn):
+     """
+     The loop of `sharded._call_local` as a compiled function. It has at least two batches.
+     The last batch is written separately, since it can have fewer rows than the others.
+@@ -707,5 +740,5 @@
+ 
+             log_psi = Model(net).evaluate(s, parameters=parameters, batch_size=64)
+     """
+-    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
+-        return _BATCH_LOOPS[global_defs.BATCH_LOOP](self, layout, kwargs, args, jsh_fn)
+\ No newline at end of file
++    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn, loop_fn):
++        return _BATCH_LOOPS[global_defs.BATCH_LOOP](self, layout, kwargs, args, jsh_fn, loop_fn)
+\ No newline at end of file

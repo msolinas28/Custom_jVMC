@@ -103,11 +103,12 @@ user fixes needed a correction (e.g. `jnp.prod` on a tuple, a MALA wrap at the w
 | `vqs.py` | done, `vqs.rst` rewritten | reported, most fixed | committed (`f2f67ce`, `76a82fc`) |
 | `global_defs.py` | done, new `global_defs.rst` in the toctree | reported, fixed | committed (`d52b4e9`) |
 | `operator/` | done, `operator.rst` rewritten | reported; transpose bug deferred | committed (`73c2f1b`) |
-| `geometry.py` | done, new `geometry.rst` in the toctree | reported, 1/2/5/6 fixed, new `tests/geometry_test.py` | **uncommitted** |
+| `geometry.py` | done, new `geometry.rst` in the toctree | reported, 1/2/5/6 fixed, new `tests/geometry_test.py` | committed (`da8264f`) |
+| `sharding_config.py` | done, new `sharding_config.rst` in the toctree, `parallelism.rst` rewritten | reported, 3/6 fixed, 1 deferred (patch ready) | **uncommitted** |
 
-Still to do: `sharding_config.py`, `stats.py`, `stepper.py`, `nets/`,
+Still to do: `stats.py`, `stepper.py`, `nets/`,
 `objective_function/`, `optimizer/`, `solver/`, `symmetry/`, `util/`, and the pages `nets.rst`,
-`stats.rst`, `util.rst`, `mpi.rst`, `parallelism.rst`, `index.rst`, `examples.rst`.
+`stats.rst`, `util.rst`, `mpi.rst`, `index.rst`, `examples.rst`.
 
 ### Operator folder, changes of 2026-11-03
 
@@ -120,7 +121,7 @@ Still to do: `sharding_config.py`, `stats.py`, `stepper.py`, `nets/`,
 - By the user: `to_dense` passes `zero_tolerance`; continuous `get_O_loc` uses
   `psi.eval_parameters`.
 
-### Geometry, changes of 2026-11-03 (uncommitted)
+### Geometry, changes of 2026-11-03
 
 - Docstrings for all of `geometry.py`; new `geometry.rst`, added to the toctree after `operator`.
 - `uniform_populate`: `jnp.repeat` → `jnp.tile` (start positions were wrong when extents differ).
@@ -130,9 +131,27 @@ Still to do: `sharding_config.py`, `stats.py`, `stepper.py`, `nets/`,
 - Abstract `domain` is now an abstract property; abstract `uniform_populate(key, shape, dtype)`.
 - New `tests/geometry_test.py` (4 tests, all fail on the old code).
 
+### Sharding config, changes of 2026-11-03 (uncommitted)
+
+- Docstrings and `#:` comments for all of `sharding_config.py`; new `sharding_config.rst` in the
+  toctree; `parallelism.rst` rewritten (old one described pmap and MPI).
+- Batched `sharded` calls raise `ValueError` if the positional arguments have different lengths
+  (were silently zero padded).
+- `ParamSpec` renamed `Params`: `sharding_config.P` is `PartitionSpec` again.
+- Two tests added to `tests/batch_layout_test.py`.
+
 ## Open items
 
 ### Deferred: important
+
+- **`sharded` caches keep objects alive** (user: later release). Static kwargs (`psi`, `operator`)
+  in `instance._sharded_cache` keep every NQS alive while the decorated instance lives; with
+  `BATCH_LOOP="compiled"` and more than one batch, nothing is ever freed, because the module-level
+  `_jitted_call_local` takes `jsh_fn` as a static argument (JAX's global cache keeps it). Tested
+  patch: `.claude/sharded_cache_weakref.patch` (weak references to static objects with
+  `weakref.finalize` dropping the entry, compiled loop stored next to `jsh_fn` on the instance as
+  a closure; a `functools.partial` would leak through JAX's `_infer_params_cached`, whose
+  signature keeps `jsh_fn` as a default).
 
 - **Discrete operators: `get_O_loc` and `Infidelity` measure the transpose of the operator.**
   Full analysis, tested patch and timings in `.claude/operator_transpose_bug.md`. Until it is
@@ -140,12 +159,23 @@ Still to do: `sharding_config.py`, `stats.py`, `stepper.py`, `nets/`,
 
 ### Waiting for a decision
 
+- `sharding_config.py`: user did not answer yet whether to delete the `scaled()` TODO comment
+  (answered in its docstring) and whether to drop `mpi.rst` from the toctree.
+
 
 - `global_defs`: `DT_OUT_REAL = f16 / bf16` fails in `solver/util.py` `diagonalize`
   (`jnp.linalg.eigh` has no LAPACK routine for them; the `except` only catches `ValueError`).
   `CG` works. Suggested: promote to at least `f32` in `diagonalize` (not tested).
 
 ### Still open in folders already done
+
+- `sharding_config.py` (left by the user): `batch_size=None` fails when the number of samples is
+  not a multiple of the devices; `broadcast_split_key` only supports raw threefry keys (intended);
+  `static_argnums` unusable; `yield_iter` + custom specs raises with `batch_size=None`. Cosmetic:
+  KeyError for a missing `batch_size`, import message says "not set" when set to `false`.
+  Multi-process can be tested on CPU: 2 processes with
+  `jax.config.update("jax_cpu_collectives_implementation", "gloo")` and
+  `jax.distributed.initialize("127.0.0.1:<port>", 2, pid)` before importing the library.
 
 - `geometry.py` (left by the user): lengths of `PBC` / `extent` not checked against `n_dim`;
   `count_particles_in_cell` counts particles outside an open domain in the edge cells (documented).
@@ -179,6 +209,11 @@ User chose to leave these, or will patch them in a later release:
 
 ### Noticed while working on other folders, to check when their turn comes
 
+- `stats.py`: on 3 devices, 8 `stats_test` tests (`act` / `rhat`) fail with e.g. "cannot reshape
+  array of shape (2049, 1) into shape (4, 512)": the samples are padded to a multiple of the
+  devices and then reshaped per chain. Fails on the committed code too.
+- Tests: on 3 devices, 32 tests in operator/vqs/minsr/objective_function fail only because their
+  batch sizes are powers of 2 ("has to be divisible by the number of devices").
 - `objective_function/infidelity.py`: `_get_f_loc_sh` calls `operator._get_conn_elements(s, {})`,
   so operators with callable (time-dependent) prefactors get no keyword arguments.
 - `optimizer/base.py`: the reweighting between substeps uses a hard-coded factor

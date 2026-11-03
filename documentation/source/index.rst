@@ -30,6 +30,7 @@
     stats
     util
     global_defs
+    sharding_config
 
 .. toctree::
     :hidden:
