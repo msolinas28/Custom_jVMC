@@ -1,0 +1,179 @@
+# Final bug fix + documentation
+
+Handover for continuing the work in a new chat. Last updated 2026-11-03.
+
+## Goal
+
+Before the release, go through the library one folder (or module) at a time and, for each one:
+
+1. Update the documentation: docstrings in the code and the matching Sphinx page in
+   `documentation/source/`.
+2. Look for bugs and report them **in the chat**, never in the documentation.
+
+The user then answers point by point: "fix it", "leave it", "I fixed it" (verify it), or a
+question. Only change code when asked; answer questions with snippets that were tested on a
+scratch copy. The user commits after each folder.
+
+## Procedure for one folder
+
+1. Read every file of the folder, its Sphinx page, its tests, and the call sites in the rest of
+   the library (`grep`). Check `git status` / `git log` first: the user edits between rounds.
+2. Write a reproduction script in the scratchpad for every suspected bug and run it on CPU with
+   1 and 3 devices. Only report what was run, or say clearly that something was read, not run.
+   Compare against exact results (dense matrices, `ExactSampler`, analytic values) wherever
+   possible.
+3. Update the documentation (see conventions below), then check that the code is unchanged apart
+   from docstrings with the AST script below.
+4. Rewrite or create the Sphinx page and build it.
+5. Run the related tests.
+6. Report: documentation summary, then bugs ranked by severity with file and line, then what was
+   checked and found correct.
+
+When the user asks to fix something: fix it, add a test when the fix changes behaviour, rerun the
+tests, and say what changed. When the user says "I fixed it": verify it by running, since several
+user fixes needed a correction (e.g. `jnp.prod` on a tuple, a MALA wrap at the wrong point,
+`to_array` keeping the wrong branch, `.astype` on a `SizedIterable`).
+
+## Documentation conventions
+
+- Sphinx has **no napoleon** (`documentation/source/conf.py`), so no NumPy-style `Parameters` /
+  `Returns` sections. Use the style of `vqs.py`:
+
+  ```
+  Args:
+      * ``name``: Description, continued on the next line with a trailing \
+        backslash and aligned indentation.
+
+  Returns:
+      Description.
+  ```
+
+- Docstrings are normal (non-raw) strings: math needs double backslashes, e.g.
+  ``:math:`\\psi(s)` ``.
+- Module constants: document with `#:` comments directly above the assignment (autodoc picks
+  them up). Module docstrings for modules with configuration.
+- **No bugs in the documentation**: no `.. warning::` blocks or "known issue" notes. Docstrings
+  describe the intended contract. Where a convention is itself in question, describe what the
+  object does in neutral terms (e.g. "maps the local state 0 to 1"). This is also saved in the
+  auto-memory (`no-bugs-in-docs`).
+- Sphinx pages use full paths, e.g. `.. autoclass:: jVMC_exp.operator.discrete.branch_free.SigmaX`.
+  `automodule:: jVMC_exp.sampler` alone shows nothing, because the classes are imported into the
+  package. Many old pages still point at `jVMC.*` and fail to import.
+- Keep the user's wording where it is still correct; match the surrounding style.
+
+## Tools and commands
+
+- Python with JAX: `~/venv/jVMC_new/bin/python` (jax 0.10.1). The system `python3` has no JAX
+  and is only good for AST checks and text edits.
+- Always set `JAX_PLATFORMS=cpu`; simulate devices with
+  `XLA_FLAGS=--xla_force_host_platform_device_count=3`, and run scripts with
+  `PYTHONPATH=<repo>`.
+- Run test suites **one at a time**: two suites in parallel were killed for lack of memory
+  (15 GB machine).
+- Scratch copies for prototypes: `cp -r jVMC_exp tests pytest.ini <scratch>/trial/`, patch,
+  then run with `PYTHONPATH=<scratch>/trial`. The scratchpad has been wiped between sessions:
+  anything worth keeping goes in `.claude/`.
+- Sphinx is not installed in the venvs. Install it into the scratchpad only:
+  `~/venv/jVMC_new/bin/pip install -q --target <scratch>/sphinxdeps sphinx sphinx_rtd_theme mock`,
+  then build one page from `documentation/source`:
+  `PYTHONPATH=<scratch>/sphinxdeps JAX_PLATFORMS=cpu ~/venv/jVMC_new/bin/python -m sphinx -b html -E -d <scratch>/doctrees . <scratch>/html <page>.rst`.
+  Check the log for lines mentioning the page and count `system-message` in the HTML.
+- Code unchanged apart from docstrings (`#:` comments don't appear in the AST anyway):
+
+  ```python
+  import ast, subprocess
+  def strip(src):
+      tree = ast.parse(src)
+      for n in ast.walk(tree):
+          if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Module)) and n.body \
+                  and isinstance(n.body[0], ast.Expr) \
+                  and isinstance(getattr(n.body[0], "value", None), ast.Constant) \
+                  and isinstance(n.body[0].value.value, str):
+              n.body = n.body[1:] or [ast.Pass()]
+      return ast.dump(tree)
+  old = subprocess.run(["git", "show", f"HEAD:{p}"], capture_output=True, text=True).stdout
+  print(strip(old) == strip(open(p).read()))
+  ```
+
+## Progress
+
+| Folder / module | Docs | Bugs | State |
+|---|---|---|---|
+| `sampler/` | done, `sampler.rst` rewritten | reported, most fixed | committed (`f61e78f`) |
+| `vqs.py` | done, `vqs.rst` rewritten | reported, most fixed | committed (`f2f67ce`, `76a82fc`) |
+| `global_defs.py` | done, new `global_defs.rst` in the toctree | reported, fixed | committed (`d52b4e9`) |
+| `operator/` | done, `operator.rst` rewritten | reported; transpose bug deferred | **uncommitted** on 2026-11-03 |
+
+Still to do: `geometry.py`, `sharding_config.py`, `stats.py`, `stepper.py`, `nets/`,
+`objective_function/`, `optimizer/`, `solver/`, `symmetry/`, `util/`, and the pages `nets.rst`,
+`stats.rst`, `util.rst`, `mpi.rst`, `parallelism.rst`, `index.rst`, `examples.rst`.
+
+### Operator folder, changes of 2026-11-03 (uncommitted)
+
+- Docstrings for every public class/method/property in `operator/`; `operator.rst` rewritten
+  (the old page described `BranchFreeOperator`, `Sx`, `scal_opstr`, POVM, none of which exist).
+- `SigmaPlus` and `SigmaMinus` swapped: they were σ⁻ and σ⁺ with respect to `SigmaZ` (state 0 =
+  up). `test_repeated_sites_dense_matrix` updated, `test_pauli_and_ladder_operators_dense_matrix`
+  added.
+- `raise NotImplemented` → `return NotImplemented` (12 places, discrete and continuous `base.py`).
+- By the user: `to_dense` passes `zero_tolerance`; continuous `get_O_loc` uses
+  `psi.eval_parameters`.
+
+## Open items
+
+### Deferred: important
+
+- **Discrete operators: `get_O_loc` and `Infidelity` measure the transpose of the operator.**
+  Full analysis, tested patch and timings in `.claude/operator_transpose_bug.md`. Until it is
+  fixed, the sampler measures ⟨σ⁻⟩ for `SigmaPlus`.
+
+### Waiting for a decision
+
+- `global_defs`: `DT_OUT_REAL = f16 / bf16` fails in `solver/util.py` `diagonalize`
+  (`jnp.linalg.eigh` has no LAPACK routine for them; the `except` only catches `ValueError`).
+  `CG` works. Suggested: promote to at least `f32` in `diagonalize` (not tested).
+
+### Still open in folders already done
+
+User chose to leave these, or will patch them in a later release:
+
+- `sampler/propose.py`: `POVMOutcome` crashes (update has shape `(1,)`) and its `% 4` binds to the
+  random number (outcomes 4, 5 reachable). The user plans to remove POVM.
+- `sampler/mc_sampler.py`: `CutoffSampler` with an `eval_ratio` net raises `UnboundLocalError`
+  (`get_ratio` only defined in the `else` branch). Its docstring still has a `.. warning::` from
+  the first round.
+- `sampler/exact_sampler.py`: docstring still has a `.. warning::` about device divisibility from
+  the first round, although `get_probabilities` no longer uses `shard_map`. Check and remove.
+- `sampler/base.py`: `sampler_state` setter restores weights but not samples / `logPsi`
+  (mismatched lengths possible); MC weights overflow to NaN for `mu < 2` with large `|log ψ|`
+  (`CutoffSampler` already subtracts the max); `__call__` with `num_samples` resamples every
+  call; `reset(key)` doesn't restart the chains.
+- `sampler/propose.py`: `MALA(appy_fun=...)` typo in the keyword; one RWM/MALA proposer can't be
+  shared by samplers with different `numChains`.
+- `vqs.py`: variables outside the `params` collection unsupported (documented as a requirement);
+  `frozen_parameters` path semantics and frozen parameters still in the gradients (user will
+  patch later); parameters committed to a single device fail on several devices (left).
+- `global_defs`: `MATMUL_CHUNK_BYTES` is fixed at compile time (documented); its env variable
+  rejects `2**30` / `1e9`.
+- `operator/`: Jordan-Wigner sign counts non-fermionic sites (documented); `CoulombInteraction`
+  rejects a list of charges, and a scalar charge `q` scales by `q` while an array scales by
+  `q_i q_j`; `ParticleDensity` default `linear_partition=(10, 10)` only fits 2D;
+  `laplacian_mode="forward"` accepted but raises at evaluation (`_frwrd_lap_fix.py` needs
+  `fwdlap`, not a dependency); `0 - op` raises `NotImplementedError` while `0 + op` works;
+  `examples/ex5`, `ex6` use the removed POVM classes (user will remove POVM).
+
+### Noticed while working on other folders, to check when their turn comes
+
+- `objective_function/infidelity.py`: `_get_f_loc_sh` calls `operator._get_conn_elements(s, {})`,
+  so operators with callable (time-dependent) prefactors get no keyword arguments.
+- `optimizer/base.py`: the reweighting between substeps uses a hard-coded factor
+  `2 * jnp.real(logPsi - logPsi0)`, i.e. assumes `logProbFactor = 0.5`; also check the weights are
+  normalized.
+- `geometry.py`: `HyperRectangle.uniform_populate` uses `jnp.repeat` where `apply_PBC` uses
+  `jnp.tile`, so starting positions are wrong when the extents differ between dimensions.
+- `util/util.py`: `measure()` passes `num_samples` to the sampler; with `ExactSampler` it ends up
+  in `get_O_loc` kwargs (ignored by real operators).
+- `solver/util.py` imports `USE_DISTRIBUTED` by name; fine now that it can only change at import
+  (`sharding_config` sets it from `jax.distributed.is_initialized()`).
+- Docs: `parallelism.rst` describes `global_defs.set_pmap_devices()` and MPI, which no longer
+  exist; `mpi.rst` points at `jVMC.mpi_wrapper`; `nets.rst`, `stats.rst`, `util.rst` use `jVMC.*`.
