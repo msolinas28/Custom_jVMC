@@ -25,6 +25,7 @@
     operator
     geometry
     sampler
+    objective_function
     nets
     symmetry
     mpi

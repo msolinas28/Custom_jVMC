@@ -109,13 +109,39 @@ user fixes needed a correction (e.g. `jnp.prod` on a tuple, a MALA wrap at the w
 | `geometry.py` | done, new `geometry.rst` in the toctree | reported, 1/2/5/6 fixed, new `tests/geometry_test.py` | committed (`da8264f`) |
 | `sharding_config.py` | done, new `sharding_config.rst` in the toctree, `parallelism.rst` rewritten | reported, 3/6 fixed, 1 deferred (patch ready) | committed (`323ebd1`) |
 | `stats.py` | done, `stats.rst` rewritten | reported, 1-4 fixed (2-4 by the user), new AR(1) test | committed (`aa6544d`) |
-| `symmetry/` | done, new `symmetry.rst` in the toctree after `nets` | reported, 2 fixed (+2 tests), rest left | **uncommitted** |
+| `symmetry/` | done, new `symmetry.rst` in the toctree after `nets` | reported, 2 fixed (+2 tests), rest left | committed (`aaf56e1`) |
+| `objective_function/` | done, new `objective_function.rst` in the toctree after `sampler` | reported, 1 fixed by the user (corrected), new test, rest left | **uncommitted** |
 
 Still to do: `stepper.py`, `nets/`,
-`objective_function/`, `optimizer/`, `solver/`, `util/`, and the pages `nets.rst`,
+`optimizer/`, `solver/`, `util/`, and the pages `nets.rst`,
 `util.rst`, `mpi.rst`, `index.rst`, `examples.rst`.
 
-### Symmetry, changes of 2026-11-05 (uncommitted)
+### Objective function, changes of 2026-11-05 (uncommitted)
+
+- Docstrings for every public class/method/property of `base.py` and `infidelity.py`; new
+  `objective_function.rst` (example with SR + Observable and Infidelity, tested on 1 and 3 devices).
+- Bugs reported: 1 `Infidelity` drops the keyword arguments (the optimizer's `t`) and calls
+  `operator._get_conn_elements(s, {})`: a time-dependent operator raises `KeyError: 't'`;
+  2 control variates are biased for a non-unitary operator (1 - i dt H, dt = 0.2: exact 0.754,
+  simple 1.139, adaptive 0.792), silently; 3 adaptive coefficient is 0/0 = NaN when R^psi is
+  constant (psi = chi with the identity), and the NaN stays in the moving average; 4 small items
+  (Estimator.__call__ evaluates estimator_fn on all samples at once, no batching; ParametricObservable
+  has no operator/estimator_fn properties; `control_variate` setter calls `.lower()` on non-strings;
+  `moving_average_width=0` gives NaN; Estimator caches the gradient kind of the first psi).
+- Checked: force formulas (derivation of R_k), all three gradients vs finite differences (tests),
+  Infidelity estimator algebra and CV algebra (simple/adaptive), default identity works for
+  spinful states regardless of `l_dim`, Estimator gradient-kind detection on a vanishing first
+  sample still matches finite differences. Infidelity uses the transposed operator like
+  `get_O_loc` (deferred operator bug); `matrix_to_jvmc_operator` builds sigma_y transposed, which
+  compensates for it, so the tests with complex unitaries pass.
+- 3 devices: the test suites only fail with the known batch size 16 not divisible by 3.
+- User: fixed 1 (keyword arguments `**op_kwargs` passed through `__call__`, `_get_f_loc`,
+  `_get_f_loc_sh`), leave 2, 3, 4. The fix called `_get_conn_elements(s, **op_kwargs)`, which
+  takes a dict: every Infidelity call raised TypeError (15 of 16 tests); corrected to
+  `_get_conn_elements(s, op_kwargs)`. New `test_time_dependent_operator` (fails on the committed
+  code with `KeyError: 't'`).
+
+### Symmetry, changes of 2026-11-05
 
 - Docstrings for every public class/function/property; module docstring of `lattice_symetries`
   rewritten (site enumerations); new `symmetry.rst`, example tested on 1 and 3 devices.
