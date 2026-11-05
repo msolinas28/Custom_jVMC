@@ -26,6 +26,7 @@
     geometry
     sampler
     nets
+    symmetry
     mpi
     stats
     util

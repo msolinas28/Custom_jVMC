@@ -108,13 +108,41 @@ user fixes needed a correction (e.g. `jnp.prod` on a tuple, a MALA wrap at the w
 | `operator/` | done, `operator.rst` rewritten | reported; transpose bug deferred | committed (`73c2f1b`) |
 | `geometry.py` | done, new `geometry.rst` in the toctree | reported, 1/2/5/6 fixed, new `tests/geometry_test.py` | committed (`da8264f`) |
 | `sharding_config.py` | done, new `sharding_config.rst` in the toctree, `parallelism.rst` rewritten | reported, 3/6 fixed, 1 deferred (patch ready) | committed (`323ebd1`) |
-| `stats.py` | done, `stats.rst` rewritten | reported, 1-4 fixed (2-4 by the user), new AR(1) test | **uncommitted** |
+| `stats.py` | done, `stats.rst` rewritten | reported, 1-4 fixed (2-4 by the user), new AR(1) test | committed (`aa6544d`) |
+| `symmetry/` | done, new `symmetry.rst` in the toctree after `nets` | reported, 2 fixed (+2 tests), rest left | **uncommitted** |
 
 Still to do: `stepper.py`, `nets/`,
-`objective_function/`, `optimizer/`, `solver/`, `symmetry/`, `util/`, and the pages `nets.rst`,
+`objective_function/`, `optimizer/`, `solver/`, `util/`, and the pages `nets.rst`,
 `util.rst`, `mpi.rst`, `index.rst`, `examples.rst`.
 
-### Stats, changes of 2026-11-05 (uncommitted)
+### Symmetry, changes of 2026-11-05 (uncommitted)
+
+- Docstrings for every public class/function/property; module docstring of `lattice_symetries`
+  rewritten (site enumerations); new `symmetry.rst`, example tested on 1 and 3 devices.
+- Dense checks (scripts were in the scratchpad: build P from `transformed_states`/`weights`,
+  check P^2 = P, P = P^+, [P, H] = 0 with real symmetric library Hamiltonians, sum over q = 1):
+  translations (all q), D4/D2, spin flip, compositions all exact for spins, spinless and spinful
+  fermions. Composed elements are exactly A_l A_r. Translation element: A c_j A^+ = c_{perm[j]};
+  psi_P(s shifted by +a) = e^{+2 pi i q a / L} psi_P(s) for spins.
+- Bugs reported: 1 fermionic particle-hole C^2 = (-1)^(M(M-1)/2) (M modes), so (1 + C)/2 is not a
+  projector for spinless L = 2, 3, 6, 7, ... and spinful odd L; 2 `ProjectedOrbitNet` flattens the
+  configurations (2D CNN with sampleShape (L, L) crashes; `sample()` returns flat configs);
+  3 `compose_projectors` re-indexes `perm_sign` by output site, single elements use input sites
+  (antiperiodic translation x reflection breaks); 4 `local_phase` ignored for spins/bosons;
+  5 `sep` average overflows for |Re log psi| > ~355; 6 `exp` average turns NaN/+inf into zero
+  amplitudes; 7 small items. Prototype fixes for 1, 2, 3, 5: `.claude/symmetry_fixes.patch`
+  (against `HEAD` before the docstrings), all dense checks pass, tests unchanged. Check scripts:
+  `.claude/symmetry_checks/` (run as `python symm_ph.py <dir of the scripts>`, with `PYTHONPATH`).
+- User: fix 2 only, leave 1, 3, 4, 5, 6, 7. Fixed 2: `ProjectedOrbitNet.__call__` reshapes the
+  transformed configurations to `s.shape` (also for the coefficient nets), `sample()` returns the
+  shape of `base_net.sample()`. New tests `test_projected_orbit_net_keeps_the_shape_...` and
+  `..._sample_keeps_the_shape_...` (fail on the old code). Docstrings of 1, 3, 4 reworded to what
+  the code does (particle-hole sign formula, compose `perm_sign` formula, `local_phase` only for
+  fermions). The patch still holds the left prototypes 1, 3, 5 for a later release.
+- Not a bug: translation(q=0) x particle-hole for spinless even L is not a projector because T and
+  C anticommute there (T|full> = -|full>); composition = P_l P_r is a projector only if they commute.
+
+### Stats, changes of 2026-11-05
 
 - Class docstrings moved from `__init__` to the class (autodoc shows only the class docstring);
   docstrings for every public method/property; `stats.rst` rewritten (pointed at `jVMC.stats`,
@@ -233,6 +261,9 @@ User chose to leave these, or will patch them in a later release:
 
 ### Noticed while working on other folders, to check when their turn comes
 
+- `nets/rnn1d_general.py`: `NQS(RNN1DGeneral(...))` fails at evaluation on CPU (1 device too):
+  "scan body function carry input and carry output must have equal types ... {V:devices}" (the
+  initial carry `jnp.zeros(inputDim)` is not marked varying inside `shard_map`). Found 2026-11-05.
 - `optimizer/minsr.py` and `solver/pinv.py` call `grad_log_psi.transform(lambda x: ...)` with a new
   lambda at every step: `transform` wraps it in `jax.jit`, so it compiles again at every step
   (~10 ms each on a (300, 10) array, measured). `optimizer/base.py` stores its functions

@@ -1,0 +1,63 @@
+--- a/jVMC_exp/symmetry/projector.py
++++ b/jVMC_exp/symmetry/projector.py
+@@ -83,7 +83,10 @@
+     right_perm = right.perm_array
+     perm = left_perm[:, right_perm].reshape(left.nsymm * right.nsymm, left.nmodes)
+     character = (left.character_array[:, None] * right.character_array[None, :]).reshape(-1)
+-    perm_sign = left.perm_sign_array[:, right_perm] * right.perm_sign_array[None, :, :]
++    # perm_sign[g, j] is the sign of a fermion on site j of the input configuration: after the
++    # left element, that fermion is on site left_inv[j], where the right element acts on it
++    left_inv = jnp.argsort(left_perm, axis=1)
++    perm_sign = left.perm_sign_array[:, None, :] * right.perm_sign_array[:, left_inv].transpose(1, 0, 2)
+     perm_sign = perm_sign.reshape(left.nsymm * right.nsymm, left.nmodes)
+     local_map = _compose_local_maps(left, right)
+     local_phase = _compose_local_phases(left, right)
+@@ -169,10 +172,13 @@
+     |full> = c_0^\dagger c_1^\dagger ... c_{M-1}^\dagger |0>
+     """
+     occ = jnp.asarray(occ, dtype=jnp.int32)
+-    mode_idx = jnp.arange(occ.shape[-1], dtype=jnp.int32)
++    n_modes = occ.shape[-1]
++    mode_idx = jnp.arange(n_modes, dtype=jnp.int32)
+     exponent = jnp.sum(occ * mode_idx, axis=-1)
++    # C^2 = (-1)^(M(M-1)/2): the phase i makes C an involution for every number of modes M
++    phase = 1j if (n_modes * (n_modes - 1) // 2) % 2 else 1.0
+ 
+-    return (1 - 2 * jnp.bitwise_and(exponent, 1)).astype(jnp.complex128)
++    return phase * (1 - 2 * jnp.bitwise_and(exponent, 1)).astype(jnp.complex128)
+ 
+ @dataclass(frozen=True)
+ class SymmetryProjector:
+@@ -462,8 +468,8 @@
+ 
+     @nn.compact
+     def __call__(self, s):
+-        s = jnp.asarray(s).reshape(self.symmetry.nmodes)
+-        states = self.symmetry.transformed_states(s)
++        shape = jnp.shape(s)
++        states = self.symmetry.transformed_states(s).reshape((self.symmetry.nsymm,) + shape)
+ 
+         # TODO: This can create OOM issues since it is batched externally
+         base_logs = jax.vmap(self.base_net)(states)
+@@ -498,4 +504,4 @@
+         sample_key, orbit_key = jax.random.split(key)
+         sample = self.base_net.sample(sample_key)
+ 
+-        return self.symmetry.random_transformed_state(sample, orbit_key)
+\ No newline at end of file
++        return self.symmetry.random_transformed_state(sample, orbit_key).reshape(jnp.shape(sample))
+\ No newline at end of file
+--- a/jVMC_exp/symmetry/average_fun.py
++++ b/jVMC_exp/symmetry/average_fun.py
+@@ -26,8 +26,10 @@
+     re = jnp.real(log_amplitudes)
+     im = jnp.imag(log_amplitudes)
+ 
+-    return 0.5 * jnp.log(jnp.mean(jnp.exp(2 * re))) + 1j * jnp.angle(jnp.mean(jnp.exp(1j * im)))
++    shift = jnp.max(re)
+ 
++    return shift + 0.5 * jnp.log(jnp.mean(jnp.exp(2 * (re - shift)))) + 1j * jnp.angle(jnp.mean(jnp.exp(1j * im)))
++
+ average_coefficients_table = {
+     "exp": avg_coefficients_exp,
+     "log": avg_coefficients_log,
