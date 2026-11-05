@@ -110,13 +110,48 @@ user fixes needed a correction (e.g. `jnp.prod` on a tuple, a MALA wrap at the w
 | `sharding_config.py` | done, new `sharding_config.rst` in the toctree, `parallelism.rst` rewritten | reported, 3/6 fixed, 1 deferred (patch ready) | committed (`323ebd1`) |
 | `stats.py` | done, `stats.rst` rewritten | reported, 1-4 fixed (2-4 by the user), new AR(1) test | committed (`aa6544d`) |
 | `symmetry/` | done, new `symmetry.rst` in the toctree after `nets` | reported, 2 fixed (+2 tests), rest left | committed (`aaf56e1`) |
-| `objective_function/` | done, new `objective_function.rst` in the toctree after `sampler` | reported, 1 fixed by the user (corrected), new test, rest left | **uncommitted** |
+| `objective_function/` | done, new `objective_function.rst` in the toctree after `sampler` | reported, 1 fixed by the user (corrected), new test, rest left | committed (`2a05a0a`) |
+| `optimizer/` | done, new `optimizer.rst` in the toctree after `objective_function` | MinSR recompilation, D, E fixed (+2 tests); A by the user; B left; C, F explained, waiting | **uncommitted** |
 
 Still to do: `stepper.py`, `nets/`,
-`optimizer/`, `solver/`, `util/`, and the pages `nets.rst`,
+`solver/`, `util/`, and the pages `nets.rst`,
 `util.rst`, `mpi.rst`, `index.rst`, `examples.rst`.
 
-### Objective function, changes of 2026-11-05 (uncommitted)
+### Optimizer, changes of 2026-11-05 (uncommitted)
+
+- User answers: A made `stepper` a required argument of `time_evolution` (verified; also changed
+  the TDVP.ground_state_search message, which had it reversed: corrected); B leave (docstring now
+  says the final `"energy"` entry repeats the last step); C, F asked for explanations (given in the
+  chat, waiting for a decision); D, E fixed:
+  - D: `TDVP.cross_validation` computes S2 first and then `_get_tdvp_error(update_1, F2, var2)`.
+    New `TestCrossValidation` (dense reference; fails on the committed code, 4.4e-15 vs 1.43). It
+    needs biases in the RBM: without them, spin flip maps the even basis states onto the odd ones.
+  - E: reweighting uses `/ sampler.logProbFactor` instead of `2 *`. New `TestSubstepReweighting`
+    (logProbFactor 0.5 and 1; fails on the committed code).
+
+- Docstrings for every public class/method/property of the five files; new `optimizer.rst`
+  (SR ground state search + TDVP with AdaptiveHeun and an observable, tested on 1 and 3 devices).
+- Fixed (pre-approved by the user): MinSR passed a new lambda to `transform` at every step,
+  1-2 compilations per update on 3 devices (26-40 ms -> 5-6 ms per update); now
+  `self._pad_obs` / `self._unpad_obs` jitted once in `__init__`. The same fix is still due in
+  `solver/pinv.py` (`_snr_step`).
+- Bugs reported: A `time_evolution` default `stepper=Euler` is the class: TypeError without a
+  stepper; B last `"energy"` entry of `time_evolution` repeats the previous step (self.o_loc not
+  recomputed after the final `sampler.sample()`), and the last time overshoots `t_max`;
+  C MinSR for holomorphic nets: update complex in the real layout, effective step = SR with
+  diagonal shift lambda/2 (matches to 7e-14); for real nets the update is complex with zero
+  imaginary part; D TDVP cross validation: the reported validation TDVP error is the error of
+  the first-half update on the first half (in-sample, identical digits), not on the second;
+  E reweighting between substeps (`resample_stepper=False`) hard-codes |psi|^2 (logProbFactor
+  0.5): weights off by 0.13 for logProbFactor=1; F matrix-free lhs with make_real=False and
+  diag_scale differs from the dense one (2e-2); small: TDVP.ground_state_search error message
+  talks about SR, tqdm total/updates in time_evolution, Evolution warns at every construction.
+- Checked: both make_real conventions reproduce exact real-time evolution of fully expressive
+  nets (real-parameter and holomorphic, 1 - F ~ 1e-11); QGT (dense, batched, padded on 3 devices)
+  equals get_covar; MinSR = SR for real and non-holomorphic nets; default solver instances hold
+  only configuration (sharing them is harmless).
+
+### Objective function, changes of 2026-11-05
 
 - Docstrings for every public class/method/property of `base.py` and `infidelity.py`; new
   `objective_function.rst` (example with SR + Observable and Infidelity, tested on 1 and 3 devices).
@@ -290,11 +325,9 @@ User chose to leave these, or will patch them in a later release:
 - `nets/rnn1d_general.py`: `NQS(RNN1DGeneral(...))` fails at evaluation on CPU (1 device too):
   "scan body function carry input and carry output must have equal types ... {V:devices}" (the
   initial carry `jnp.zeros(inputDim)` is not marked varying inside `shard_map`). Found 2026-11-05.
-- `optimizer/minsr.py` and `solver/pinv.py` call `grad_log_psi.transform(lambda x: ...)` with a new
-  lambda at every step: `transform` wraps it in `jax.jit`, so it compiles again at every step
-  (~10 ms each on a (300, 10) array, measured). `optimizer/base.py` stores its functions
-  (`self._pad_obs` etc.) and does not recompile. User (2026-11-05): fix when doing `optimizer/` and
-  `solver/`.
+- `solver/pinv.py` (`_snr_step`) calls `grad_log_psi.transform(lambda x: ...)` with a new lambda
+  at every step: `transform` wraps it in `jax.jit`, so it compiles again at every step. User
+  (2026-11-05): fix when doing `solver/`. (Fixed in `optimizer/minsr.py` on 2026-11-05.)
 - Tests: on 3 devices, 32 tests in operator/vqs/minsr/objective_function fail only because their
   batch sizes are powers of 2 ("has to be divisible by the number of devices").
 - `objective_function/infidelity.py`: `_get_f_loc_sh` calls `operator._get_conn_elements(s, {})`,

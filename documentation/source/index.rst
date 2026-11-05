@@ -26,6 +26,7 @@
     geometry
     sampler
     objective_function
+    optimizer
     nets
     symmetry
     mpi
