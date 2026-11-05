@@ -1,6 +1,6 @@
 # Final bug fix + documentation
 
-Handover for continuing the work in a new chat. Last updated 2026-11-03.
+Handover for continuing the work in a new chat. Last updated 2026-11-05.
 
 ## Goal
 
@@ -63,8 +63,11 @@ user fixes needed a correction (e.g. `jnp.prod` on a tuple, a MALA wrap at the w
 
 ## Tools and commands
 
-- Python with JAX: `~/venv/jVMC_new/bin/python` (jax 0.10.1). The system `python3` has no JAX
-  and is only good for AST checks and text edits.
+- Python with JAX: `~/venv/jVMC_new/bin/python` (jax 0.10.1) on the old machine;
+  `~/env/jVMC_env_exp/bin/python` (jax 0.10.2) on the Mac used since 2026-11-05, where pytest is not
+  installed: use `python -m unittest tests.<name>_test`. `-m` puts the working directory first on
+  `sys.path`, so `cd` into a scratch copy to test it. The system `python3` has no JAX and is only
+  good for AST checks and text edits.
 - Always set `JAX_PLATFORMS=cpu`; simulate devices with
   `XLA_FLAGS=--xla_force_host_platform_device_count=3`, and run scripts with
   `PYTHONPATH=<repo>`.
@@ -104,11 +107,32 @@ user fixes needed a correction (e.g. `jnp.prod` on a tuple, a MALA wrap at the w
 | `global_defs.py` | done, new `global_defs.rst` in the toctree | reported, fixed | committed (`d52b4e9`) |
 | `operator/` | done, `operator.rst` rewritten | reported; transpose bug deferred | committed (`73c2f1b`) |
 | `geometry.py` | done, new `geometry.rst` in the toctree | reported, 1/2/5/6 fixed, new `tests/geometry_test.py` | committed (`da8264f`) |
-| `sharding_config.py` | done, new `sharding_config.rst` in the toctree, `parallelism.rst` rewritten | reported, 3/6 fixed, 1 deferred (patch ready) | **uncommitted** |
+| `sharding_config.py` | done, new `sharding_config.rst` in the toctree, `parallelism.rst` rewritten | reported, 3/6 fixed, 1 deferred (patch ready) | committed (`323ebd1`) |
+| `stats.py` | done, `stats.rst` rewritten | reported, 1-4 fixed (2-4 by the user), new AR(1) test | **uncommitted** |
 
-Still to do: `stats.py`, `stepper.py`, `nets/`,
+Still to do: `stepper.py`, `nets/`,
 `objective_function/`, `optimizer/`, `solver/`, `symmetry/`, `util/`, and the pages `nets.rst`,
-`stats.rst`, `util.rst`, `mpi.rst`, `index.rst`, `examples.rst`.
+`util.rst`, `mpi.rst`, `index.rst`, `examples.rst`.
+
+### Stats, changes of 2026-11-05 (uncommitted)
+
+- Class docstrings moved from `__init__` to the class (autodoc shows only the class docstring);
+  docstrings for every public method/property; `stats.rst` rewritten (pointed at `jVMC.stats`,
+  used the removed `covar()`), example tested on 1 and 3 devices.
+- Bugs reported (numbers as in the chat): 1 `get_autocorrelation_time` FFT length
+  `n = ceil(log2(L))` instead of `2 * 2**ceil(log2(L))` (τ from the first ~12 samples);
+  2 R-hat/ACT reshape the padded observations (the 8 `stats_test` failures on 3 devices);
+  3 `linear_map` multiplies along the sample axis; 4 `weights=None` takes the dtype of the
+  observations (complex weights / errors, float16 weights); 5 `transform` keeps `_num_obs`
+  (`str()` raises after a shape change), returns `None` against its annotation;
+  6 `LazySampledObs.var` / one-pass covariances lose precision for large means; 7 small items.
+- Fixed: 1 (FFT length `2 * 2**ceil(log2(L))`, new `test_act_matches_exact_ar1_value`, fails on
+  the old code); 2, 3, 4 by the user, verified (all 30 `stats_test` pass on 1 and 3 devices).
+  Left: 5 (user: transformations are not meant to change the number of components), 6, 7.
+  `.claude/stats_fixes.patch` is the prototype, now applied: can be deleted.
+- Checked and not a bug: the ACT window fallback is unreachable (τ at the last lag is 0 for
+  mean-subtracted data); denormal weights are flushed to 0 by XLA on CPU (no `1/w` overflow); MC
+  samples are stored chain-major on 1 and 3 devices, as R-hat/ACT assume.
 
 ### Operator folder, changes of 2026-11-03
 
@@ -209,9 +233,11 @@ User chose to leave these, or will patch them in a later release:
 
 ### Noticed while working on other folders, to check when their turn comes
 
-- `stats.py`: on 3 devices, 8 `stats_test` tests (`act` / `rhat`) fail with e.g. "cannot reshape
-  array of shape (2049, 1) into shape (4, 512)": the samples are padded to a multiple of the
-  devices and then reshaped per chain. Fails on the committed code too.
+- `optimizer/minsr.py` and `solver/pinv.py` call `grad_log_psi.transform(lambda x: ...)` with a new
+  lambda at every step: `transform` wraps it in `jax.jit`, so it compiles again at every step
+  (~10 ms each on a (300, 10) array, measured). `optimizer/base.py` stores its functions
+  (`self._pad_obs` etc.) and does not recompile. User (2026-11-05): fix when doing `optimizer/` and
+  `solver/`.
 - Tests: on 3 devices, 32 tests in operator/vqs/minsr/objective_function fail only because their
   batch sizes are powers of 2 ("has to be divisible by the number of devices").
 - `objective_function/infidelity.py`: `_get_f_loc_sh` calls `operator._get_conn_elements(s, {})`,

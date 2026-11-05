@@ -1,0 +1,57 @@
+--- a/jVMC_exp/stats.py
++++ b/jVMC_exp/stats.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ import jax
+ import jax.numpy as jnp
++import math
+ from functools import partial, cached_property
+ 
+ from jVMC_exp.sharding_config import DEVICE_SHARDING, MESH, SizedIterable, pad_to_devices
+@@ -69,7 +70,7 @@
+ 
+ @jax.jit(static_argnums=(1,))
+ def _apply_and_project(data, apply_fn, projection):
+-    return jnp.matmul(projection, apply_fn(data)) 
++    return jnp.matmul(apply_fn(data), projection.T)
+ 
+ @jax.jit(static_argnums=(1, 2))
+ @partial(jax.vmap, in_axes=(0, None, None))
+@@ -103,7 +104,7 @@
+         num_devices = MESH.shape["devices"]
+ 
+         if weights is None:
+-            weights = jnp.ones(self._num_samples, dtype=observations.dtype) / self._num_samples
++            weights = jnp.full(self._num_samples, 1.0 / self._num_samples)
+         elif weights.shape != (self._num_samples,):
+             raise ValueError(f"Weights must have shape ({self._num_samples},), got {weights.shape}")
+         weights /= jnp.sum(weights)
+@@ -240,7 +241,7 @@
+             raise NotImplementedError
+ 
+         chain_length = self._num_samples // n_chains
+-        chain_obs = SampledObs(self.observations.reshape((n_chains, chain_length)).T)
++        chain_obs = SampledObs(self.observations[:self._num_samples].reshape((n_chains, chain_length)).T)
+ 
+         B = jnp.var(chain_obs.mean, ddof=1)
+         W = jnp.mean(chain_obs.var * chain_length / (chain_length - 1))
+@@ -252,9 +253,9 @@
+             raise NotImplementedError
+ 
+         chain_length = self._num_samples // n_chains
+-        obs = self.observations.reshape((n_chains, chain_length))
++        obs = self.observations[:self._num_samples].reshape((n_chains, chain_length))
+         z = obs - jnp.mean(obs, axis=-1)[:, None]
+-        dim = int(jnp.ceil(jnp.log2(chain_length)))
++        dim = 2 * 2 ** int(jnp.ceil(jnp.log2(chain_length)))
+         
+         return SampledObs(_get_autocorrelation_time(z, c, dim))
+     
+@@ -275,6 +276,7 @@
+             self._observations = _apply_and_project(self.observations, element_wise_fn, linear_map)
+         else:
+             self._observations = jax.jit(element_wise_fn)(self.observations)
++        self._num_obs = math.prod(self._observations.shape[1:])
+         self._mean = _get_mean(self._observations, self.weights)
+ 
+     def select(self, idx):
