@@ -4,6 +4,13 @@ Findings from 2026-11-03, against commit `d52b4e9` plus the uncommitted operator
 that day (documentation, `SigmaPlus`/`SigmaMinus` swap, `return NotImplemented`). Status: **not
 fixed yet**, kept for later because it changes results. A tested patch is at the end.
 
+**`matrix_to_jvmc_operator` is part of this fix** (decided on 2026-11-06, util round). The helper
+builds `matrixᵀ` today (its σy basis element is σyᵀ, `jVMC_exp/util/util.py`, `local_basis`), and
+`to_dense` / `to_sparse` of its result give `matrixᵀ`. The engine transpose flips it back, so the
+sampler and `Infidelity` measure `matrix` today (checked against exact values). The two have to be
+fixed together: changing only one of them makes `Infidelity` use `Uᵀ`. The σy change is in the
+patch below (`util.py` hunk), see also "Why `Infidelity` works today".
+
 ## The bug in one sentence
 
 For every discrete (branch-free) operator, `get_O_loc` computes the local estimator of `Mᵀ`,
@@ -46,7 +53,7 @@ product is consistent with `M` (the engine applies the last factor first), so th
 comes out transposed, not just each factor.
 
 `Infidelity._get_f_loc_sh` (`jVMC_exp/objective_function/infidelity.py`) uses
-`operator._get_conn_elements(s, {})` in the same way, so it also uses `Mᵀ`.
+`operator._get_conn_elements(s, op_kwargs)` in the same way, so it also uses `Mᵀ`.
 
 ## Consequences
 
@@ -156,12 +163,16 @@ same function in the same way; not benchmarked separately.
   a complex hopping), with a complex random `CpxRBM`.
 - Add a test that `to_sparse` of `matrix_to_jvmc_operator(U)` equals `U`.
 - Re-run the notebook `examples/ex8_infidelity_optimization.ipynb`.
-- Check the docstring of `matrix_to_jvmc_operator` (it says the local basis is I, σx, σy, σz,
-  which becomes true).
+- The docstring of `matrix_to_jvmc_operator` (rewritten on 2026-11-06) states the intended
+  contract: the sampler and `Infidelity` measure `matrix`. This holds before and after the patch.
+  After the patch, `to_sparse` / `to_dense` of the result also give `matrix` (today `matrixᵀ`), so
+  the docstring needs no change.
 
 ## Patch (option B)
 
-Applied cleanly with `git apply` to the tree of 2026-11-03.
+Applied cleanly with `git apply` to the tree of 2026-11-03. Refreshed on 2026-11-06: the
+`Infidelity` hunk now passes `op_kwargs` (changed in the objective-function round), and the
+`util.py` hunk has the new line numbers. `git apply --check` passes on the tree of 2026-11-06.
 
 ```diff
 --- a/jVMC_exp/operator/discrete/branch_free.py
@@ -257,18 +268,18 @@ Applied cleanly with `git apply` to the tree of 2026-11-03.
          if s_p.shape[0] == 0:
 --- a/jVMC_exp/objective_function/infidelity.py
 +++ b/jVMC_exp/objective_function/infidelity.py
-@@ -238,7 +238,7 @@
-         self, s, log_phi_s, *,
-         parameters, operator: Operator, psi: NQS, chunk_size, batch_size
+@@ -300,7 +300,7 @@
+         parameters, operator: Operator, psi: NQS, chunk_size, batch_size,
+         **op_kwargs
      ):
--        s_p, mat_els, mat_el_diag = operator._get_conn_elements(s, {})
-+        s_p, mat_els, mat_el_diag = operator._get_conn_elements(s, {}, transpose=True)
+-        s_p, mat_els, mat_el_diag = operator._get_conn_elements(s, op_kwargs)
++        s_p, mat_els, mat_el_diag = operator._get_conn_elements(s, op_kwargs, transpose=True)
          s_p = jnp.concatenate([s[None], s_p], axis=0)
          mat_els = jnp.concatenate([mat_el_diag[None], mat_els], axis=0)
  
 --- a/jVMC_exp/util/util.py
 +++ b/jVMC_exp/util/util.py
-@@ -203,7 +203,7 @@
+@@ -190,7 +190,7 @@
      local_basis = [
          np.eye(2, dtype=global_defs.DT_OPERATORS_CPX),
          np.array([[0.0, 1.0], [1.0, 0.0]], dtype=global_defs.DT_OPERATORS_CPX),

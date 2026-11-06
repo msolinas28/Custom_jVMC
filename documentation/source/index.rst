@@ -27,7 +27,7 @@
     sampler
     objective_function
     optimizer
-    solver
+    stepper
     nets
     symmetry
     mpi
