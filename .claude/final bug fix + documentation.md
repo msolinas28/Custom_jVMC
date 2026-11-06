@@ -112,13 +112,81 @@ user fixes needed a correction (e.g. `jnp.prod` on a tuple, a MALA wrap at the w
 | `symmetry/` | done, new `symmetry.rst` in the toctree after `nets` | reported, 2 fixed (+2 tests), rest left | committed (`aaf56e1`) |
 | `objective_function/` | done, new `objective_function.rst` in the toctree after `sampler` | reported, 1 fixed by the user (corrected), new test, rest left | committed (`2a05a0a`) |
 | `optimizer/` | done, new `optimizer.rst` in the toctree after `objective_function` | MinSR recompilation, D, E fixed (+2 tests); A by the user; B left; C, F explained, waiting | committed (`890a558`) |
-| `stepper.py` | done, `util/stepper.rst` moved to `stepper.rst`, in the toctree after `optimizer` | 1 (ex2) and 3 fixed (+2 tests), 2, 4-7 left | **uncommitted** |
+| `stepper.py` | done, `util/stepper.rst` moved to `stepper.rst`, in the toctree after `optimizer` | 1 (ex2) and 3 fixed (+2 tests), 2, 4-7 left | committed (`85ce561`) |
+| `util/` | done, `util.rst` rewritten, the four `util/*.rst` removed (`git rm`) | reported (1-10); 3 removed by the user (`init_net`), 5 moved to the transpose bug, 4, 6-10 left; 1, 2 explained, waiting | **uncommitted** |
 
 Still to do: `nets/`,
-`solver/`, `util/`, and the pages `nets.rst`,
-`util.rst`, `mpi.rst`, `index.rst`, `examples.rst`.
+`solver/`, and the pages `nets.rst`,
+`mpi.rst`, `index.rst`, `examples.rst`.
 
-### Stepper, changes of 2026-11-05 (uncommitted)
+### Util, changes of 2026-11-06 (uncommitted)
+
+- Docstrings for every public function/class/method of `util.py`, `grads.py`, `key_gen.py`,
+  `input_manager.py`, `output_manager.py`, module docstrings, `#:` comments for `ObservableEntry`
+  and `OperatorWithKwargs`. `OutputManager`/`InputManager` docstrings were NumPy style (no napoleon):
+  rewritten. `measure` docstring: the "list of operators" form is gone (the code never accepted it;
+  `ObservableEntry` and the optimizer docs don't have it). The docstring of
+  `matrix_to_jvmc_operator` was after the local import, so not a docstring: moved above it (AST
+  check that drops all bare strings: code unchanged in the six files).
+- `util.rst` rewritten (sections: measurements, output/input with an SR + `InputManager` example,
+  operators from matrices, S-norm, internal helpers; the `init_net` section was dropped when the
+  user removed the function); `util/minsr.rst`, `util/tdvp.rst`,
+  `util/symmetries.rst`, `util/output_manager.rst` removed (pointed at `jVMC.util.*`; covered by
+  `optimizer.rst`, `symmetry.rst`, `util.rst`). Snippets run on 1 and 3 devices; no Sphinx warning
+  for the page.
+- Bugs reported (numbers as in the chat): 1 `OutputManager.save_to_h5()` raises TypeError for a
+  `None` in the metadata, and `SR`/`TDVP` with the default `PinvSNR` (`snr_tol=0`, or any ExactSampler)
+  always store `snr=None` with `save_meta_data=True`; the default `append=False` truncates the file
+  first, so the incremental file loses everything after the failing key (parameters gone);
+  static `write_metadata(x=None)` fails too; 2 `NQS(seed=None)` on several processes: AssertionError
+  in `jax.device_put` (each process draws its own `generate_seed()`; seed=123 works);
+  3 `init_net`: `"net2"` calls `TwoNets(net1=, net2=)` (field is `nets`), mutates `descr` (2nd call
+  KeyError), tuple `actFun` KeyError, int `dims` TypeError, only used by POVM examples;
+  4 `OutputManager(path)` default `append=True`: rerunning a script appends to the old datasets
+  (`times` = [0 1 2 0 1 2]); 5 `matrix_to_jvmc_operator` builds Mᵀ (`to_dense` = Mᵀ), which the
+  deferred get_O_loc transpose bug turns back into M: fix both together; 6 `check_network_parameter_shape`
+  is always True (dict accepted in memory, fails in the file); 7 `format_key(jnp.int32(5))` returns
+  the scalar (invalid key), NumPy copy of a key TypeError, float seed truncated; 8 `measure` drops
+  the imaginary part (non-Hermitian observables); 9 `pick_gradient` decides holomorphy at one input
+  (a non-holomorphic net whose gradient vanishes there counts as holomorphic; `NQS` uses a random
+  normal input, so unlikely); 10 small: `InputManager.get_network_checkpoint` KeyError instead of
+  RuntimeError without checkpoints, `write_dataset(group="")` fails with a path, static metadata with
+  the name of a series breaks the series, observable named `times` collides, ragged observables fail
+  in `save_to_h5`, `matrix_to_jvmc_operator` accepts `sites=(1, 1)`, `get_iterable` unused.
+- Answers (2026-11-06): 3 `init_net` removed by the user (unused now): its section in `util.rst`
+  and the mention in the module docstring removed. Left behind: `import ... activation_functions as
+  act_funs` in `util.py` (only `init_net` used it); `examples/ex5`, `ex6` still call `init_net` (POVM
+  examples, to be removed by the user); `util/__init__.py` is back to HEAD, so its package docstring
+  is gone (not rendered by `util.rst`). 4 leave. 5 fix together with the transpose bug: recorded in
+  `.claude/operator_transpose_bug.md` (new paragraph at the top; the patch refreshed, the
+  `Infidelity` hunk now uses `op_kwargs`, `git apply --check` passes). 6, 7, 9, 10 leave.
+  8 intended (real parts), leave.
+  1 explained: `_as_h5_array(None)` returns `None` (`jnp.asarray(None)` raises, the fallback
+  `device_get` passes it through); the in-memory series is `[None, None, ...]` and
+  `parent.create_dataset(data=...)` at `_write_dict_to_h5` (`output_manager.py:384`) raises
+  `TypeError: Object dtype dtype('O') has no native HDF5 equivalent`; static case line 224
+  (`One of data, shape or dtype must be specified`). Streaming already skips `None`
+  (`_append_h5`, line 125), which is why only `save_to_h5()` fails. Proposed: skip `None` in
+  `_write_dict_to_h5` and static `write_metadata` like streaming does, and convert the whole tree
+  before opening the file (and before `del parent[key]`), so a failure leaves the file untouched;
+  optionally don't report `snr` when the SNR cutoff is off (solver pass).
+  2 explained: seeds are per process, not per device. Proposed: `generate_seed()` draws on process 0
+  and `multihost_utils.broadcast_one_to_all`; all processes must call it (they do: `NQS`, samplers).
+  Prototyped in the scratchpad on 2 processes: same seed, `NQS(seed=None)` works, MCSampler fine;
+  single process returns the value. The sampler already uses only process 0's key
+  (`broadcast_split_key`), so nothing changes there.
+- Checked: `s_norm_fn` = dense reference (variance of G·v) to 1e-16 for holomorphic, non-holomorphic
+  and real-parameter nets, Pinv and CG (callable qgt), padding on 3 devices; works as `normFunction`
+  of `time_evolution`. All four flat gradients match finite differences; holomorphy detection right
+  in complex64 and for large gradients. `measure` with time-dependent operators and
+  `num_samples` + ExactSampler is harmless (callable prefactors must take `**kwargs`). Layout
+  helpers consistent with `parameters_flat` and the holomorphic gradients. OutputManager/InputManager
+  roundtrip of parameters and observables, groups, checkpoints by time; `_as_h5_array` of global
+  arrays works on process 0 alone (2 processes). MCSampler(key=None) on 2 processes: fine.
+- Tests: `output_manager_test` OK on 1 and 3 devices (run from the scratchpad: it writes
+  `test_output.h5` in the cwd), `infidelity_test`, `vqs_test` OK.
+
+### Stepper, changes of 2026-11-05
 
 - Module docstring (ODE, list of steppers, right-hand side contract `f(y, t, **rhsArgs, intStep=k)`,
   usage); docstrings for every class/method/property, `Initializer arguments:` / `Arguments:` ->
@@ -375,7 +443,11 @@ User chose to leave these, or will patch them in a later release:
   `2 * jnp.real(logPsi - logPsi0)`, i.e. assumes `logProbFactor = 0.5`; also check the weights are
   normalized.
 - `util/util.py`: `measure()` passes `num_samples` to the sampler; with `ExactSampler` it ends up
-  in `get_O_loc` kwargs (ignored by real operators).
+  in `get_O_loc` kwargs (ignored by real operators). Checked 2026-11-06: harmless, callable
+  prefactors must take `**kwargs`.
+- Optimizer on 2 CPU processes (gloo): `SR.ground_state_search` with `MCSampler` aborts (SIGABRT, no
+  traceback) in the first step; sampling and measuring work on 2 processes. Probably the solver's
+  distributed path (`jaxmg` is Linux/GPU only). Check in the `solver/` pass. Found 2026-11-06.
 - `solver/util.py` imports `USE_DISTRIBUTED` by name; fine now that it can only change at import
   (`sharding_config` sets it from `jax.distributed.is_initialized()`).
 - Docs: `parallelism.rst` describes `global_defs.set_pmap_devices()` and MPI, which no longer
