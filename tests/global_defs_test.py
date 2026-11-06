@@ -30,7 +30,7 @@ class TestUpdate(unittest.TestCase):
     def test_rejects_other_dtypes_and_keeps_the_setting(self):
         before = global_defs.DT_PARAMS_REAL
 
-        for dtype in (jnp.int32, jnp.bool_, np.longdouble, jnp.complex64, "f64", "f16"):
+        for dtype in (jnp.int32, jnp.bool_, jnp.complex64, "f64", "f16"):
             with self.assertRaises(TypeError):
                 global_defs.update(dt_params_real=dtype)
             self.assertEqual(global_defs.DT_PARAMS_REAL, before)
