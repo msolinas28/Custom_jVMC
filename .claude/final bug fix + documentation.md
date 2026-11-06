@@ -111,13 +111,52 @@ user fixes needed a correction (e.g. `jnp.prod` on a tuple, a MALA wrap at the w
 | `stats.py` | done, `stats.rst` rewritten | reported, 1-4 fixed (2-4 by the user), new AR(1) test | committed (`aa6544d`) |
 | `symmetry/` | done, new `symmetry.rst` in the toctree after `nets` | reported, 2 fixed (+2 tests), rest left | committed (`aaf56e1`) |
 | `objective_function/` | done, new `objective_function.rst` in the toctree after `sampler` | reported, 1 fixed by the user (corrected), new test, rest left | committed (`2a05a0a`) |
-| `optimizer/` | done, new `optimizer.rst` in the toctree after `objective_function` | MinSR recompilation, D, E fixed (+2 tests); A by the user; B left; C, F explained, waiting | **uncommitted** |
+| `optimizer/` | done, new `optimizer.rst` in the toctree after `objective_function` | MinSR recompilation, D, E fixed (+2 tests); A by the user; B left; C, F explained, waiting | committed (`890a558`) |
+| `stepper.py` | done, `util/stepper.rst` moved to `stepper.rst`, in the toctree after `optimizer` | 1 (ex2) and 3 fixed (+2 tests), 2, 4-7 left | **uncommitted** |
 
-Still to do: `stepper.py`, `nets/`,
+Still to do: `nets/`,
 `solver/`, `util/`, and the pages `nets.rst`,
 `util.rst`, `mpi.rst`, `index.rst`, `examples.rst`.
 
-### Optimizer, changes of 2026-11-05 (uncommitted)
+### Stepper, changes of 2026-11-05 (uncommitted)
+
+- Module docstring (ODE, list of steppers, right-hand side contract `f(y, t, **rhsArgs, intStep=k)`,
+  usage); docstrings for every class/method/property, `Initializer arguments:` / `Arguments:` ->
+  `Args:`; the step-size controller formula in `AbstractAdaptiveStepper`; the `intStep` values and
+  stage times of every scheme in its `step()`. The RK23/RK45 "FSAL not exploited yet, see TODO"
+  sentence reworded to what the code does. AST check: code unchanged.
+- `git mv documentation/source/util/stepper.rst documentation/source/stepper.rst` (pointed at
+  `jVMC.util.stepper`), rewritten, added to `index.rst` after `optimizer`; `optimizer.rst` links to
+  it. Page snippets (module usage, TDVP + RK23, SR + `Euler(optax.exponential_decay(...))`) run on
+  1 and 3 devices; Sphinx build has no warnings for the page.
+- Bugs reported (numbers as in the chat): 1 `examples/ex2_unitary_time_evolution.ipynb` passes
+  `tol=` to `AdaptiveHeun` (TypeError; runs to t = 2 with `rtol=0., atol=integratorTol`);
+  2 `atol=0` with `y = 0`, or `rtol = atol = 0`: every attempt rejected, dt -> 0 -> NaN, then the
+  misleading "right-hand side is NaN" RuntimeError after 40-91 evaluations; 3 Heun/AdaptiveHeun/
+  RK23/RK45 promote float32/complex64 `y` to float64/complex128 (float64 `jnp.array` tableaux; Euler
+  keeps the dtype; harmless in the optimizers, the parameter setter casts back); 4 validation:
+  `max_step=0` accepted (dt = 0, `time_evolution` never ends), negative `rtol`/`atol` accepted,
+  `Euler.update_dt` accepts dt <= 0, `min_step`/`max_step` setters don't recheck min < max;
+  5 custom `normFunction` returning a Python float: ZeroDivisionError when the error is exactly 0;
+  6 question: only `Euler` has `update_dt`, so `ground_state_search` rejects the other steppers;
+  7 cosmetic: `RK23/RK45._k0` stored but never read.
+- User: fix 1 and 3, leave 2, 4, 5, 7; 6 is the intended usage (only `Euler` in ground state
+  searches). Fixed 1: ex2 uses `AdaptiveHeun(timeStep=dt, rtol=0., atol=integratorTol)` (stored
+  outputs not re-run). Fixed 3 as the user suggested, with two adjustments: `A` and `b` of the four
+  tableaux are cast to `global_defs.DT_OUT_REAL` at construction, `c` is not (a bfloat16 `c` rounds
+  `1.5 + 0.75e-3` to `1.5`: the stage times would be lost); `_adaptive_step_control` returns
+  `float(dt)`, because with the cast `self.dt` became a float32 array and `t + self.dt` float32
+  stage times. New `TestDtype` in `tests/stepper_test.py` (both tests fail on the committed code;
+  the time test also fails with the cast but without `float()`). Module docstring says the
+  coefficients follow `DT_OUT_REAL` and the times stay 64-bit.
+- Checked: local error slopes on an inhomogeneous linear ODE (Euler 2, Heun 3, AdaptiveHeun 3,
+  RK23 4, RK45 6; error estimates 3, 3, 5, so the exponent -1/(p+1) is right); intStep sequences;
+  all five steppers in `TDVP.time_evolution` (ExactSampler, `resample_stepper` True/False, 1 and 3
+  devices, identical results, energy conserved to 1e-3 ... 5e-6); `normFunction` reaches the
+  stepper through `time_evolution` kwargs. Tests: `stepper_test` OK on 1 and 3 devices,
+  `tdvp_test` OK (1 device). Scripts were in the scratchpad (`order.py`, `edge.py`, `tdvp_all.py`).
+
+### Optimizer, changes of 2026-11-05
 
 - User answers: A made `stepper` a required argument of `time_evolution` (verified; also changed
   the TDVP.ground_state_search message, which had it reversed: corrected); B leave (docstring now

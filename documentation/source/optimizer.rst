@@ -14,7 +14,7 @@ function (see :ref:`ObjectiveFunction`):
 
 ``SR`` and ``TDVP`` solve the equation :math:`S\dot\theta=cF` with the quantum geometric tensor
 :math:`S` and the force :math:`F`, with a solver of ``jVMC_exp.solver``. A stepper of
-``jVMC_exp.stepper`` integrates the update :math:`\dot\theta`: its time step is the learning rate
+``jVMC_exp.stepper`` (see :ref:`Stepper`) integrates the update :math:`\dot\theta`: its time step is the learning rate
 of a ground state search, and the time step of a time evolution.
 
 Usage
