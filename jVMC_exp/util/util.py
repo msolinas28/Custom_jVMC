@@ -247,8 +247,8 @@ def s_norm_fn(opt: TDVP):
     derivatives with respect to the real parameters.
 
     Args:
-        * ``opt``: Optimizer derived from ``Evolution``, e.g. ``TDVP``, created with \
-          ``store_qgt=True``. Raises ``ValueError`` otherwise.
+        * ``opt``: Optimizer derived from ``Evolution``, e.g. ``TDVP``, or ``BGSTDVP``, created \
+          with ``store_qgt=True``. Raises ``ValueError`` otherwise.
 
     Returns:
         The norm, a function of ``v``. It raises ``RuntimeError`` if ``opt`` has not been \
