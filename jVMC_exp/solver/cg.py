@@ -1,11 +1,13 @@
-from .base import AbstractSolver
 from jax.scipy.sparse.linalg import cg
+
+from .base import AbstractSolver
+
 
 class CG(AbstractSolver):
     """
     Conjugate gradient solver, ``jax.scipy.sparse.linalg.cg``.
 
-    It is matrix-free: :math:`A` is the function :math:`v\\mapsto Av`, which the optimizer \
+    It is matrix-free: :math:`A` is the function :math:`v\\mapsto Av`, whic_H the optimizer \
     computes from the logarithmic derivatives without assembling the matrix. The method assumes \
     a Hermitian positive definite :math:`A`, and starts from :math:`x=0`.
 
@@ -15,6 +17,7 @@ class CG(AbstractSolver):
         * ``maxiter`` [optional]: Maximal number of iterations. If ``None``, ten times the length \
           of :math:`b`.
     """
+
     def __init__(self, tol: float = 1e-5, maxiter: int | None = None):
         self._tol = tol
         self._maxiter = maxiter

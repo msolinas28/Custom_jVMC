@@ -24,18 +24,18 @@ from jVMC_exp.sampler import MCSampler
 from jVMC_exp.sampler.propose import SpinFlip
 from jVMC_exp.solver import Pinv
 from jVMC_exp.vqs import NQS
-from compare_netket import jvmc_hamiltonian
+from compare_netket import jvmchamiltonian
 
 L, H, n = 21, 21, 1002
-ham = jvmc_hamiltonian(L, 1.0)
+ham = jvmchamiltonian(L, 1.0)
 out = {}
-for net_name, net in (("rbm", RBM(numHidden=H, bias=False)), ("cpxrbm", CpxRBM(numHidden=H, bias=False))):
+for net_name, net in (("rbm", RBM(num_hidden=H, bias=False)), ("cpxrbm", CpxRBM(num_hidden=H, bias=False))):
     rng = np.random.default_rng(0)
-    psi = NQS(net, L, batchSize=256, seed=0)
-    sampler = MCSampler(psi, SpinFlip(), key=0, numChains=jax.device_count(), numSamples=n)
+    psi = NQS(net, L, batch_size=256, seed=0)
+    sampler = MCSampler(psi, SpinFlip(), key=0, numchains=jax.device_count(), num_samples=n)
     s = jnp.asarray(rng.integers(0, 2, (n, L)), dtype=jVMC_exp.global_defs.DT_SAMPLES)
-    sampler._samples, sampler._logPsi, sampler._weights = s, psi(s), jnp.full(n, 1 / n)
-    minsr = MinSR(sampler, psi, diagonalShift=1e-3, solver=Pinv())
+    sampler._samples, sampler._log_psi, sampler._weights = s, psi(s), jnp.full(n, 1 / n)
+    minsr = MinSR(sampler, psi, diagonal_shift=1e-3, solver=Pinv())
     for batched in (False, True):
         for rep in range(2):
             update = minsr.get_update(Observable(ham, batched_jacobian=batched).value_and_grad(sampler, compute_grad=False))

@@ -10,7 +10,7 @@
  from jVMC_exp.sharding_config import DEVICE_SHARDING, MESH, SizedIterable, pad_to_devices
  
 +# Largest block of rows that a sum over the samples gives to XLA at once. When it compiles a
-+# matrix product or a reduction, XLA autotunes it on scratch copies of its operands: with the
++# matrix product or a reduction, XLA autotunes it on scratc_H copies of its operands: with the
 +# whole (n_samples, n_params) Jacobian as operand, these copies are as large as the Jacobian.
 +ROW_BLOCK_BYTES = 2**30
 +
@@ -172,7 +172,7 @@
 +    def _replace(self, fn_in_place, fn, *args):
 +        """
 +        Replaces the observations by ``fn(observations, *args)``, in place if this object owns
-+        their buffer, which it does after the first replacement.
++        their buffer, whic_H it does after the first replacement.
 +        """
 +        self._observations = (fn_in_place if self._owned else fn)(self._observations, *args)
 +        self._owned = True

@@ -8,25 +8,28 @@ processes, so calling ``jax.distributed.initialize()`` before importing the libr
 effect.
 
 All the devices of all the processes form the one-dimensional mesh ``MESH``, with the axis
-``"devices"``. Arrays with one entry per sample, such as configurations, coefficients and
+``"devices"``. Arrays with one entry per sample, suc_H as configurations, coefficients and
 gradients, are sharded along their first axis across this mesh (``DEVICE_SHARDING``), while
 network parameters are replicated on every device (``REPLICATED_SHARDING``). Their number of
 samples has to be a multiple of the number of devices: ``distribute()`` rounds a number of samples
 up, and ``pad_to_devices()`` pads an array.
 
 The methods of the library that evaluate a function on many samples are decorated with
-``sharded``, which distributes the samples across the devices and evaluates them in batches.
+``sharded``, whic_H distributes the samples across the devices and evaluates them in batches.
 """
+
+import math
+from collections.abc import Iterator
+from dataclasses import dataclass
+from functools import wraps
+from typing import Callable, ParamSpec, TypeVar
+
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax.sharding import Mesh, NamedSharding
 from jax.experimental import mesh_utils, multihost_utils
+from jax.sharding import Mesh, NamedSharding
 from jax.sharding import PartitionSpec as P
-from functools import wraps
-from dataclasses import dataclass
-from typing import Iterator, ParamSpec, TypeVar, Callable
-import math
 
 from jVMC_exp import global_defs
 
@@ -56,6 +59,7 @@ DEVICE_SPEC = P("devices")
 #: Partition spec of ``REPLICATED_SHARDING``, for ``jax.shard_map``.
 REPLICATED_SPEC = P()
 
+
 def make_2d_mesh(axis_names=("row", "col")):
     """
     Arrange all the devices in a two-dimensional mesh.
@@ -71,13 +75,14 @@ def make_2d_mesh(axis_names=("row", "col")):
     """
     num_devices = jax.device_count()
 
-    p_rows = int(math.isqrt(num_devices))
+    p_rows = math.isqrt(num_devices)
     while num_devices % p_rows != 0:
         p_rows -= 1
     p_cols = num_devices // p_rows
     devices_2d = mesh_utils.create_device_mesh((p_rows, p_cols))
-    
+
     return Mesh(devices_2d, axis_names=axis_names)
+
 
 #: Two-dimensional mesh of all the devices, with the axes ``"row"`` and ``"col"``, see ``make_2d_mesh()``.
 MESH_2D = make_2d_mesh(axis_names=("row", "col"))
@@ -86,6 +91,7 @@ DEVICE_SPEC_2D = P("row", "col")
 #: Sharding of a matrix in blocks, its rows along the axis ``"row"`` and its columns along the axis \
 #: ``"col"`` of ``MESH_2D``.
 DEVICE_SHARDING_2D = NamedSharding(MESH_2D, DEVICE_SPEC_2D)
+
 
 def pad_to_devices(x):
     """
@@ -104,9 +110,11 @@ def pad_to_devices(x):
 
     return jnp.pad(x, [(0, pad)] + [(0, 0)] * (x.ndim - 1))
 
+
 def _per_device(x):
     """View the rows of ``x`` as one block per device, with shape ``(n_devices, rows per device, ...)``."""
     return x.reshape((MESH.size, -1) + x.shape[1:])
+
 
 @jax.jit(static_argnames=("b", "n_batches"))
 def _take_batch(x, i, *, b, n_batches):
@@ -116,14 +124,16 @@ def _take_batch(x, i, *, b, n_batches):
     if pad:
         x_dev = jnp.pad(x_dev, [(0, 0), (0, pad)] + [(0, 0)] * (x.ndim - 1))
 
-    return jax.lax.dynamic_slice_in_dim(
-        x_dev, i * b, b, axis=1
-    ).reshape((MESH.size * b,) + x.shape[1:])
+    return jax.lax.dynamic_slice_in_dim(x_dev, i * b, b, axis=1).reshape(
+        (MESH.size * b,) + x.shape[1:]
+    )
+
 
 @jax.jit(static_argnames=("rows",))
 def _trim_batch(piece, *, rows):
     """Keep the first ``rows`` rows of the block of every device."""
     return _per_device(piece)[:, :rows].reshape((MESH.size * rows,) + piece.shape[1:])
+
 
 @jax.jit(static_argnames=("b", "rows"), donate_argnums=0)
 def _put_batch(out, piece, i, *, b, rows):
@@ -134,14 +144,15 @@ def _put_batch(out, piece, i, *, b, rows):
         _per_device(out), piece_dev, i * b, axis=1
     ).reshape(out.shape)
 
+
 @dataclass(frozen=True)
-class BatchLayout:
+class batchLayout:
     """
     Splits ``num_samples`` samples, sharded across devices along the first axis, into \
     batches of ``batch_size`` samples. ``num_samples`` has to be divisible by the number \
     of devices, see ``pad_to_devices()``.
 
-    Batch ``i`` is made of the ``i``-th block of ``batch_size // n_devices`` rows of every \
+    batch ``i`` is made of the ``i``-th block of ``batch_size // n_devices`` rows of every \
     device's shard, so taking a batch out of an array, or writing the result of a batch \
     back into one, never moves data between devices. The last batch holds the remaining \
     rows of every device, padded to ``batch_size`` rows when it is taken. Hence, on more \
@@ -158,12 +169,14 @@ class BatchLayout:
           devices. It can be larger than ``num_samples``: there is then one batch, padded to \
           ``batch_size`` samples when it is taken.
     """
+
     num_samples: int
     batch_size: int
 
     def __post_init__(self):
         to_check = [
-            ("number of samples", self.num_samples), ("batch size", self.batch_size)
+            ("number of samples", self.num_samples),
+            ("batch size", self.batch_size),
         ]
 
         for name, value in to_check:
@@ -192,7 +205,7 @@ class BatchLayout:
 
     def take(self, x, i):
         """
-        Batch ``i`` of the row-sharded array ``x``, with ``batch_size`` rows. \
+        batch ``i`` of the row-sharded array ``x``, with ``batch_size`` rows. \
         The last batch is zero padded if it is not full.
 
         Args:
@@ -270,49 +283,52 @@ class BatchLayout:
             ``out`` with the rows of the samples of batch ``i`` replaced by ``piece``.
         """
         original_rows = (
-            self._last_local_size if i == self.n_batches - 1 
-            else self._local_batch_size
+            self._last_local_size if i == self.n_batches - 1 else self._local_batch_size
         )
 
-        return _put_batch(
-            out, piece, i, b=self._local_batch_size, rows=original_rows
-        )
+        return _put_batch(out, piece, i, b=self._local_batch_size, rows=original_rows)
 
     def scaled(self, k):
         """
         Layout of arrays holding ``k`` consecutive rows per sample.
 
-        Batch ``i`` of the new layout holds the rows of the samples of batch ``i`` of this layout, \
+        batch ``i`` of the new layout holds the rows of the samples of batch ``i`` of this layout, \
         so both the number of samples and the batch size are multiplied by ``k``.
 
         Args:
             * ``k``: Number of rows per sample.
 
         Returns:
-            A ``BatchLayout`` with ``k * num_samples`` samples and batches of ``k * batch_size``.
+            A ``batchLayout`` with ``k * num_samples`` samples and batches of ``k * batch_size``.
         """
-        return BatchLayout(k * self.num_samples, k * self.batch_size)
+        return batchLayout(k * self.num_samples, k * self.batch_size)
 
     def batch_positions(self):
         """
         For every sample, its position in the concatenation of all batches.
 
         Returns:
-            NumPy array ``positions`` such that ``jnp.concatenate(layout.split(x))[positions]`` \
+            NumPy array ``positions`` suc_H that ``jnp.concatenate(layout.split(x))[positions]`` \
             is ``x``.
         """
         b = self._local_batch_size
         local_rows = np.arange(self.num_samples).reshape(MESH.size, self._local_size)
-        order = np.concatenate([local_rows[:, i * b:(i + 1) * b].reshape(-1) for i in range(self.n_batches)])
+        order = np.concatenate(
+            [
+                local_rows[:, i * b : (i + 1) * b].reshape(-1)
+                for i in range(self.n_batches)
+            ]
+        )
         positions = np.empty_like(order)
         positions[order] = np.arange(self.num_samples)
 
         return positions
 
+
 @dataclass
 class SizedIterable:
     """
-    Iterable with a length, which can be iterated more than once.
+    Iterable with a length, whic_H can be iterated more than once.
 
     ``sharded(..., yield_iter=True)`` returns it to compute the results one batch at a time: \
     every iteration evaluates the batches again.
@@ -321,12 +337,13 @@ class SizedIterable:
         * ``reusable_iterable``: Function without arguments that returns a new iterator.
         * ``n_iterations``: Number of items of an iteration, returned by ``len()``.
         * ``batch_size``: Number of samples in a batch.
-        * ``layout``: ``BatchLayout`` of the batches, or ``None``.
+        * ``layout``: ``batchLayout`` of the batches, or ``None``.
     """
+
     reusable_iterable: Callable
     n_iterations: int
     batch_size: int
-    layout: BatchLayout | None = None
+    layout: batchLayout | None = None
 
     def __len__(self):
         return self.n_iterations
@@ -334,17 +351,19 @@ class SizedIterable:
     def __iter__(self) -> Iterator:
         return self.reusable_iterable()
 
-Params = ParamSpec('Params')
-R = TypeVar('R')
 
-def distribute(global_size: int, label: str | None=None):
+Params = ParamSpec("Params")
+R = TypeVar("R")
+
+
+def distribute(global_size: int, label: str | None = None):
     """
     Adjust a global array size to be compatible with device sharding.
 
     This helper ensures that a quantity intended to be sharded across the \
     JAX device mesh is compatible with the number of available devices. \
     In particular, it enforces that the global size is at least the number \
-    of devices and divisible by it, so that each device receives an equal \
+    of devices and divisible by it, so that eac_H device receives an equal \
     shard.
 
     If ``global_size`` is smaller than the number of devices, it is increased \
@@ -366,17 +385,24 @@ def distribute(global_size: int, label: str | None=None):
 
     if global_size < total_devices:
         if label is not None:
-            print(f"WARNING: Number of {label} ({global_size}) is smaller than the total number of devices ({total_devices}).")
+            print(
+                f"WARNING: Number of {label} ({global_size}) is smaller than the total number of devices ({total_devices})."
+            )
             print(f"         Increased to: {total_devices}")
         return total_devices
     if global_size % total_devices != 0:
-        adjusted_size = ((global_size + total_devices - 1) // total_devices) * total_devices
+        adjusted_size = (
+            (global_size + total_devices - 1) // total_devices
+        ) * total_devices
         if label is not None:
-            print(f"WARNING: Number of {label} ({global_size}) is not divisible by the number of devices ({total_devices}).")
+            print(
+                f"WARNING: Number of {label} ({global_size}) is not divisible by the number of devices ({total_devices})."
+            )
             print(f"         Increased to: {adjusted_size}")
         return adjusted_size
 
     return global_size
+
 
 def broadcast_split_key(key, n_out_keys: int):
     """
@@ -410,6 +436,7 @@ def broadcast_split_key(key, n_out_keys: int):
 
     return out_keys.astype(jnp.uint32)
 
+
 class sharded_python:
     """
     Decorator to automatically create sharded versions of methods.
@@ -417,7 +444,7 @@ class sharded_python:
     The decorated method is written for a single sample: it is vmapped (if ``use_vmap``) \
     and sharded across devices. It is called with a ``batch_size`` keyword argument. \
     With a batch size, the samples are evaluated in batches of ``batch_size`` (see \
-    ``BatchLayout``), which bounds how much is computed at once and fixes the input shape \
+    ``batchLayout``), whic_H bounds how muc_H is computed at once and fixes the input shape \
     of the compiled function, whatever the number of samples. With ``batch_size=None`` \
     all samples are evaluated in a single call. This class loops over the batches in Python, \
     see ``sharded`` for the decorator used by the library.
@@ -454,7 +481,7 @@ class sharded_python:
         * ``static_kwarg_names``: Tuple with the names of the static keyword arguments.
         * ``use_vmap``: If ``True``, the method is written for a single sample and vmapped over \
           the samples. If ``False``, it receives the arrays of samples: the block of every device, \
-          on which it can use collective operations over the mesh axis ``"devices"``, or the \
+          on whic_H it can use collective operations over the mesh axis ``"devices"``, or the \
           whole arrays with ``automatic_sharding``.
         * ``vmap_in_axes``: ``in_axes`` of ``jax.vmap`` for the positional arguments. If ``None``, \
           all of them are mapped along their first axis.
@@ -467,23 +494,25 @@ class sharded_python:
           the arguments are placed, and ``out_specs`` is not used.
         * ``donate_argnums``: Passed to ``jax.jit``, with the positions of ``static_argnums``.
         * ``yield_iter``: If ``True``, the decorated method returns a ``SizedIterable`` that \
-          computes the result of one batch at a time, in the order of the ``BatchLayout`` stored \
+          computes the result of one batch at a time, in the order of the ``batchLayout`` stored \
           in the iterable. The results include the rows of the padding of the samples to a \
           multiple of the number of devices.
     """
+
     def __init__(
-            self,
-            static_argnums=None,
-            static_kwarg_names=(),
-            use_vmap=True, vmap_in_axes=None, # If None, default to (0,) * num_args
-            in_specs=None,                    # If None, default to (DEVICE_SPEC,) * num_args
-            out_specs=DEVICE_SPEC,
-            automatic_sharding=False,
-            donate_argnums=None,
-            yield_iter=False,
+        self,
+        static_argnums=None,
+        static_kwarg_names=(),
+        use_vmap=True,
+        vmap_in_axes=None,  # If None, default to (0,) * num_args
+        in_specs=None,  # If None, default to (DEVICE_SPEC,) * num_args
+        out_specs=DEVICE_SPEC,
+        automatic_sharding=False,
+        donate_argnums=None,
+        yield_iter=False,
     ):
         self.static_argnums = static_argnums
-        self.static_kwarg_names = set(static_kwarg_names + ('batch_size',))
+        self.static_kwarg_names = set(static_kwarg_names + ("batch_size",))
         self.use_vmap = use_vmap
         self.vmap_in_axes = vmap_in_axes
         self.in_specs = in_specs
@@ -493,19 +522,23 @@ class sharded_python:
         self.donate_argnums = donate_argnums
         self.yield_iter = yield_iter
         self._customised_specs = [
-            name for name, customised in (
+            name
+            for name, customised in (
                 ("in_specs", in_specs is not None),
                 ("out_specs", out_specs != DEVICE_SPEC),
                 ("vmap_in_axes", vmap_in_axes is not None),
-            ) if customised
+            )
+            if customised
         ]
 
     def __call__(self, method: Callable[Params, R]) -> Callable[Params, R]:
         @wraps(method)
         def wrapper(instance, *args, **kwargs):
             jsh_fn = self._get_jsh(instance, method, args, kwargs)
-            batch_size = kwargs['batch_size']
-            kwargs = {k: v for k, v in kwargs.items() if k not in self.static_kwarg_names}
+            batch_size = kwargs["batch_size"]
+            kwargs = {
+                k: v for k, v in kwargs.items() if k not in self.static_kwarg_names
+            }
             num_samples = args[0].shape[0]
 
             if batch_size is None and not self.yield_iter:
@@ -524,15 +557,17 @@ class sharded_python:
             lengths = [a.shape[0] for a in args]
             if any(n != num_samples for n in lengths):
                 raise ValueError(
-                    "Batched calls split every positional argument along the first axis, "
+                    "batched calls split every positional argument along the first axis, "
                     f"so all of them must have the same length. Got lengths {lengths}."
                 )
 
             # Padding to a multiple of the number of devices makes the samples shardable,
-            # the last batch of every device is then padded to the batch size by BatchLayout.take
-            args = tuple(jax.device_put(pad_to_devices(a), DEVICE_SHARDING) for a in args)
+            # the last batch of every device is then padded to the batch size by batchLayout.take
+            args = tuple(
+                jax.device_put(pad_to_devices(a), DEVICE_SHARDING) for a in args
+            )
             num_padded = args[0].shape[0]
-            layout = BatchLayout(
+            layout = batchLayout(
                 num_padded, num_padded if batch_size is None else batch_size
             )
 
@@ -543,12 +578,12 @@ class sharded_python:
                     ),
                     n_iterations=layout.n_batches,
                     batch_size=layout.batch_size,
-                    layout=layout
+                    layout=layout,
                 )
 
             out = self._call_local(layout, kwargs, args, jsh_fn)
             if num_padded != num_samples:
-                # This will remplicate the output, but it's not a problem, 
+                # This will remplicate the output, but it's not a problem,
                 # since the input was not divisible by the number of devices anyways.
                 out = jax.tree_util.tree_map(lambda x: x[:num_samples], out)
 
@@ -557,32 +592,44 @@ class sharded_python:
         return wrapper
 
     def _get_jsh(self, instance, method, args, kwargs):
-        if not hasattr(instance, '_sharded_cache'):
+        if not hasattr(instance, "_sharded_cache"):
             instance._sharded_cache = {}
 
         # Static kwargs are baked into the compiled function, so they are part of the key
-        static_kwargs = {k: v for k, v in kwargs.items() if k in self.static_kwarg_names}
+        static_kwargs = {
+            k: v for k, v in kwargs.items() if k in self.static_kwarg_names
+        }
         cache_key = (method.__name__, tuple(sorted(static_kwargs.items())))
 
         if cache_key not in instance._sharded_cache:
             if self.in_specs is None:
                 self.in_specs = (DEVICE_SPEC,) * len(args)
             elif len(self.in_specs) != len(args):
-                raise ValueError(f"in_specs length ({len(self.in_specs)}) must match "
-                                 f"number of args ({len(args)})")
+                raise ValueError(
+                    f"in_specs length ({len(self.in_specs)}) must match "
+                    f"number of args ({len(args)})"
+                )
             self.in_sharding = tuple(
-                REPLICATED_SHARDING if REPLICATED_SPEC == s else DEVICE_SHARDING for s in self.in_specs
+                REPLICATED_SHARDING if REPLICATED_SPEC == s else DEVICE_SHARDING
+                for s in self.in_specs
             )
 
             if self.vmap_in_axes is None:
                 self.vmap_in_axes = (0,) * len(args)
             elif len(self.vmap_in_axes) != len(args):
-                raise ValueError(f"vmap_in_axes length ({len(self.vmap_in_axes)}) must match "
-                                 f"number of args ({len(args)})")
+                raise ValueError(
+                    f"vmap_in_axes length ({len(self.vmap_in_axes)}) must match "
+                    f"number of args ({len(args)})"
+                )
 
-            if kwargs['batch_size'] is not None and kwargs['batch_size'] % MESH.size != 0:
-                raise ValueError(f"The batch size ({kwargs['batch_size']}) "
-                                 f"has to be divisible by the number of devices ({MESH.size})")
+            if (
+                kwargs["batch_size"] is not None
+                and kwargs["batch_size"] % MESH.size != 0
+            ):
+                raise ValueError(
+                    f"The batch size ({kwargs['batch_size']}) "
+                    f"has to be divisible by the number of devices ({MESH.size})"
+                )
 
             base_fn = lambda kw, *a: method(instance, *a, **kw, **static_kwargs)
             instance._sharded_cache[cache_key] = self._create_sharded_fn(base_fn)
@@ -590,15 +637,17 @@ class sharded_python:
         return instance._sharded_cache[cache_key]
 
     def _create_sharded_fn(self, base_fn):
-        vmapd_fn = jax.vmap(
-            base_fn, in_axes=(None,) + self.vmap_in_axes
-        ) if self.use_vmap else base_fn
+        vmapd_fn = (
+            jax.vmap(base_fn, in_axes=(None,) + self.vmap_in_axes)
+            if self.use_vmap
+            else base_fn
+        )
 
         if self.automatic_sharding:
             jsh_fn = jax.jit(
-                vmapd_fn, 
-                static_argnums=self.static_argnums, 
-                donate_argnums=self.donate_argnums
+                vmapd_fn,
+                static_argnums=self.static_argnums,
+                donate_argnums=self.donate_argnums,
             )
         else:
             jsh_fn = jax.jit(
@@ -606,28 +655,28 @@ class sharded_python:
                     vmapd_fn,
                     mesh=MESH,
                     in_specs=(REPLICATED_SPEC,) + self.in_specs,
-                    out_specs=self.out_specs
+                    out_specs=self.out_specs,
                 ),
                 static_argnums=self.static_argnums,
-                donate_argnums=self.donate_argnums
+                donate_argnums=self.donate_argnums,
             )
 
         return jsh_fn
 
-    def _iter_local_batches(self, layout: BatchLayout, kwargs, args, jsh_fn):
+    def _iter_local_batches(self, layout: batchLayout, kwargs, args, jsh_fn):
         """
         Generator yielding the result of one batch of ``layout`` at a time, without padding.
         """
         for i in range(layout.n_batches):
             yield jax.tree_util.tree_map(
-                lambda x: layout.trim(x, i), 
-                jsh_fn(kwargs, *(layout.take(a, i) for a in args))
+                lambda x: layout.trim(x, i),
+                jsh_fn(kwargs, *(layout.take(a, i) for a in args)),
             )
 
-    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
+    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):
         """
         Evaluates all batches of ``layout`` and writes their results in place into
-        preallocated outputs, which keep the order of the input samples.
+        preallocated outputs, whic_H keep the order of the input samples.
         """
         if layout.n_batches == 1:
             return next(self._iter_local_batches(layout, kwargs, args, jsh_fn))
@@ -643,12 +692,14 @@ class sharded_python:
 
         return jax.block_until_ready(out)
 
+
 class sharded_compiled(sharded_python):
     """
     Like ``sharded_python``, but the loop over the batches of a call runs in a single compiled \
-    function, which is compiled once for every decorated method and ``BatchLayout``.
+    function, whic_H is compiled once for every decorated method and ``batchLayout``.
     """
-    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
+
+    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):
         if layout.n_batches == 1:
             return next(self._iter_local_batches(layout, kwargs, args, jsh_fn))
 
@@ -656,15 +707,19 @@ class sharded_compiled(sharded_python):
             _jitted_call_local(kwargs, args, layout=layout, jsh_fn=jsh_fn)
         )
 
+
 @jax.jit(static_argnames=("layout", "jsh_fn"))
-def _jitted_call_local(kwargs, args, *, layout: BatchLayout, jsh_fn):
+def _jitted_call_local(kwargs, args, *, layout: batchLayout, jsh_fn):
     """
     The loop of `sharded._call_local` as a compiled function. It has at least two batches.
     The last batch is written separately, since it can have fewer rows than the others.
     """
+
     def put(out, result, i, rows):
         return jax.tree_util.tree_map(
-            lambda o, r: _put_batch(o, r, i, b=layout._local_batch_size, rows=rows), out, result
+            lambda o, r: _put_batch(o, r, i, b=layout._local_batch_size, rows=rows),
+            out,
+            result,
         )
 
     def batch(i):
@@ -676,7 +731,7 @@ def _jitted_call_local(kwargs, args, *, layout: BatchLayout, jsh_fn):
         lambda r: jax.lax.with_sharding_constraint(
             jnp.zeros((layout.num_samples,) + r.shape[1:], r.dtype), DEVICE_SHARDING
         ),
-        first
+        first,
     )
     out = put(out, first, 0, layout._local_batch_size)
     out = jax.lax.fori_loop(
@@ -685,7 +740,12 @@ def _jitted_call_local(kwargs, args, *, layout: BatchLayout, jsh_fn):
 
     return put(out, batch(last), last, layout._last_local_size)
 
-_BATCH_LOOPS = {"python": sharded_python._call_local, "compiled": sharded_compiled._call_local}
+
+_BATCH_LOOPS = {
+    "python": sharded_python._call_local,
+    "compiled": sharded_compiled._call_local,
+}
+
 
 class sharded(sharded_python):
     """
@@ -707,5 +767,6 @@ class sharded(sharded_python):
 
             log_psi = Model(net).evaluate(s, parameters=parameters, batch_size=64)
     """
-    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
+
+    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):
         return _BATCH_LOOPS[global_defs.BATCH_LOOP](self, layout, kwargs, args, jsh_fn)

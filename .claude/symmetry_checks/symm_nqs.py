@@ -23,8 +23,8 @@ L = 6
 b = make_basis(L, 2)
 for kind in ("spin", "spinless_fermion"):
     symm = square_translation_symmetry(L, 1, kind, q=(1, 0))
-    base = NQS(nets.CpxRBM(numHidden=4, bias=True), L, batchSize=8 * nd, seed=3)
-    proj = NQS(nets.CpxRBM(numHidden=4, bias=True), L, batchSize=8 * nd, seed=3, orbit=symm)
+    base = NQS(nets.CpxRBM(num_hidden=4, bias=True), L, batch_size=8 * nd, seed=3)
+    proj = NQS(nets.CpxRBM(num_hidden=4, bias=True), L, batch_size=8 * nd, seed=3, orbit=symm)
     proj.parameters = base.parameters_flat
     psi = np.asarray(jnp.exp(base(jnp.asarray(b))))
     psi_p = np.asarray(jnp.exp(proj(jnp.asarray(b))))
@@ -32,8 +32,8 @@ for kind in ("spin", "spinless_fermion"):
 
 # b) two-dimensional sample shape with a 2D network
 symm = square_translation_symmetry(3, 3, "spin")
-run("b CNN, sampleShape (3, 3), no orbit", lambda: NQS(nets.CNN(F=(3, 3), channels=(2,), strides=(1, 1)), (3, 3), batchSize=9 * nd, seed=1)(jnp.zeros((9 * nd, 3, 3), jnp.int32)).shape)
-run("b CNN, sampleShape (3, 3), orbit", lambda: NQS(nets.CNN(F=(3, 3), channels=(2,), strides=(1, 1)), (3, 3), batchSize=9 * nd, seed=1, orbit=symm)(jnp.zeros((9 * nd, 3, 3), jnp.int32)).shape)
+run("b CNN, sample_shape (3, 3), no orbit", lambda: NQS(nets.CNN(F=(3, 3), channels=(2,), strides=(1, 1)), (3, 3), batch_size=9 * nd, seed=1)(jnp.zeros((9 * nd, 3, 3), jnp.int32)).shape)
+run("b CNN, sample_shape (3, 3), orbit", lambda: NQS(nets.CNN(F=(3, 3), channels=(2,), strides=(1, 1)), (3, 3), batch_size=9 * nd, seed=1, orbit=symm)(jnp.zeros((9 * nd, 3, 3), jnp.int32)).shape)
 
 # c) direct sampling from a projected generator with 'sep': histogram against exact |psi_P|^2
 import flax.linen as nn
@@ -49,7 +49,7 @@ class ProductGenerator(nn.Module):
 L = 4
 b = make_basis(L, 2)
 for name, symm in [("spin flip", spin_flip_symmetry(L, 1)), ("translation", square_translation_symmetry(L, 1, "spin"))]:
-    psi = NQS(ProductGenerator(L), L, batchSize=64 * nd, seed=5, orbit=symm, symmetry_average="sep")
+    psi = NQS(ProductGenerator(L), L, batch_size=64 * nd, seed=5, orbit=symm, symmetry_average="sep")
     p_exact = np.exp(2 * np.real(np.asarray(psi(jnp.asarray(b)))))
     n = 64 * nd * 500
     s = np.asarray(psi.sample(n, key=jax.random.PRNGKey(0)))
@@ -65,6 +65,6 @@ for Lx in (6, 10, 14):
 
 # e) output dtype of a projected net with single-precision parameters
 symm = square_translation_symmetry(4, 1, "spin")
-pn = ProjectedOrbitNet(base_net=nets.CpxRBM(numHidden=2), symmetry=symm)
+pn = ProjectedOrbitNet(base_net=nets.CpxRBM(num_hidden=2), symmetry=symm)
 v = pn.init(jax.random.PRNGKey(0), jnp.zeros(4, jnp.int32))
 run("e output dtype", lambda: pn.apply(v, jnp.zeros(4, jnp.int32)).dtype)

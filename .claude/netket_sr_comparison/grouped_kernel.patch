@@ -5,10 +5,10 @@
  R = TypeVar('R')
  
 +# A batched call of a method decorated with ``group_batches=True`` evaluates up to
-+# MAX_BATCHES_PER_CALL batches per dispatch, with at most GROUP_BYTES of arguments per device
-+MAX_BATCHES_PER_CALL = 64
++# MAX_batchES_PER_CALL batches per dispatch, with at most GROUP_BYTES of arguments per device
++MAX_batchES_PER_CALL = 64
 +GROUP_BYTES = 2**28
-+_N_BATCHES = "_n_batches"
++_N_batchES = "_n_batches"
 +
 +def _loop_over_batches(fn, b):
 +    """
@@ -20,7 +20,7 @@
 +    """
 +    def looped_fn(kw, *args):
 +        kw = dict(kw)
-+        n_batches = kw.pop(_N_BATCHES)
++        n_batches = kw.pop(_N_batchES)
 +
 +        def batch(i):
 +            return fn(kw, *(jax.lax.dynamic_slice_in_dim(a, i * b, b) for a in args))
@@ -111,25 +111,25 @@
                  jsh_fn(kwargs, *(layout.take(a, i) for a in args))
              )
  
-+    def _call_grouped(self, layout: BatchLayout, kwargs, args, jsh_fn):
++    def _call_grouped(self, layout: batchLayout, kwargs, args, jsh_fn):
 +        """
-+        As `_call_local`, but every dispatch evaluates a group of up to ``MAX_BATCHES_PER_CALL``
++        As `_call_local`, but every dispatch evaluates a group of up to ``MAX_batchES_PER_CALL``
 +        consecutive batches of ``layout``, in a loop inside the compiled function (see
-+        `_loop_over_batches`). Every dispatch costs a fixed host time, which on a GPU can be
++        `_loop_over_batches`). Every dispatch costs a fixed host time, whic_H on a GPU can be
 +        longer than the evaluation of a batch. The compiled function always gets a full group
 +        of rows, the last group being zero padded, so it is compiled once whatever the number
 +        of samples, and the padding batches are not evaluated.
 +        """
 +        row_bytes = sum(math.prod(a.shape[1:]) * a.dtype.itemsize for a in args)
 +        group = max(1, min(
-+            MAX_BATCHES_PER_CALL, GROUP_BYTES // max(1, layout._local_batch_size * row_bytes)
++            MAX_batchES_PER_CALL, GROUP_BYTES // max(1, layout._local_batch_size * row_bytes)
 +        ))
-+        groups = BatchLayout(layout.num_samples, group * layout.batch_size)
++        groups = batchLayout(layout.num_samples, group * layout.batch_size)
 +
 +        out = None
 +        for g in range(groups.n_batches):
 +            n_batches = min(group, layout.n_batches - g * group)
-+            result = jsh_fn({**kwargs, _N_BATCHES: n_batches}, *(groups.take(a, g) for a in args))
++            result = jsh_fn({**kwargs, _N_batchES: n_batches}, *(groups.take(a, g) for a in args))
 +            if groups.n_batches == 1:
 +                return jax.tree_util.tree_map(lambda x: groups.trim(x, 0), result)
 +            if out is None:
@@ -138,13 +138,13 @@
 +
 +        return jax.block_until_ready(out)
 +
-     def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
+     def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):
          """
          Evaluates all batches of ``layout`` and writes their results in place into
 --- a/jVMC_exp/vqs.py
 +++ b/jVMC_exp/vqs.py
 @@ -455,7 +455,7 @@
-             s, parameters=self.eval_parameters, batch_size=self.batchSize
+             s, parameters=self.eval_parameters, batch_size=self.batch_size
          ).astype(self.out_dtype)
      
 -    @sharded()

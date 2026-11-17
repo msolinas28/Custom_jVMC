@@ -1,9 +1,10 @@
+import math
+import warnings
+from typing import Literal
+
 import jax
 import jax.numpy as jnp
-import warnings
 import numpy as np
-from typing import Literal
-import math
 
 try:
     import jaxmg
@@ -11,17 +12,15 @@ except ImportError:
     jaxmg = None
 
 from jVMC_exp.global_defs import USE_DISTRIBUTED
-from jVMC_exp.sharding_config import (
-    MESH, MESH_2D,
-    DEVICE_SHARDING, DEVICE_SHARDING_2D
-)
+from jVMC_exp.sharding_config import DEVICE_SHARDING, DEVICE_SHARDING_2D, MESH, MESH_2D
+
 
 def _distributed_warning(A, mode):
     if mode.lower() == "distributed":
         if jaxmg is None:
             if jax.process_index() == 0:
                 warnings.warn(
-                    "mode='distributed' requires the 'jaxmg' package, which is not installed "
+                    "mode='distributed' requires the 'jaxmg' package, whic_H is not installed "
                     "(install it via a CUDA extra, e.g. `pip install jVMC_exp[cuda13]`). "
                     "Falling back to mode='device'."
                 )
@@ -60,17 +59,19 @@ def _distributed_warning(A, mode):
                     "mode='distributed' requires JVMC_USE_DISTRIBUTED=true and "
                     "one process per GPU, since jaxmg's cuSOLVERMp backend "
                     "needs rank-per-GPU execution "
-                    "(e.g. launch with `srun --ntasks=<n_gpus> --gpus-per-task=1`). "
+                    "(e.g. launc_H with `srun --ntasks=<n_gpus> --gpus-per-task=1`). "
                     "Falling back to mode='device'."
                 )
             mode = "device"
 
     return mode
 
+
 def _eigh_numpy(S):
     e, V = np.linalg.eigh(np.array(S))
 
     return jnp.array(e), jnp.array(V)
+
 
 def smooth_cutoff_fn(x, c, exp=6):
     """
@@ -86,14 +87,15 @@ def smooth_cutoff_fn(x, c, exp=6):
     Returns:
         :math:`r(x)`, with the shape of ``x``.
     """
-    return 1 / (1 + (c / x)**exp)
+    return 1 / (1 + (c / x) ** exp)
+
 
 def diagonalize(
-        A,
-        pad_size: int = 0,
-        mode: Literal["device", "distributed", "host"] = "device",
-        T_A: int | None = None
-    ):
+    A,
+    pad_size: int = 0,
+    mode: Literal["device", "distributed", "host"] = "device",
+    T_A: int | None = None,
+):
     """
     Eigenvalues and eigenvectors of a Hermitian matrix.
 
@@ -108,7 +110,7 @@ def diagonalize(
 
     * ``"device"``: ``jax.numpy.linalg.eigh`` on the devices of :math:`A`. If it raises \
       ``ValueError``, ``numpy.linalg.eigh`` is used instead, with a ``RuntimeWarning``.
-    * ``"host"``: ``numpy.linalg.eigh`` on the host, which gathers :math:`A`.
+    * ``"host"``: ``numpy.linalg.eigh`` on the host, whic_H gathers :math:`A`.
     * ``"distributed"``: ``jaxmg.syevd`` on :math:`A` sharded in blocks over ``MESH_2D`` (see \
       ``jVMC_exp.sharding_config``), with :math:`V` sharded along its rows afterwards. It needs \
       the ``jaxmg`` package, a GPU backend, more than one device, a matrix size divisible by the \
@@ -131,7 +133,7 @@ def diagonalize(
     """
     mode = _distributed_warning(A, mode)
 
-    if pad_size !=0:
+    if pad_size != 0:
         # Frobenius norm >= spectral radius for Hermitian A
         # Used here to recognize the fake eigenvalues given by padding
         c = 2 * jnp.linalg.norm(A) + 1
@@ -145,8 +147,9 @@ def diagonalize(
         except ValueError:
             if jax.process_index() == 0:
                 warnings.warn(
-                    "jax.numpy.linalg.eigh raised an exception. Falling back to " 
-                    "numpy.linalg.eigh for diagonalization.", RuntimeWarning
+                    "jax.numpy.linalg.eigh raised an exception. Falling back to "
+                    "numpy.linalg.eigh for diagonalization.",
+                    RuntimeWarning,
                 )
             ev, V = _eigh_numpy(A)
 

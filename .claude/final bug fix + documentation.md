@@ -4,7 +4,7 @@ Handover for continuing the work in a new chat. Last updated 2026-11-05.
 
 ## Goal
 
-Before the release, go through the library one folder (or module) at a time and, for each one:
+Before the release, go through the library one folder (or module) at a time and, for eac_H one:
 
 1. Update the documentation: docstrings in the code and the matching Sphinx page in
    `documentation/source/`.
@@ -12,15 +12,15 @@ Before the release, go through the library one folder (or module) at a time and,
 
 The user then answers point by point: "fix it", "leave it", "I fixed it" (verify it), or a
 question. Only change code when asked; answer questions with snippets that were tested on a
-scratch copy. The user commits after each folder.
+scratc_H copy. The user commits after eac_H folder.
 
 ## Procedure for one folder
 
 1. Read every file of the folder, its Sphinx page, its tests, and the call sites in the rest of
-   the library (`grep`). Check `git status` / `git log` first: the user edits between rounds.
+   the library (`grep`). check `git status` / `git log` first: the user edits between rounds.
 2. Write a reproduction script in the scratchpad for every suspected bug and run it on CPU with
    1 and 3 devices. Only report what was run, or say clearly that something was read, not run.
-   Compare against exact results (dense matrices, `ExactSampler`, analytic values) wherever
+   Compare against exact results (dense matrices, `exact_sampler`, analytic values) wherever
    possible.
 3. Update the documentation (see conventions below), then check that the code is unchanged apart
    from docstrings with the AST script below.
@@ -66,21 +66,21 @@ user fixes needed a correction (e.g. `jnp.prod` on a tuple, a MALA wrap at the w
 - Python with JAX: `~/venv/jVMC_new/bin/python` (jax 0.10.1) on the old machine;
   `~/env/jVMC_env_exp/bin/python` (jax 0.10.2) on the Mac used since 2026-11-05, where pytest is not
   installed: use `python -m unittest tests.<name>_test`. `-m` puts the working directory first on
-  `sys.path`, so `cd` into a scratch copy to test it. The system `python3` has no JAX and is only
+  `sys.path`, so `cd` into a scratc_H copy to test it. The system `python3` has no JAX and is only
   good for AST checks and text edits.
 - Always set `JAX_PLATFORMS=cpu`; simulate devices with
   `XLA_FLAGS=--xla_force_host_platform_device_count=3`, and run scripts with
   `PYTHONPATH=<repo>`.
 - Run test suites **one at a time**: two suites in parallel were killed for lack of memory
   (15 GB machine).
-- Scratch copies for prototypes: `cp -r jVMC_exp tests pytest.ini <scratch>/trial/`, patch,
-  then run with `PYTHONPATH=<scratch>/trial`. The scratchpad has been wiped between sessions:
+- Scratc_H copies for prototypes: `cp -r jVMC_exp tests pytest.ini <scratc_H>/trial/`, patch,
+  then run with `PYTHONPATH=<scratc_H>/trial`. The scratchpad has been wiped between sessions:
   anything worth keeping goes in `.claude/`.
 - Sphinx is not installed in the venvs. Install it into the scratchpad only:
-  `~/venv/jVMC_new/bin/pip install -q --target <scratch>/sphinxdeps sphinx sphinx_rtd_theme mock`,
+  `~/venv/jVMC_new/bin/pip install -q --target <scratc_H>/sphinxdeps sphinx sphinx_rtd_theme mock`,
   then build one page from `documentation/source`:
-  `PYTHONPATH=<scratch>/sphinxdeps JAX_PLATFORMS=cpu ~/venv/jVMC_new/bin/python -m sphinx -b html -E -d <scratch>/doctrees . <scratch>/html <page>.rst`.
-  Check the log for lines mentioning the page and count `system-message` in the HTML.
+  `PYTHONPATH=<scratc_H>/sphinxdeps JAX_PLATFORMS=cpu ~/venv/jVMC_new/bin/python -m sphinx -b html -E -d <scratc_H>/doctrees . <scratc_H>/html <page>.rst`.
+  check the log for lines mentioning the page and count `system-message` in the HTML.
 - Code unchanged apart from docstrings (`#:` comments don't appear in the AST anyway):
 
   ```python
@@ -135,15 +135,15 @@ Still to do: `nets/`,
   `optimizer.rst`, `symmetry.rst`, `util.rst`). Snippets run on 1 and 3 devices; no Sphinx warning
   for the page.
 - Bugs reported (numbers as in the chat): 1 `OutputManager.save_to_h5()` raises TypeError for a
-  `None` in the metadata, and `SR`/`TDVP` with the default `PinvSNR` (`snr_tol=0`, or any ExactSampler)
+  `None` in the metadata, and `SR`/`TDVP` with the default `PinvSNR` (`snr_tol=0`, or any exact_sampler)
   always store `snr=None` with `save_meta_data=True`; the default `append=False` truncates the file
   first, so the incremental file loses everything after the failing key (parameters gone);
   static `write_metadata(x=None)` fails too; 2 `NQS(seed=None)` on several processes: AssertionError
-  in `jax.device_put` (each process draws its own `generate_seed()`; seed=123 works);
+  in `jax.device_put` (eac_H process draws its own `generate_seed()`; seed=123 works);
   3 `init_net`: `"net2"` calls `TwoNets(net1=, net2=)` (field is `nets`), mutates `descr` (2nd call
-  KeyError), tuple `actFun` KeyError, int `dims` TypeError, only used by POVM examples;
+  KeyError), tuple `act_fun` KeyError, int `dims` TypeError, only used by POVM examples;
   4 `OutputManager(path)` default `append=True`: rerunning a script appends to the old datasets
-  (`times` = [0 1 2 0 1 2]); 5 `matrix_to_jvmc_operator` builds Mᵀ (`to_dense` = Mᵀ), which the
+  (`times` = [0 1 2 0 1 2]); 5 `matrix_to_jvmc_operator` builds Mᵀ (`to_dense` = Mᵀ), whic_H the
   deferred get_O_loc transpose bug turns back into M: fix both together; 6 `check_network_parameter_shape`
   is always True (dict accepted in memory, fails in the file); 7 `format_key(jnp.int32(5))` returns
   the scalar (invalid key), NumPy copy of a key TypeError, float seed truncated; 8 `measure` drops
@@ -166,7 +166,7 @@ Still to do: `nets/`,
   `parent.create_dataset(data=...)` at `_write_dict_to_h5` (`output_manager.py:384`) raises
   `TypeError: Object dtype dtype('O') has no native HDF5 equivalent`; static case line 224
   (`One of data, shape or dtype must be specified`). Streaming already skips `None`
-  (`_append_h5`, line 125), which is why only `save_to_h5()` fails. Proposed: skip `None` in
+  (`_append_h5`, line 125), whic_H is why only `save_to_h5()` fails. Proposed: skip `None` in
   `_write_dict_to_h5` and static `write_metadata` like streaming does, and convert the whole tree
   before opening the file (and before `del parent[key]`), so a failure leaves the file untouched;
   optionally don't report `snr` when the SNR cutoff is off (solver pass).
@@ -175,11 +175,11 @@ Still to do: `nets/`,
   Prototyped in the scratchpad on 2 processes: same seed, `NQS(seed=None)` works, MCSampler fine;
   single process returns the value. The sampler already uses only process 0's key
   (`broadcast_split_key`), so nothing changes there.
-- Checked: `s_norm_fn` = dense reference (variance of G·v) to 1e-16 for holomorphic, non-holomorphic
-  and real-parameter nets, Pinv and CG (callable qgt), padding on 3 devices; works as `normFunction`
+- checked: `s_norm_fn` = dense reference (variance of G·v) to 1e-16 for holomorphic, non-holomorphic
+  and real-parameter nets, Pinv and CG (callable qgt), padding on 3 devices; works as `norm_function`
   of `time_evolution`. All four flat gradients match finite differences; holomorphy detection right
   in complex64 and for large gradients. `measure` with time-dependent operators and
-  `num_samples` + ExactSampler is harmless (callable prefactors must take `**kwargs`). Layout
+  `num_samples` + exact_sampler is harmless (callable prefactors must take `**kwargs`). Layout
   helpers consistent with `parameters_flat` and the holomorphic gradients. OutputManager/InputManager
   roundtrip of parameters and observables, groups, checkpoints by time; `_as_h5_array` of global
   arrays works on process 0 alone (2 processes). MCSampler(key=None) on 2 processes: fine.
@@ -188,9 +188,9 @@ Still to do: `nets/`,
 
 ### Stepper, changes of 2026-11-05
 
-- Module docstring (ODE, list of steppers, right-hand side contract `f(y, t, **rhsArgs, intStep=k)`,
+- Module docstring (ODE, list of steppers, right-hand side contract `f(y, t, **rhs_args, int_step=k)`,
   usage); docstrings for every class/method/property, `Initializer arguments:` / `Arguments:` ->
-  `Args:`; the step-size controller formula in `AbstractAdaptiveStepper`; the `intStep` values and
+  `Args:`; the step-size controller formula in `AbstractAdaptiveStepper`; the `int_step` values and
   stage times of every scheme in its `step()`. The RK23/RK45 "FSAL not exploited yet, see TODO"
   sentence reworded to what the code does. AST check: code unchanged.
 - `git mv documentation/source/util/stepper.rst documentation/source/stepper.rst` (pointed at
@@ -205,11 +205,11 @@ Still to do: `nets/`,
   keeps the dtype; harmless in the optimizers, the parameter setter casts back); 4 validation:
   `max_step=0` accepted (dt = 0, `time_evolution` never ends), negative `rtol`/`atol` accepted,
   `Euler.update_dt` accepts dt <= 0, `min_step`/`max_step` setters don't recheck min < max;
-  5 custom `normFunction` returning a Python float: ZeroDivisionError when the error is exactly 0;
+  5 custom `norm_function` returning a Python float: ZeroDivisionError when the error is exactly 0;
   6 question: only `Euler` has `update_dt`, so `ground_state_search` rejects the other steppers;
   7 cosmetic: `RK23/RK45._k0` stored but never read.
 - User: fix 1 and 3, leave 2, 4, 5, 7; 6 is the intended usage (only `Euler` in ground state
-  searches). Fixed 1: ex2 uses `AdaptiveHeun(timeStep=dt, rtol=0., atol=integratorTol)` (stored
+  searches). Fixed 1: ex2 uses `AdaptiveHeun(time_step=dt, rtol=0., atol=integratorTol)` (stored
   outputs not re-run). Fixed 3 as the user suggested, with two adjustments: `A` and `b` of the four
   tableaux are cast to `global_defs.DT_OUT_REAL` at construction, `c` is not (a bfloat16 `c` rounds
   `1.5 + 0.75e-3` to `1.5`: the stage times would be lost); `_adaptive_step_control` returns
@@ -217,24 +217,24 @@ Still to do: `nets/`,
   stage times. New `TestDtype` in `tests/stepper_test.py` (both tests fail on the committed code;
   the time test also fails with the cast but without `float()`). Module docstring says the
   coefficients follow `DT_OUT_REAL` and the times stay 64-bit.
-- Checked: local error slopes on an inhomogeneous linear ODE (Euler 2, Heun 3, AdaptiveHeun 3,
-  RK23 4, RK45 6; error estimates 3, 3, 5, so the exponent -1/(p+1) is right); intStep sequences;
-  all five steppers in `TDVP.time_evolution` (ExactSampler, `resample_stepper` True/False, 1 and 3
-  devices, identical results, energy conserved to 1e-3 ... 5e-6); `normFunction` reaches the
+- checked: local error slopes on an inhomogeneous linear ODE (Euler 2, Heun 3, AdaptiveHeun 3,
+  RK23 4, RK45 6; error estimates 3, 3, 5, so the exponent -1/(p+1) is right); int_step sequences;
+  all five steppers in `TDVP.time_evolution` (exact_sampler, `resample_stepper` True/False, 1 and 3
+  devices, identical results, energy conserved to 1e-3 ... 5e-6); `norm_function` reaches the
   stepper through `time_evolution` kwargs. Tests: `stepper_test` OK on 1 and 3 devices,
   `tdvp_test` OK (1 device). Scripts were in the scratchpad (`order.py`, `edge.py`, `tdvp_all.py`).
 
 ### Optimizer, changes of 2026-11-05
 
 - User answers: A made `stepper` a required argument of `time_evolution` (verified; also changed
-  the TDVP.ground_state_search message, which had it reversed: corrected); B leave (docstring now
+  the TDVP.ground_state_search message, whic_H had it reversed: corrected); B leave (docstring now
   says the final `"energy"` entry repeats the last step); C, F asked for explanations (given in the
   chat, waiting for a decision); D, E fixed:
   - D: `TDVP.cross_validation` computes S2 first and then `_get_tdvp_error(update_1, F2, var2)`.
     New `TestCrossValidation` (dense reference; fails on the committed code, 4.4e-15 vs 1.43). It
     needs biases in the RBM: without them, spin flip maps the even basis states onto the odd ones.
-  - E: reweighting uses `/ sampler.logProbFactor` instead of `2 *`. New `TestSubstepReweighting`
-    (logProbFactor 0.5 and 1; fails on the committed code).
+  - E: reweighting uses `/ sampler.log_prob_factor` instead of `2 *`. New `TestSubstepReweighting`
+    (log_prob_factor 0.5 and 1; fails on the committed code).
 
 - Docstrings for every public class/method/property of the five files; new `optimizer.rst`
   (SR ground state search + TDVP with AdaptiveHeun and an observable, tested on 1 and 3 devices).
@@ -249,11 +249,11 @@ Still to do: `nets/`,
   diagonal shift lambda/2 (matches to 7e-14); for real nets the update is complex with zero
   imaginary part; D TDVP cross validation: the reported validation TDVP error is the error of
   the first-half update on the first half (in-sample, identical digits), not on the second;
-  E reweighting between substeps (`resample_stepper=False`) hard-codes |psi|^2 (logProbFactor
-  0.5): weights off by 0.13 for logProbFactor=1; F matrix-free lhs with make_real=False and
+  E reweighting between substeps (`resample_stepper=False`) hard-codes |psi|^2 (log_prob_factor
+  0.5): weights off by 0.13 for log_prob_factor=1; F matrix-free lhs with make_real=False and
   diag_scale differs from the dense one (2e-2); small: TDVP.ground_state_search error message
   talks about SR, tqdm total/updates in time_evolution, Evolution warns at every construction.
-- Checked: both make_real conventions reproduce exact real-time evolution of fully expressive
+- checked: both make_real conventions reproduce exact real-time evolution of fully expressive
   nets (real-parameter and holomorphic, 1 - F ~ 1e-11); QGT (dense, batched, padded on 3 devices)
   equals get_covar; MinSR = SR for real and non-holomorphic nets; default solver instances hold
   only configuration (sharing them is harmless).
@@ -270,15 +270,15 @@ Still to do: `nets/`,
   (Estimator.__call__ evaluates estimator_fn on all samples at once, no batching; ParametricObservable
   has no operator/estimator_fn properties; `control_variate` setter calls `.lower()` on non-strings;
   `moving_average_width=0` gives NaN; Estimator caches the gradient kind of the first psi).
-- Checked: force formulas (derivation of R_k), all three gradients vs finite differences (tests),
-  Infidelity estimator algebra and CV algebra (simple/adaptive), default identity works for
+- checked: force formulas (derivation of R_k), all three gradients vs finite differences (tests),
+  Infidelity estimator algebra and c_V algebra (simple/adaptive), default identity works for
   spinful states regardless of `l_dim`, Estimator gradient-kind detection on a vanishing first
   sample still matches finite differences. Infidelity uses the transposed operator like
-  `get_O_loc` (deferred operator bug); `matrix_to_jvmc_operator` builds sigma_y transposed, which
+  `get_O_loc` (deferred operator bug); `matrix_to_jvmc_operator` builds sigma_y transposed, whic_H
   compensates for it, so the tests with complex unitaries pass.
 - 3 devices: the test suites only fail with the known batch size 16 not divisible by 3.
 - User: fixed 1 (keyword arguments `**op_kwargs` passed through `__call__`, `_get_f_loc`,
-  `_get_f_loc_sh`), leave 2, 3, 4. The fix called `_get_conn_elements(s, **op_kwargs)`, which
+  `_get_f_loc_sh`), leave 2, 3, 4. The fix called `_get_conn_elements(s, **op_kwargs)`, whic_H
   takes a dict: every Infidelity call raised TypeError (15 of 16 tests); corrected to
   `_get_conn_elements(s, op_kwargs)`. New `test_time_dependent_operator` (fails on the committed
   code with `KeyError: 't'`).
@@ -294,12 +294,12 @@ Still to do: `nets/`,
   psi_P(s shifted by +a) = e^{+2 pi i q a / L} psi_P(s) for spins.
 - Bugs reported: 1 fermionic particle-hole C^2 = (-1)^(M(M-1)/2) (M modes), so (1 + C)/2 is not a
   projector for spinless L = 2, 3, 6, 7, ... and spinful odd L; 2 `ProjectedOrbitNet` flattens the
-  configurations (2D CNN with sampleShape (L, L) crashes; `sample()` returns flat configs);
+  configurations (2D CNN with sample_shape (L, L) crashes; `sample()` returns flat configs);
   3 `compose_projectors` re-indexes `perm_sign` by output site, single elements use input sites
   (antiperiodic translation x reflection breaks); 4 `local_phase` ignored for spins/bosons;
   5 `sep` average overflows for |Re log psi| > ~355; 6 `exp` average turns NaN/+inf into zero
   amplitudes; 7 small items. Prototype fixes for 1, 2, 3, 5: `.claude/symmetry_fixes.patch`
-  (against `HEAD` before the docstrings), all dense checks pass, tests unchanged. Check scripts:
+  (against `HEAD` before the docstrings), all dense checks pass, tests unchanged. check scripts:
   `.claude/symmetry_checks/` (run as `python symm_ph.py <dir of the scripts>`, with `PYTHONPATH`).
 - User: fix 2 only, leave 1, 3, 4, 5, 6, 7. Fixed 2: `ProjectedOrbitNet.__call__` reshapes the
   transformed configurations to `s.shape` (also for the coefficient nets), `sample()` returns the
@@ -326,14 +326,14 @@ Still to do: `nets/`,
   the old code); 2, 3, 4 by the user, verified (all 30 `stats_test` pass on 1 and 3 devices).
   Left: 5 (user: transformations are not meant to change the number of components), 6, 7.
   `.claude/stats_fixes.patch` is the prototype, now applied: can be deleted.
-- Checked and not a bug: the ACT window fallback is unreachable (τ at the last lag is 0 for
+- checked and not a bug: the ACT window fallback is unreachable (τ at the last lag is 0 for
   mean-subtracted data); denormal weights are flushed to 0 by XLA on CPU (no `1/w` overflow); MC
   samples are stored chain-major on 1 and 3 devices, as R-hat/ACT assume.
 
 ### Operator folder, changes of 2026-11-03
 
 - Docstrings for every public class/method/property in `operator/`; `operator.rst` rewritten
-  (the old page described `BranchFreeOperator`, `Sx`, `scal_opstr`, POVM, none of which exist).
+  (the old page described `branchFreeOperator`, `Sx`, `scal_opstr`, POVM, none of whic_H exist).
 - `SigmaPlus` and `SigmaMinus` swapped: they were σ⁻ and σ⁺ with respect to `SigmaZ` (state 0 =
   up). `test_repeated_sites_dense_matrix` updated, `test_pauli_and_ladder_operators_dense_matrix`
   added.
@@ -355,7 +355,7 @@ Still to do: `nets/`,
 
 - Docstrings and `#:` comments for all of `sharding_config.py`; new `sharding_config.rst` in the
   toctree; `parallelism.rst` rewritten (old one described pmap and MPI).
-- Batched `sharded` calls raise `ValueError` if the positional arguments have different lengths
+- batched `sharded` calls raise `ValueError` if the positional arguments have different lengths
   (were silently zero padded).
 - `ParamSpec` renamed `Params`: `sharding_config.P` is `PartitionSpec` again.
 - Two tests added to `tests/batch_layout_test.py`.
@@ -366,7 +366,7 @@ Still to do: `nets/`,
 
 - **`sharded` caches keep objects alive** (user: later release). Static kwargs (`psi`, `operator`)
   in `instance._sharded_cache` keep every NQS alive while the decorated instance lives; with
-  `BATCH_LOOP="compiled"` and more than one batch, nothing is ever freed, because the module-level
+  `batch_LOOP="compiled"` and more than one batch, nothing is ever freed, because the module-level
   `_jitted_call_local` takes `jsh_fn` as a static argument (JAX's global cache keeps it). Tested
   patch: `.claude/sharded_cache_weakref.patch` (weak references to static objects with
   `weakref.finalize` dropping the entry, compiled loop stored next to `jsh_fn` on the instance as
@@ -408,17 +408,17 @@ User chose to leave these, or will patch them in a later release:
   (`get_ratio` only defined in the `else` branch). Its docstring still has a `.. warning::` from
   the first round.
 - `sampler/exact_sampler.py`: docstring still has a `.. warning::` about device divisibility from
-  the first round, although `get_probabilities` no longer uses `shard_map`. Check and remove.
-- `sampler/base.py`: `sampler_state` setter restores weights but not samples / `logPsi`
+  the first round, although `get_probabilities` no longer uses `shard_map`. check and remove.
+- `sampler/base.py`: `sampler_state` setter restores weights but not samples / `log_psi`
   (mismatched lengths possible); MC weights overflow to NaN for `mu < 2` with large `|log ψ|`
   (`CutoffSampler` already subtracts the max); `__call__` with `num_samples` resamples every
   call; `reset(key)` doesn't restart the chains.
 - `sampler/propose.py`: `MALA(appy_fun=...)` typo in the keyword; one RWM/MALA proposer can't be
-  shared by samplers with different `numChains`.
+  shared by samplers with different `numchains`.
 - `vqs.py`: variables outside the `params` collection unsupported (documented as a requirement);
   `frozen_parameters` path semantics and frozen parameters still in the gradients (user will
   patch later); parameters committed to a single device fail on several devices (left).
-- `global_defs`: `MATMUL_CHUNK_BYTES` is fixed at compile time (documented); its env variable
+- `global_defs`: `MATMUL_chunk_BYTES` is fixed at compile time (documented); its env variable
   rejects `2**30` / `1e9`.
 - `operator/`: Jordan-Wigner sign counts non-fermionic sites (documented); `CoulombInteraction`
   rejects a list of charges, and a scalar charge `q` scales by `q` while an array scales by
@@ -431,7 +431,7 @@ User chose to leave these, or will patch them in a later release:
 
 - `nets/rnn1d_general.py`: `NQS(RNN1DGeneral(...))` fails at evaluation on CPU (1 device too):
   "scan body function carry input and carry output must have equal types ... {V:devices}" (the
-  initial carry `jnp.zeros(inputDim)` is not marked varying inside `shard_map`). Found 2026-11-05.
+  initial carry `jnp.zeros(input_dim)` is not marked varying inside `shard_map`). Found 2026-11-05.
 - `solver/pinv.py` (`_snr_step`) calls `grad_log_psi.transform(lambda x: ...)` with a new lambda
   at every step: `transform` wraps it in `jax.jit`, so it compiles again at every step. User
   (2026-11-05): fix when doing `solver/`. (Fixed in `optimizer/minsr.py` on 2026-11-05.)
@@ -440,15 +440,15 @@ User chose to leave these, or will patch them in a later release:
 - `objective_function/infidelity.py`: `_get_f_loc_sh` calls `operator._get_conn_elements(s, {})`,
   so operators with callable (time-dependent) prefactors get no keyword arguments.
 - `optimizer/base.py`: the reweighting between substeps uses a hard-coded factor
-  `2 * jnp.real(logPsi - logPsi0)`, i.e. assumes `logProbFactor = 0.5`; also check the weights are
+  `2 * jnp.real(log_psi - log_psi_0)`, i.e. assumes `log_prob_factor = 0.5`; also check the weights are
   normalized.
-- `util/util.py`: `measure()` passes `num_samples` to the sampler; with `ExactSampler` it ends up
-  in `get_O_loc` kwargs (ignored by real operators). Checked 2026-11-06: harmless, callable
+- `util/util.py`: `measure()` passes `num_samples` to the sampler; with `exact_sampler` it ends up
+  in `get_O_loc` kwargs (ignored by real operators). checked 2026-11-06: harmless, callable
   prefactors must take `**kwargs`.
 - Optimizer on 2 CPU processes (gloo): `SR.ground_state_search` with `MCSampler` aborts (SIGABRT, no
   traceback) in the first step; sampling and measuring work on 2 processes. Probably the solver's
-  distributed path (`jaxmg` is Linux/GPU only). Check in the `solver/` pass. Found 2026-11-06.
+  distributed path (`jaxmg` is Linux/GPU only). check in the `solver/` pass. Found 2026-11-06.
 - `solver/util.py` imports `USE_DISTRIBUTED` by name; fine now that it can only change at import
   (`sharding_config` sets it from `jax.distributed.is_initialized()`).
-- Docs: `parallelism.rst` describes `global_defs.set_pmap_devices()` and MPI, which no longer
+- Docs: `parallelism.rst` describes `global_defs.set_pmap_devices()` and MPI, whic_H no longer
   exist; `mpi.rst` points at `jVMC.mpi_wrapper`; `nets.rst`, `stats.rst`, `util.rst` use `jVMC.*`.

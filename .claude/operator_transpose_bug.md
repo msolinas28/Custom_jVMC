@@ -33,7 +33,7 @@ as the true operator.
   | `c†_0 c_2` | 1.1 |
 
 - One spin in `(|0⟩ + i|1⟩)/√2`, an eigenstate of the standard σy with eigenvalue +1:
-  `to_array` + `to_sparse` give ⟨σy⟩ = +1, `ExactSampler(psi)(op.SigmaY(0))` gives −1.
+  `to_array` + `to_sparse` give ⟨σy⟩ = +1, `exact_sampler(psi)(op.SigmaY(0))` gives −1.
 - A Hermitian hopping with complex amplitude, `(0.3+0.4i) c†_0 c_2 + h.c.`, has its expectation
   value with the wrong sign: sampler +0.0508, exact −0.0508.
 - `to_sparse` itself is right: `tests/to_sparse_to_array_test.py` checks it against a Hamiltonian
@@ -47,10 +47,10 @@ The elementary operators define a ket action: `O|s⟩ = mat_els[s] · |map[s]⟩
 column = input).
 
 `get_O_loc` needs rows: `O_loc(s) = Σ_s' ⟨s|O|s'⟩ ψ(s')/ψ(s)`. It instead computes
-`Σ mat_el(s→s') ψ(s')/ψ(s) = Σ_s' M[s', s] ψ(s')/ψ(s)`, which is the local estimator of `Mᵀ`
+`Σ mat_el(s→s') ψ(s')/ψ(s) = Σ_s' M[s', s] ψ(s')/ψ(s)`, whic_H is the local estimator of `Mᵀ`
 (`jVMC_exp/operator/discrete/base.py`, `_get_O_loc`, last line). The order of the factors in a
 product is consistent with `M` (the engine applies the last factor first), so the whole operator
-comes out transposed, not just each factor.
+comes out transposed, not just eac_H factor.
 
 `Infidelity._get_f_loc_sh` (`jVMC_exp/objective_function/infidelity.py`) uses
 `operator._get_conn_elements(s, op_kwargs)` in the same way, so it also uses `Mᵀ`.
@@ -71,9 +71,9 @@ Worked out from the algebra; the per-sample errors above were measured.
 
 ## The original jVMC had the same engine
 
-Its `_get_s_primes` + `get_O_loc` compute `Σ matEl·ψ(map(s))/ψ(s)` exactly like this library.
-Running the original definitions (`Sz = [-1, 1]`, so state 0 = down; `Sy` matEls `[1j, -1j]`;
-`Sp` map `[1, 0]` matEls `[1, 0]`; `Sm` map `[0, 0]` matEls `[0, 1]`; `creation` /
+Its `_get_s_primes` + `get_O_loc` compute `Σ mat_el·ψ(map(s))/ψ(s)` exactly like this library.
+Running the original definitions (`Sz = [-1, 1]`, so state 0 = down; `Sy` mat_els `[1j, -1j]`;
+`Sp` map `[1, 0]` mat_els `[1, 0]`; `Sm` map `[0, 0]` mat_els `[0, 1]`; `creation` /
 `annihilation` as in the original) through the current engine:
 
 | Original operator | What its sampler measured |
@@ -97,7 +97,7 @@ consistent, so fixing the engine once makes everything right.
 
 `util.util.matrix_to_jvmc_operator` expands a dense matrix in a local basis I, σx, σy, σz and maps
 the basis elements to `IdentityOperator`, `SigmaX`, `SigmaY`, `SigmaZ`. Its σy element is
-`[[0, 1j], [-1j, 0]]`, which is σyᵀ, i.e. exactly what the engine measures for `SigmaY`. I, σx, σz
+`[[0, 1j], [-1j, 0]]`, whic_H is σyᵀ, i.e. exactly what the engine measures for `SigmaY`. I, σx, σz
 are symmetric and tensor products transpose factor by factor, so for any `U` built by the helper
 the sampler measures `U` (checked: `to_sparse(U_op) == Uᵀ`, sampler measures `U`). The two
 transposes cancel.
@@ -110,7 +110,7 @@ The σy entry was added in commit `54e2988` (2026-04-16), together with the help
 changed. `Infidelity` with an operator built by hand from `op.*` (e.g. `1 − iδt·H` with a σy field
 or ladder operators) uses `Uᵀ` today.
 
-## Options compared (prototyped on scratch copies)
+## Options compared (prototyped on scratc_H copies)
 
 | | A: conjugate matrix elements in `get_O_loc` | B: transpose the operator strings for `get_O_loc` |
 |---|---|---|
@@ -128,13 +128,13 @@ leave two conventions in the library.
 
 ### How option B works
 
-- `_compile` builds a second set of arrays for the transposed strings: each string's factors in
-  reverse order, each elementary operator replaced by its transpose.
+- `_compile` builds a second set of arrays for the transposed strings: eac_H string's factors in
+  reverse order, eac_H elementary operator replaced by its transpose.
 - The transpose of an elementary operator is computed generically from `map` / `mat_els`
   (inverse map on the non-zero elements). It is branch-free for every predefined operator; a
   clear `ValueError` is raised otherwise.
 - Fermion signs carry over unchanged: they only depend on the occupations of other sites (and,
-  for spin up, of the down mode on the same site), which are the same in `s` and `s'`.
+  for spin up, of the down mode on the same site), whic_H are the same in `s` and `s'`.
 - `get_O_loc` and `Infidelity` use the transposed arrays; `to_sparse` and `get_conn_elements`
   keep the original ones.
 - `matrix_to_jvmc_operator` switches its σy basis element to the standard
@@ -142,14 +142,14 @@ leave two conventions in the library.
 
 ### Execution time of option B
 
-Four alternating rounds on CPU, 4096 samples, `CpxRBM(numHidden=16)`:
+Four alternating rounds on CPU, 4096 samples, `CpxRBM(num_hidden=16)`:
 
 | | repo | patched |
 |---|---|---|
 | operator compile, once per operator (2D Ising 6×6, 144 strings) | 8–10 ms | 21–23 ms |
 | operator compile, Hubbard L=12 | 5 ms | 12 ms |
 | first `get_O_loc`, incl. JIT | 0.57–0.65 s | 0.57–0.65 s |
-| steady `get_O_loc`, Ising / Hubbard / Ising with `batchSize=64` | 85–91 / 51–55 / 323–353 ms | 88–89 / 52–62 / 320–389 ms |
+| steady `get_O_loc`, Ising / Hubbard / Ising with `batch_size=64` | 85–91 / 51–55 / 323–353 ms | 88–89 / 52–62 / 320–389 ms |
 | `to_sparse` | 2.2–2.4 ms | 2.3 ms |
 
 Only the one-time compile is slower (it builds the arrays twice). The compiled kernel has the same
@@ -168,7 +168,7 @@ same function in the same way; not benchmarked separately.
   After the patch, `to_sparse` / `to_dense` of the result also give `matrix` (today `matrixᵀ`), so
   the docstring needs no change.
 
-## Patch (option B)
+## patch (option B)
 
 Applied cleanly with `git apply` to the tree of 2026-11-03. Refreshed on 2026-11-06: the
 `Infidelity` hunk now passes `op_kwargs` (changed in the objective-function round), and the
@@ -201,15 +201,15 @@ Applied cleanly with `git apply` to the tree of 2026-11-03. Refreshed on 2026-11
  
      def _compile(self):
 +        self._compile_strings(transpose=False)
-+        compiled = (self.idxC, self.mapC, self.matElsC, self.fermionicC, self.spinC, self.spinfulC, self.firstC)
++        compiled = (self.idxC, self.mapC, self.mat_elsC, self.fermionicC, self.spinC, self.spinfulC, self.firstC)
 +        self._compile_strings(transpose=True)
-+        self._transposed = (self.idxC, self.mapC, self.matElsC, self.fermionicC, self.spinC, self.spinfulC, self.firstC)
-+        self.idxC, self.mapC, self.matElsC, self.fermionicC, self.spinC, self.spinfulC, self.firstC = compiled
++        self._transposed = (self.idxC, self.mapC, self.mat_elsC, self.fermionicC, self.spinC, self.spinfulC, self.firstC)
++        self.idxC, self.mapC, self.mat_elsC, self.fermionicC, self.spinC, self.spinfulC, self.firstC = compiled
 +
 +    def _compile_strings(self, transpose):
          strings = self._get_list_of_strings()
          max_length = max(len(s) for s in strings)
-         max_ldim = max(self._site_ldim.values())
+         max_l_dim = max(self._site_l_dim.values())
 @@ -210,12 +229,16 @@
              
              n = len(op_string)
@@ -224,10 +224,10 @@ Applied cleanly with `git apply` to the tree of 2026-11-03. Refreshed on 2026-11
 +                        _transpose_local(op.map, op.mat_els) if transpose else (op.map, op.mat_els)
 +                    )
                      idx_row.append(op.idx)
--                    map_row.append(np.pad(op.map, (0, max_ldim - op.ldim)))
--                    matels_row.append(np.pad(op.mat_els, (0, max_ldim - op.ldim)))
-+                    map_row.append(np.pad(op_map, (0, max_ldim - op.ldim)))
-+                    matels_row.append(np.pad(op_mat_els, (0, max_ldim - op.ldim)))
+-                    map_row.append(np.pad(op.map, (0, max_l_dim - op.l_dim)))
+-                    mat_els_row.append(np.pad(op.mat_els, (0, max_l_dim - op.l_dim)))
++                    map_row.append(np.pad(op_map, (0, max_l_dim - op.l_dim)))
++                    mat_els_row.append(np.pad(op_mat_els, (0, max_l_dim - op.l_dim)))
                      fermionic_row.append(int(op.fermionic))
                      spin_row.append(op.spin if op.spin is not None else 0)
                      spinful_row.append(1 if op.spin is not None else 0)
@@ -237,20 +237,20 @@ Applied cleanly with `git apply` to the tree of 2026-11-03. Refreshed on 2026-11
  
 -    def _get_conn_elements(self, s, kwargs):
 +    def _get_conn_elements(self, s, kwargs, transpose=False):
-+        idxC, mapC, matElsC, fermionicC, spinC, spinfulC, firstC = (
++        idxC, mapC, mat_elsC, fermionicC, spinC, spinfulC, firstC = (
 +            self._transposed if transpose else
-+            (self.idxC, self.mapC, self.matElsC, self.fermionicC, self.spinC, self.spinfulC, self.firstC)
++            (self.idxC, self.mapC, self.mat_elsC, self.fermionicC, self.spinC, self.spinfulC, self.firstC)
 +        )
-         sampleShape = s.shape
+         sample_shape = s.shape
          s = s.ravel()
          dim = s.shape[0]
 @@ -339,8 +366,7 @@
-             return s_p.reshape(sampleShape), matEl
+             return s_p.reshape(sample_shape), mat_el
          
          s_p, mat_els = jax.vmap(process_string, in_axes=(None,) + (0,) * 8)(
--            s, prefactors, self.idxC, self.mapC, self.matElsC,
+-            s, prefactors, self.idxC, self.mapC, self.mat_elsC,
 -            self.fermionicC, self.spinC, self.spinfulC, self.firstC
-+            s, prefactors, idxC, mapC, matElsC, fermionicC, spinC, spinfulC, firstC
++            s, prefactors, idxC, mapC, mat_elsC, fermionicC, spinC, spinfulC, firstC
          )
          
          mat_el_diag = jnp.sum(mat_els[self.diagC])
@@ -301,7 +301,7 @@ from jVMC_exp import global_defs
 
 L = 3
 basis = jnp.array(list(product((0, 1), repeat=L)), dtype=global_defs.DT_SAMPLES)
-psi = NQS(nets.CpxRBM(numHidden=3, bias=False), L, 2**8, seed=3)
+psi = NQS(nets.CpxRBM(num_hidden=3, bias=False), L, 2**8, seed=3)
 psi.parameters = 0.4 * jax.random.normal(jax.random.PRNGKey(1), psi.parameters_flat.shape)
 amplitudes = np.exp(np.asarray(psi(basis)))
 

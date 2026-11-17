@@ -7,15 +7,15 @@ The sampler module provides the possibilities to sample variational quantum stat
 
 * :class:`~jVMC_exp.sampler.mc_sampler.MCSampler` samples discrete computational basis
   configurations. If the variational wave function provides a ``sample()`` member function,
-  direct sampling is used. Otherwise, Markov Chain Monte Carlo (MCMC) is employed.
+  direct sampling is used. Otherwise, Markov chain Monte Carlo (MCMC) is employed.
 * :class:`~jVMC_exp.sampler.mc_sampler.MCSamplerCont` does the same for continuous particle
   configurations.
 * :class:`~jVMC_exp.sampler.mc_sampler.CutoffSampler` is an MCMC sampler that clips small
   probabilities from below, and corrects for this in the weights of the samples.
-* :class:`~jVMC_exp.sampler.exact_sampler.ExactSampler` works with all basis states instead of
-  samples, which can be helpful for quick troubleshooting.
+* :class:`~jVMC_exp.sampler.exact_sampler.exact_sampler` works with all basis states instead of
+  samples, whic_H can be helpful for quick troubleshooting.
 
-The MCMC updates come from the proposers of the ``jVMC_exp.sampler.propose`` module, which is also
+The MCMC updates come from the proposers of the ``jVMC_exp.sampler.propose`` module, whic_H is also
 available as ``jVMC_exp.propose``.
 
 Usage
@@ -23,15 +23,15 @@ Usage
 
 A sampler is bound to a variational state. Calling ``sample()`` returns the configurations, their
 logarithmic wave function coefficients and their normalized weights, and stores them in the
-``samples``, ``logPsi`` and ``weights`` properties. Calling the sampler evaluates an observable on
+``samples``, ``log_psi`` and ``weights`` properties. Calling the sampler evaluates an observable on
 these samples::
 
-    psi = jVMC_exp.vqs.NQS(net, L, batchSize=2**10, seed=1234)
+    psi = jVMC_exp.vqs.NQS(net, L, batch_size=2**10, seed=1234)
     sampler = jVMC_exp.sampler.MCSampler(
-        psi, jVMC_exp.propose.SpinFlip(), key=123, numChains=2**6, numSamples=2**12
+        psi, jVMC_exp.propose.SpinFlip(), key=123, numchains=2**6, num_samples=2**12
     )
 
-    s, logPsi, p = sampler.sample()
+    s, log_psi, p = sampler.sample()
     energy = sampler(hamiltonian)
     energy = sampler(hamiltonian, resample=True)    # after changing psi.parameters
 
@@ -64,7 +64,7 @@ Samplers
     :members:
     :show-inheritance:
 
-.. autoclass:: jVMC_exp.sampler.exact_sampler.ExactSampler
+.. autoclass:: jVMC_exp.sampler.exact_sampler.exact_sampler
     :members:
     :special-members: __call__
     :show-inheritance:

@@ -15,8 +15,8 @@ XLA_FLAGS=--xla_gpu_autotune_level=0 removes the cuBLAS/fusion autotuning buffer
 """
 import sys, os, json, argparse
 
-BENCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tests", "benchmark", "netket_comparison")
-sys.path.insert(0, BENCH)
+BENc_H = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tests", "benchmark", "netket_comparison")
+sys.path.insert(0, BENc_H)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("mode", choices=["stages", "dense", "blocked", "netket"])
@@ -78,18 +78,18 @@ def instrument():
 def apply_blocked_fix():
     """
     Prototype: the dense path keeps the stored Jacobian J, but builds the force and S from
-    row blocks of batchSize samples of it, as the batched path does with recomputed blocks.
+    row blocks of batch_size samples of it, as the batched path does with recomputed blocks.
     No normalized copy of J, and every GEMM has the shape of one block.
     """
     import jVMC_exp.stats as stats
     from jVMC_exp.stats import SampledObs
-    from jVMC_exp.sharding_config import BatchLayout
+    from jVMC_exp.sharding_config import batchLayout
     from jVMC_exp.optimizer import base
     from jVMC_exp.objective_function.base import Observable, ObjectiveFunctionOutput
 
     def layout_of(obs, batch_size):
         n = obs.observations.shape[0]
-        return BatchLayout(n, min(batch_size, n))
+        return batchLayout(n, min(batch_size, n))
 
     def block(x, layout, i):
         return layout.trim(layout.take(x, i), i)
@@ -100,7 +100,7 @@ def apply_blocked_fix():
             return vag(self, sampler, compute_grad, **op_kwargs)
         o_loc = self(sampler, **op_kwargs)
         obs = SampledObs(sampler.psi.gradients(sampler.samples), sampler.weights)
-        layout = layout_of(obs, sampler.psi.batchSize)
+        layout = layout_of(obs, sampler.psi.batch_size)
         grad = 0
         for i, (w, other) in enumerate(zip(layout.split(obs.weights), layout.split(o_loc._normalized_obs))):
             grad += stats._get_weighted_covar(block(obs.observations, layout, i), w, other)
@@ -112,7 +112,7 @@ def apply_blocked_fix():
         if not isinstance(grad_log_psi, SampledObs):
             return lhs(self, grad_log_psi)
         J, mean = grad_log_psi.observations, grad_log_psi.mean
-        layout = layout_of(grad_log_psi, self.psi.batchSize)
+        layout = layout_of(grad_log_psi, self.psi.batch_size)
         S = None
         for i, w in enumerate(layout.split(grad_log_psi.weights)):
             b = stats._normalize(block(J, layout, i), w, mean)

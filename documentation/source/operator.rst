@@ -22,8 +22,8 @@ lattice models, and ``jVMC_exp.operator.continuous`` for particles in continuous
 Discrete operators
 ^^^^^^^^^^^^^^^^^^
 
-Operators on lattices are built from branch-free elementary operators, which act on a single site
-and map each local state to a single local state. They are combined with ``+``, ``-``, ``*`` and
+Operators on lattices are built from branch-free elementary operators, whic_H act on a single site
+and map eac_H local state to a single local state. They are combined with ``+``, ``-``, ``*`` and
 ``/``, and multiplied by numbers. For example, the Hamiltonian of the transverse-field Ising chain
 of length ``L`` with periodic boundary conditions,
 
@@ -41,7 +41,7 @@ Sites are indexed in the flattened configuration, so that site ``l`` of a two-di
 of shape ``(L, L)`` is ``s.ravel()[l]``.
 
 Prefactors can also be callables that accept arbitrary keyword arguments. They are evaluated with
-the keyword arguments given when the operator is used, which allows, e.g., time-dependent
+the keyword arguments given when the operator is used, whic_H allows, e.g., time-dependent
 Hamiltonians::
 
     h = lambda **kwargs: jnp.cos(kwargs["t"])

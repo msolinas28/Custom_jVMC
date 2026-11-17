@@ -21,8 +21,8 @@ for kind, sizes in [("spinless_fermion", [(2, 1), (3, 1), (4, 1), (5, 1), (6, 1)
                     ("spinful_fermion", [(2, 1), (3, 1)])]:
     for Lx, Ly in sizes:
         N = Lx * Ly
-        ldim = 2 if kind == "spinless_fermion" else 4
-        b = make_basis(N, ldim)
+        l_dim = 2 if kind == "spinless_fermion" else 4
+        b = make_basis(N, l_dim)
         M = N if kind == "spinless_fermion" else 2 * N
         if kind == "spinless_fermion":
             n = lambda i: op.Number(i) - 0.5 * op.IdentityOperator(2, i)

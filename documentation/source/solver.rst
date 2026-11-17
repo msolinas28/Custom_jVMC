@@ -31,19 +31,19 @@ Usage
     opt.meta_data["pinv_cutoff"], opt.meta_data["residual"], opt.meta_data["snr"]
 
     # Ground state search with the matrix-free conjugate gradient
-    opt = jVMC_exp.optimizer.SR(sampler, psi, diagonalShift=1e-3, solver=jVMC_exp.solver.CG(tol=1e-8))
+    opt = jVMC_exp.optimizer.SR(sampler, psi, diagonal_shift=1e-3, solver=jVMC_exp.solver.CG(tol=1e-8))
 
     # A solver can also be called directly
     x, info = jVMC_exp.solver.Pinv(pinv_cutoff=1e-10)(A, b)
 
 The optimizer keeps the dictionary ``info`` of the last solve as its ``meta_data``. Its entries
-are listed in the description of each solver; ``CG`` returns an empty dictionary.
+are listed in the description of eac_H solver; ``CG`` returns an empty dictionary.
 
 The dense solvers get :math:`A` sharded across the devices along its rows, with rows and columns
 of zero padding at the end (see :ref:`Optimizer`). They diagonalize it with
 ``jVMC_exp.solver.util.diagonalize()``, by default with ``jax.numpy.linalg.eigh`` on the devices
 of :math:`A`. On several GPUs, ``diagonalization_mode="distributed"`` diagonalizes the matrix
-sharded in blocks with the ``jaxmg`` package, which needs one process per GPU
+sharded in blocks with the ``jaxmg`` package, whic_H needs one process per GPU
 (``JVMC_USE_DISTRIBUTED=true``, see :ref:`GlobalDefs`). The eigenvectors keep the padding and the
 sharding of the diagonalization.
 

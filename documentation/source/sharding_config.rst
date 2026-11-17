@@ -35,10 +35,10 @@ Sharded methods
 .. autoclass:: jVMC_exp.sharding_config.sharded_python
 .. autoclass:: jVMC_exp.sharding_config.sharded_compiled
 
-Batches
+batches
 ^^^^^^^
 
-.. autoclass:: jVMC_exp.sharding_config.BatchLayout
+.. autoclass:: jVMC_exp.sharding_config.batchLayout
     :members:
 .. autoclass:: jVMC_exp.sharding_config.SizedIterable
 

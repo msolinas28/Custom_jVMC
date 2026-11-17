@@ -75,17 +75,17 @@ Design choices
 Variational wave functions
 --------------------------
 A core part of this codebase is the ``NQS`` class, an abstract wrapper class 
-for variational wave functions, which proves an interface that other parts 
+for variational wave functions, whic_H proves an interface that other parts 
 of the code rely on. At initialization the specific variational wave function 
 is passed to ``NQS`` in the form of a `Flax <https://github.com/google/flax>`_
 module. `Flax <https://github.com/google/flax>`_ is a
 library that supplements `JAX` with a class structure to enable simple
 implementation of neural networks (and more) based on modules as it is
-known also from `Pytorch`.
+known also from `Pytorc_H`.
 
 Parallelism
 -----------
-The performance of the code relies on a few design choices, which enable
+The performance of the code relies on a few design choices, whic_H enable
 efficient computation for typical use cases on a desktop device as well as
 on distributed multi GPU clusters. An important manifestation of these
 choices are required array dimensions when interfacing `jVMC`: All data
@@ -113,11 +113,11 @@ the variational wave function (see :ref:`VQS`). Moreover, assume that ``sampler`
 ``Sampler`` object (see :ref:`Sampler`). Then, estimating an operator expectation value
 using the `jVMC` framework boils down to::
 
-    s, logPsi, _ = sampler.sample()                 # Get samples (parallelized)
+    s, log_psi, _ = sampler.sample()                 # Get samples (parallelized)
     sPrime, _ = op.get_s_primes(sampleConfigs)      # Get s', where O_{s,s'}!=0
-    logPsiOffd = psi(sPrime)                        # Evaluate wave function on s'
-    Oloc = get_O_loc(logPsi, logPsiOffd)            # Compute local estimator
-    Omean = jVMC.mpi_wrapper.get_global_mean(Oloc)  # Compute mean of all processes
+    log_psiOffd = psi(sPrime)                        # Evaluate wave function on s'
+    O_loc = get_O_loc(log_psi, log_psiOffd)            # Compute local estimator
+    Omean = jVMC.mpi_wrapper.get_global_mean(O_loc)  # Compute mean of all processes
 
 Also computing the variational derivatives :math:`\partial_{\theta_k}\log\psi_\theta(s)`
 is straightforward when using the ``NQS`` class::

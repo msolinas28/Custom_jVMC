@@ -11,8 +11,8 @@ from jVMC_exp.symmetry.lattice_symetries import (
     chain_reflection_symmetry, particle_hole_symmetry, spin_flip_symmetry,
 )
 
-def make_basis(n, ldim):
-    return np.array(list(itertools.product(range(ldim), repeat=n)), dtype=np.int32)
+def make_basis(n, l_dim):
+    return np.array(list(itertools.product(range(l_dim), repeat=n)), dtype=np.int32)
 
 def dense_P(symm, basis):
     index = {tuple(b): k for k, b in enumerate(basis)}

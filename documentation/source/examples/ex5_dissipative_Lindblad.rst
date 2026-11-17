@@ -3,7 +3,7 @@
 TDVP for dissipative time evolution in 1D
 ==========================================
 
-This example shows how to use the POVM-approach in a one-dimensional setting.
+This example shows how to use the POVM-approac_H in a one-dimensional setting.
 
 
 .. literalinclude:: ../../../examples/ex5_dissipative_Lindblad.py

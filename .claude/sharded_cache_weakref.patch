@@ -95,17 +95,17 @@
                  jsh_fn(kwargs, *(layout.take(a, i) for a in args))
              )
  
--    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
-+    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn, loop_fn):
+-    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):
++    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn, loop_fn):
          """
          Evaluates all batches of ``layout`` and writes their results in place into
-         preallocated outputs, which keep the order of the input samples.
+         preallocated outputs, whic_H keep the order of the input samples.
 @@ -648,16 +684,13 @@
      Like ``sharded_python``, but the loop over the batches of a call runs in a single compiled \
-     function, which is compiled once for every decorated method and ``BatchLayout``.
+     function, whic_H is compiled once for every decorated method and ``batchLayout``.
      """
--    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
-+    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn, loop_fn):
+-    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):
++    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn, loop_fn):
          if layout.n_batches == 1:
              return next(self._iter_local_batches(layout, kwargs, args, jsh_fn))
  
@@ -115,8 +115,8 @@
 +        return jax.block_until_ready(loop_fn(kwargs, args, layout=layout))
  
 -@jax.jit(static_argnames=("layout", "jsh_fn"))
--def _jitted_call_local(kwargs, args, *, layout: BatchLayout, jsh_fn):
-+def _call_local_loop(kwargs, args, *, layout: BatchLayout, jsh_fn):
+-def _jitted_call_local(kwargs, args, *, layout: batchLayout, jsh_fn):
++def _call_local_loop(kwargs, args, *, layout: batchLayout, jsh_fn):
      """
      The loop of `sharded._call_local` as a compiled function. It has at least two batches.
      The last batch is written separately, since it can have fewer rows than the others.
@@ -124,9 +124,9 @@
  
              log_psi = Model(net).evaluate(s, parameters=parameters, batch_size=64)
      """
--    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
--        return _BATCH_LOOPS[global_defs.BATCH_LOOP](self, layout, kwargs, args, jsh_fn)
+-    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):
+-        return _batch_LOOPS[global_defs.batch_LOOP](self, layout, kwargs, args, jsh_fn)
 \ No newline at end of file
-+    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn, loop_fn):
-+        return _BATCH_LOOPS[global_defs.BATCH_LOOP](self, layout, kwargs, args, jsh_fn, loop_fn)
++    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn, loop_fn):
++        return _batch_LOOPS[global_defs.batch_LOOP](self, layout, kwargs, args, jsh_fn, loop_fn)
 \ No newline at end of file
