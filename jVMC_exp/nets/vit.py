@@ -9,13 +9,13 @@ import jax.numpy as jnp
 
 from jVMC_exp import global_defs
 
-patch_MIXING_ATTENTION = "patch-mixing-attention"
+PATCH_MIXING_ATTENTION = "patch-mixing-attention"
 VITERITTI_DISTANCE_ATTENTION = "viteritti-distance-attention"
 _VIT_ATTENTION_ALIASES = {
-    "patch-mixing-attention": patch_MIXING_ATTENTION,
-    "patch_mixing_attention": patch_MIXING_ATTENTION,
-    "patch-mixing": patch_MIXING_ATTENTION,
-    "patch_mixing": patch_MIXING_ATTENTION,
+    "patch-mixing-attention": PATCH_MIXING_ATTENTION,
+    "patch_mixing_attention": PATCH_MIXING_ATTENTION,
+    "patch-mixing": PATCH_MIXING_ATTENTION,
+    "patch_mixing": PATCH_MIXING_ATTENTION,
     "viteritti-distance-attention": VITERITTI_DISTANCE_ATTENTION,
     "viteritti_distance_attention": VITERITTI_DISTANCE_ATTENTION,
     "viteritt-distance-attention": VITERITTI_DISTANCE_ATTENTION,
@@ -138,7 +138,7 @@ def canonical_vit_attention_kind(attention_kind: str) -> str:
         return _VIT_ATTENTION_ALIASES[key]
     except KeyError as exc:
         allowed = ", ".join(
-            sorted({patch_MIXING_ATTENTION, VITERITTI_DISTANCE_ATTENTION})
+            sorted({PATCH_MIXING_ATTENTION, VITERITTI_DISTANCE_ATTENTION})
         )
         raise ValueError(f"attention_kind must be one of: {allowed}.") from exc
 
@@ -177,7 +177,7 @@ class ViterittiFactoredAttention(nn.Module):
     embed_dim: int
     heads: int
     n_patches: int
-    attention_kind: str = patch_MIXING_ATTENTION
+    attention_kind: str = PATCH_MIXING_ATTENTION
     distance_gamma_init: float = 3.0
     param_dtype: Any = None
     compute_dtype: Any = None
@@ -193,7 +193,7 @@ class ViterittiFactoredAttention(nn.Module):
         head_dim = self.embed_dim // self.heads
         x = jnp.asarray(x, dtype=compute_dtype)
         attention_kind = canonical_vit_attention_kind(self.attention_kind)
-        if attention_kind == patch_MIXING_ATTENTION:
+        if attention_kind == PATCH_MIXING_ATTENTION:
             alpha = self.param(
                 "alpha",
                 nn.initializers.xavier_uniform(),
@@ -257,7 +257,7 @@ class ViterittiEncoderBlock(nn.Module):
     embed_dim: int
     heads: int
     n_patches: int
-    attention_kind: str = patch_MIXING_ATTENTION
+    attention_kind: str = PATCH_MIXING_ATTENTION
     distance_gamma_init: float = 3.0
     param_dtype: Any = None
     compute_dtype: Any = None
@@ -401,7 +401,7 @@ class ViterittiSpatialViTReal(nn.Module):
     theta0: float = 0.0
     phase_scale: float = 0.0
     cpm_phase_layer: bool = False
-    attention_kind: str = patch_MIXING_ATTENTION
+    attention_kind: str = PATCH_MIXING_ATTENTION
     distance_gamma_init: float = 3.0
     param_dtype: Any = None
     compute_dtype: Any = None
@@ -483,7 +483,7 @@ class LogViterittiSpatialViTJVMC(nn.Module):
     theta0: float = 0.0
     phase_scale: float = 0.0
     cpm_phase_layer: bool = False
-    attention_kind: str = patch_MIXING_ATTENTION
+    attention_kind: str = PATCH_MIXING_ATTENTION
     distance_gamma_init: float = 3.0
     param_dtype: Any = None
     compute_dtype: Any = None

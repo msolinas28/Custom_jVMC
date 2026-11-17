@@ -78,7 +78,7 @@ export TF_CUDA_PATHS=$MY_PATH_TO_CUDA
 ```
 python build/build.py --enable_cuda --cuda_path $MY_PATH_TO_CUDA --cudnn_path $MY_PATH_TO_CUDNN --python_bin_path $MY_PATH_TO_PYTHON
 ```
-&nbsp;&nbsp;&nbsp;This will first download and compile bazel. Bazel creates a local cache directory under $HOME/.cache/bazel. This can, however, easily ex_Haust the home directory quota. If so, a corresponding error will appear while building jaxlib. To circumvent this, go to the next step, otherwise skip it.
+&nbsp;&nbsp;&nbsp;This will first download and compile bazel. Bazel creates a local cache directory under $HOME/.cache/bazel. This can, however, easily exhaust the home directory quota. If so, a corresponding error will appear while building jaxlib. To circumvent this, go to the next step, otherwise skip it.
 
 6. To avoid cramming the home directory, we create a wrapper script for bazel that temporarily overwrites the HOME environment variable to fool bazel into using a different directory, see this [Bazel issue](https://github.com/bazelbuild/bazel/issues/4248).
 
@@ -115,15 +115,15 @@ python -c 'import jax'
 &nbsp;&nbsp;&nbsp;If your cluster has a slurm queue: To run all JAX tests, submit a script similar to
 ```
 #!/bin/bash -x
-#Sbatch --account=your_account
-#Sbatch --nodes=1
-#Sbatch --ntasks=1
-#Sbatch --ntasks-per-node=12
-#Sbatch --output=gpu-out.%j
-#Sbatch --error=gpu-err.%j
-#Sbatch --time=02:00:00
-#Sbatch --partition=gpu_partition
-#Sbatch --gres=gpu:1
+#SBATCH --account=your_account
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=12
+#SBATCH --output=gpu-out.%j
+#SBATCH --error=gpu-err.%j
+#SBATCH --time=02:00:00
+#SBATCH --partition=gpu_partition
+#SBATCH --gres=gpu:1
  
 srun pytest -n auto /your/path/jax/tests/
 ```

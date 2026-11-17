@@ -14,7 +14,7 @@ are not case sensitive:
 * ``JVMC_USE_DISTRIBUTED``: ``USE_DISTRIBUTED``, ``true`` or ``false`` (default). If ``true``,
   ``jax.distributed.initialize()`` is called when the library is imported.
 * ``JVMC_BATCH_LOOP``: ``BATCH_LOOP``, ``python`` (default) or ``compiled``.
-* ``JVMC_MATMUL_chunk_BYTES``: ``MATMUL_chunk_BYTES``, an integer. The default is ``2**30``.
+* ``JVMC_MATMUL_CHUNK_BYTES``: ``MATMUL_CHUNK_BYTES``, an integer. The default is ``2**30``.
 
 The function ``update()`` changes these settings afterwards, except for ``USE_DISTRIBUTED``, which
 can only be set through its environment variable. It takes data types as objects, e.g.,
@@ -146,8 +146,8 @@ def _read_matmul_chunk_bytes(chunk_bytes):
 #: the tangent kernel of MinSR handle at once (0: the whole Jacobian at once). When it compiles a
 #: matrix product, XLA autotunes it on its own copies of the operands, as large as the operands.
 #: It is read when a product is compiled, and it affects the memory use, not the result.
-MATMUL_chunk_BYTES = _read_matmul_chunk_bytes(
-    os.environ.get("JVMC_MATMUL_chunk_BYTES", 2**30)
+MATMUL_CHUNK_BYTES = _read_matmul_chunk_bytes(
+    os.environ.get("JVMC_MATMUL_CHUNK_BYTES", 2**30)
 )
 
 
@@ -173,7 +173,7 @@ def update(
         * ``dt_out_cpx``: New value of ``DT_OUT_CPX`` and ``DT_OPERATORS_CPX``, one of the data \
           types in ``allowed_dtypes_cpx``.
         * ``batch_loop``: New value of ``BATCH_LOOP``, one of ``BATCH_LOOPS``.
-        * ``matmul_chunk_bytes``: New value of ``MATMUL_chunk_BYTES``, a non-negative integer.
+        * ``matmul_chunk_bytes``: New value of ``MATMUL_CHUNK_BYTES``, a non-negative integer.
 
     Example::
 
@@ -188,7 +188,7 @@ def update(
     global DT_OUT_REAL
     global DT_OUT_CPX
     global BATCH_LOOP
-    global MATMUL_chunk_BYTES
+    global MATMUL_CHUNK_BYTES
     global DT_OPERATORS_REAL
     global DT_OPERATORS_CPX
 
@@ -210,4 +210,4 @@ def update(
         BATCH_LOOP = _read_batch_loop(batch_loop)
 
     if matmul_chunk_bytes is not None:
-        MATMUL_chunk_BYTES = _read_matmul_chunk_bytes(matmul_chunk_bytes)
+        MATMUL_CHUNK_BYTES = _read_matmul_chunk_bytes(matmul_chunk_bytes)

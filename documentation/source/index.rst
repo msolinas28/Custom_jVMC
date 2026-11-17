@@ -81,7 +81,7 @@ is passed to ``NQS`` in the form of a `Flax <https://github.com/google/flax>`_
 module. `Flax <https://github.com/google/flax>`_ is a
 library that supplements `JAX` with a class structure to enable simple
 implementation of neural networks (and more) based on modules as it is
-known also from `Pytorc_H`.
+known also from `Pytorch`.
 
 Parallelism
 -----------
@@ -115,8 +115,8 @@ using the `jVMC` framework boils down to::
 
     s, log_psi, _ = sampler.sample()                 # Get samples (parallelized)
     sPrime, _ = op.get_s_primes(sampleConfigs)      # Get s', where O_{s,s'}!=0
-    log_psiOffd = psi(sPrime)                        # Evaluate wave function on s'
-    O_loc = get_O_loc(log_psi, log_psiOffd)            # Compute local estimator
+    log_psi_offd = psi(sPrime)                        # Evaluate wave function on s'
+    O_loc = get_O_loc(log_psi, log_psi_offd)            # Compute local estimator
     Omean = jVMC.mpi_wrapper.get_global_mean(O_loc)  # Compute mean of all processes
 
 Also computing the variational derivatives :math:`\partial_{\theta_k}\log\psi_\theta(s)`

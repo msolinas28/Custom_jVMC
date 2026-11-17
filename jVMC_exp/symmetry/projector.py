@@ -274,13 +274,13 @@ class SymmetryProjector:
     :math:`A_g` with :math:`(A_g\\psi)(s)=\\sigma_g(s)\\psi(g\\cdot s)` then maps the fermion \
     operators as :math:`A_g\\hat c_iA_g^\\dagger=\\hat c_{\\mathrm{perm}[g,i]}`, for each spin.
 
-    The functions of ``jVMC_exp.symmetry.lattice_symetries`` build the projectors of the usual \
+    The functions of ``jVMC_exp.symmetry.lattice_symmetries`` build the projectors of the usual \
     lattice symmetries. ``projector_1 * projector_2`` composes two projectors (see \
     ``compose_projectors()``), and ``projector * net`` returns the ``ProjectedOrbitNet`` of a \
     network.
 
     A configuration has one local state per site, with the sites of a two-dimensional lattice \
-    in the order of its site enumeration (see ``jVMC_exp.symmetry.lattice_symetries``). For \
+    in the order of its site enumeration (see ``jVMC_exp.symmetry.lattice_symmetries``). For \
     spinful fermions the local states 0, 1, 2 and 3 stand for an empty site, a spin up, a spin \
     down and a doubly occupied site.
 
@@ -293,7 +293,7 @@ class SymmetryProjector:
           ``"spinful_fermion"``. The plural forms are accepted.
         * ``perm``: Site permutations, of shape ``(nsymm, n_sites)``: the element ``g`` maps \
           ``s`` to ``s[perm[g]]``.
-        * ``character``: characters :math:`\\chi_g`, of shape ``(nsymm,)``.
+        * ``character``: Characters :math:`\\chi_g`, of shape ``(nsymm,)``.
         * ``perm_sign`` [optional]: Boundary signs, +1 or -1, of shape ``(nsymm, n_sites)``: \
           under the element ``g``, a fermion on the site ``i`` of ``s`` gets the sign \
           ``perm_sign[g, i]``, e.g. -1 for the fermions that cross an antiperiodic boundary. \

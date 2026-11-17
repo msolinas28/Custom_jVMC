@@ -10,7 +10,7 @@ from jVMC_exp.sharding_config import (
     DEVICE_SHARDING,
     DEVICE_SPEC,
     REPLICATED_SHARDING,
-    batchLayout,
+    BatchLayout,
     _put_batch,
     _take_batch,
     _trim_batch,
@@ -41,11 +41,11 @@ def _interleave(x):
     return jnp.stack([x, -x], axis=1).reshape((2 * x.shape[0],) + x.shape[1:])
 
 
-class TestbatchLayout(unittest.TestCase):
+class TestBatchLayout(unittest.TestCase):
     def test_put_inverts_split(self):
         for n, b in LOCAL_SIZES:
             with self.subTest(n=n, b=b):
-                layout = batchLayout(n * D, b * D)
+                layout = BatchLayout(n * D, b * D)
                 x = _data(n * D)
                 out = None
                 for i, piece in enumerate(layout.split(x)):
@@ -58,7 +58,7 @@ class TestbatchLayout(unittest.TestCase):
                 )
 
     def test_put_accepts_padded_last_batch(self):
-        layout = batchLayout(10 * D, 4 * D)
+        layout = BatchLayout(10 * D, 4 * D)
         x = _data(10 * D)
         out = layout.alloc(x)
         for i in range(layout.n_batches):
@@ -69,7 +69,7 @@ class TestbatchLayout(unittest.TestCase):
     def test_batch_sizes_match_consecutive_batches(self):
         for n, b in LOCAL_SIZES:
             with self.subTest(n=n, b=b):
-                layout = batchLayout(n * D, b * D)
+                layout = BatchLayout(n * D, b * D)
                 sizes = [piece.shape[0] for piece in layout.split(_data(n * D))]
                 expected = [min(b * D, n * D - i * b * D) for i in range(-(-n // b))]
 
@@ -79,7 +79,7 @@ class TestbatchLayout(unittest.TestCase):
     def test_batch_positions(self):
         for n, b in LOCAL_SIZES:
             with self.subTest(n=n, b=b):
-                layout = batchLayout(n * D, b * D)
+                layout = BatchLayout(n * D, b * D)
                 x = _data(n * D)
                 in_batch_order = jnp.concatenate(layout.split(x))
 
@@ -88,7 +88,7 @@ class TestbatchLayout(unittest.TestCase):
                 )
 
     def test_scaled_layout_splits_interleaved_rows(self):
-        layout = batchLayout(10 * D, 4 * D)
+        layout = BatchLayout(10 * D, 4 * D)
         x = _data(10 * D)
         for piece, interleaved_piece in zip(
             layout.split(x), layout.scaled(2).split(_interleave(x))
@@ -96,7 +96,7 @@ class TestbatchLayout(unittest.TestCase):
             self.assertTrue(jnp.array_equal(_interleave(piece), interleaved_piece))
 
     def test_helpers_do_not_communicate(self):
-        layout = batchLayout(10 * D, 4 * D)
+        layout = BatchLayout(10 * D, 4 * D)
         x = _data(10 * D)
         piece = layout.take(x, 0)
         compiled = {
@@ -111,7 +111,7 @@ class TestbatchLayout(unittest.TestCase):
                 self.assertFalse([c for c in COLLECTIVES if c in hlo])
 
     def test_replicated_results_stay_replicated(self):
-        layout = batchLayout(10 * D, 4 * D)
+        layout = BatchLayout(10 * D, 4 * D)
         x = _data(10 * D)
         out = None
         for i in range(layout.n_batches):
@@ -124,12 +124,12 @@ class TestbatchLayout(unittest.TestCase):
 
     def test_invalid_sizes_raise(self):
         with self.assertRaises(ValueError):
-            batchLayout(4 * D, 0)
+            BatchLayout(4 * D, 0)
         if D > 1:
             with self.assertRaises(ValueError):
-                batchLayout(4 * D + 1, 4 * D)
+                BatchLayout(4 * D + 1, 4 * D)
             with self.assertRaises(ValueError):
-                batchLayout(4 * D, 4 * D + 1)
+                BatchLayout(4 * D, 4 * D + 1)
 
 
 class _Model:
@@ -206,7 +206,7 @@ class TestShardedDecorator(unittest.TestCase):
                 x = _data(n * D)
                 iterable = model.lazy_double(x, batch_size=b * D)
 
-                self.assertEqual(iterable.layout, batchLayout(n * D, b * D))
+                self.assertEqual(iterable.layout, BatchLayout(n * D, b * D))
                 self.assertEqual(len(iterable), iterable.layout.n_batches)
                 for piece, expected in zip(iterable, iterable.layout.split(2 * x)):
                     self.assertTrue(jnp.array_equal(piece, expected))
@@ -235,7 +235,7 @@ class TestShardedDecorator(unittest.TestCase):
         x = jax.random.normal(jax.random.PRNGKey(0), (10 * D + 1, 3))
         iterable = model.lazy_double(x, batch_size=4 * D)
 
-        self.assertEqual(iterable.layout, batchLayout(len(pad_to_devices(x)), 4 * D))
+        self.assertEqual(iterable.layout, BatchLayout(len(pad_to_devices(x)), 4 * D))
         for piece, expected in zip(
             iterable, iterable.layout.split(pad_to_devices(2 * x))
         ):

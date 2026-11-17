@@ -23,7 +23,7 @@ class MCSampler(AbstractMCSampler):
     """
     Sampler of discrete computational basis configurations.
 
-    chains that do not get their initial configuration from ``init_state`` start from random
+    Chains that do not get their initial configuration from ``init_state`` start from random
 
     See :class:`~jVMC_exp.sampler.base.AbstractMCSampler` for the sampled distribution and the initializer arguments.
     """
@@ -40,7 +40,7 @@ class MCSamplerCont(AbstractMCSampler):
     """
     Sampler of continuous particle configurations.
 
-    chains that do not get their initial configuration from ``init_state`` start from particle \
+    Chains that do not get their initial configuration from ``init_state`` start from particle \
     positions drawn uniformly from the geometry of the proposer.
 
     See :class:`~jVMC_exp.sampler.base.AbstractMCSampler` for the sampled distribution and the initializer arguments. \
@@ -99,13 +99,13 @@ class CutoffSampler(MCSampler):
 
     During the Markov chain update, the log-probability
     :math:`\\mu \\, \\text{Re}(\\log\\psi)` is clipped from below at
-    ``cutoff = maxlog_psi + log(eps)``, so that the chains sample
+    ``cutoff = max_log_psi + log(eps)``, so that the chains sample
     :math:`q(s) \\propto \\max\\{|\\psi(s)|^{\\mu}, e^{\\text{cutoff}}\\}`.
     The returned weight for each sample is multiplied by the importance ratio
     :math:`r(s) = |\\psi(s)|^{\\mu} / \\max\\{|\\psi(s)|^{\\mu}, e^{\\text{cutoff}}\\}`
     so that estimators stay unbiased.
 
-    ``maxlog_psi`` is an estimate of :math:`\\mu\\,\\max_s\\text{Re}(\\log\\psi(s))`. Every
+    ``max_log_psi`` is an estimate of :math:`\\mu\\,\\max_s\\text{Re}(\\log\\psi(s))`. Every
     ``sample()`` call replaces it with the maximum over the new samples, which
     moves the cutoff for the next call: the weights of a call are computed with the
     cutoff that was in place before it.
@@ -137,7 +137,7 @@ class CutoffSampler(MCSampler):
         * ``mu``: Exponent of the sampled distribution :math:`|\\psi|^{\\mu}`.
         * ``log_prob_factor``: Factor for log-probabilities (``0.5`` for pure
           wave functions, ``1.0`` for POVMs).
-        * ``maxlog_psi``: Optional initial value of
+        * ``max_log_psi``: Optional initial value of
           :math:`\\mu\\,\\max_s\\text{Re}(\\log\\psi(s))`. If ``None``, a
           quick bootstrap MC run is used to estimate it.
         * ``bootstrap_kwargs``: Optional dict of keyword arguments
@@ -161,7 +161,7 @@ class CutoffSampler(MCSampler):
         init_state=None,
         mu=2,
         log_prob_factor=0.5,
-        maxlog_psi=None,
+        max_log_psi=None,
         bootstrap_kwargs=None,
     ):
         if psi.is_generator:
@@ -192,10 +192,10 @@ class CutoffSampler(MCSampler):
             log_prob_factor=log_prob_factor,
         )
 
-        if maxlog_psi is None:
-            maxlog_psi = self._bootstrap_max_log_psi(bootstrap_kwargs or {})
+        if max_log_psi is None:
+            max_log_psi = self._bootstrap_max_log_psi(bootstrap_kwargs or {})
 
-        self._maxlog_psi = jnp.asarray(maxlog_psi)
+        self._max_log_psi = jnp.asarray(max_log_psi)
         self.eps = eps
         self.ratio = None
         self.renorm = None
@@ -254,15 +254,15 @@ class CutoffSampler(MCSampler):
         self._update_cutoff()
 
     @property
-    def maxlog_psi(self):
+    def max_log_psi(self):
         """
         Estimate of :math:`\\mu\\,\\max_s\\text{Re}(\\log\\psi(s))`. Setting it updates ``cutoff``.
         """
-        return self._maxlog_psi
+        return self._max_log_psi
 
-    @maxlog_psi.setter
-    def maxlog_psi(self, value):
-        self._maxlog_psi = jnp.asarray(value)
+    @max_log_psi.setter
+    def max_log_psi(self, value):
+        self._max_log_psi = jnp.asarray(value)
         self._update_cutoff()
 
     @property
@@ -271,8 +271,8 @@ class CutoffSampler(MCSampler):
         return self._cutoff
 
     def _update_cutoff(self):
-        """Recompute the cutoff from the current `eps` and `maxlog_psi`."""
-        self._cutoff = self._maxlog_psi + jnp.log(self._eps)
+        """Recompute the cutoff from the current `eps` and `max_log_psi`."""
+        self._cutoff = self._max_log_psi + jnp.log(self._eps)
 
     def _bootstrap_max_log_psi(self, bootstrap_kwargs):
         """Run a small MCSampler to obtain an initial estimate of max log psi."""
@@ -306,14 +306,14 @@ class CutoffSampler(MCSampler):
             jnp.zeros((self.num_chains,), dtype=np.int64), DEVICE_SHARDING
         )
 
-        num_samples_str = str(self._samplePerchain)
+        num_samples_str = str(self._samples_per_chain)
 
         if num_samples_str not in self._get_samples_jsh:
             get_samples = partial(
                 self._get_samples,
                 sweep_function=partial(self._sweep, get_ratio=self._get_ratio),
                 update_proposer=self.update_proposer,
-                num_samples=self._samplePerchain,
+                num_samples=self._samples_per_chain,
                 therm_sweeps=self.thermalization_sweeps,
                 sweep_steps=self.sweep_steps,
                 sample_shape=self.sample_shape,
@@ -355,7 +355,7 @@ class CutoffSampler(MCSampler):
         p = jnp.exp(log_weights - jnp.max(log_weights))
         self.ratio = jnp.exp(log_ratio)
         self.renorm = self.num_samples / jnp.sum(self.ratio)
-        self.maxlog_psi = jnp.max(log_P_mu)
+        self.max_log_psi = jnp.max(log_P_mu)
 
         return configs, coeffs, p / jnp.sum(p)
 
@@ -439,7 +439,7 @@ class CutoffSampler(MCSampler):
             )
 
             # Compute acceptance probability
-            P, newlog_prob = get_ratio(
+            P, new_log_prob = get_ratio(
                 log_prob, log_prob_correction, params, state, new_state, cutoff
             )
 
@@ -448,14 +448,14 @@ class CutoffSampler(MCSampler):
 
             # Perform update if accepted
             new_state = jax.lax.cond(accepted, lambda: new_state, lambda: state)
-            newlog_prob = jax.lax.cond(accepted, lambda: newlog_prob, lambda: log_prob)
+            new_log_prob = jax.lax.cond(accepted, lambda: new_log_prob, lambda: log_prob)
 
-            return new_state, newlog_prob, new_key, accepted
+            return new_state, new_log_prob, new_key, accepted
 
         def sweep_step(carry, _):
             states, log_prob, keys, num_proposed, num_accepted = carry
 
-            new_states, newlog_prob, new_keys, accepted = jax.vmap(
+            new_states, new_log_prob, new_keys, accepted = jax.vmap(
                 perform_mc_update_single_chain,
                 in_axes=(0, 0, 0, self.update_proposer.arg_in_axes),
             )(states, log_prob, keys, update_proposer_arg)
@@ -463,7 +463,7 @@ class CutoffSampler(MCSampler):
             num_proposed = num_proposed + 1
             num_accepted = num_accepted + accepted
 
-            return (new_states, newlog_prob, new_keys, num_proposed, num_accepted), None
+            return (new_states, new_log_prob, new_keys, num_proposed, num_accepted), None
 
         (states, log_prob, key, num_proposed, num_accepted), _ = jax.lax.scan(
             sweep_step,

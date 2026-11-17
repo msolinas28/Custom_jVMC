@@ -8,7 +8,7 @@ from jax import random
 import jVMC_exp
 from jVMC_exp import nets
 from jVMC_exp.symmetry import ProjectedOrbitNet
-from jVMC_exp.symmetry.lattice_symetries import square_translation_symmetry
+from jVMC_exp.symmetry.lattice_symmetries import square_translation_symmetry
 
 
 class TestCNN(unittest.TestCase):
@@ -68,7 +68,7 @@ class TestProjectedOrbitNet(unittest.TestCase):
         self.assertTrue(jnp.max(jnp.abs(psi_s)) < 1e-12)
 
 
-class TesDT_PARAMS_CPXNet(unittest.TestCase):
+class TestCpxNet(unittest.TestCase):
     def test_cpx_rnn_1d(self):
         rnn = nets.RNN1DGeneral(L=5, real_valued_params=False)
         params = rnn.init(random.PRNGKey(0), jnp.zeros((5,), dtype=np.int32))

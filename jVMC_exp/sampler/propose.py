@@ -171,7 +171,7 @@ class SpinFlip(AbstractProposer):
 
 class POVMOutcome(AbstractProposer):
     """
-    change the POVM outcome of a randomly chosen site.
+    Change the POVM outcome of a randomly chosen site.
     """
 
     def __init__(self):

@@ -16,7 +16,7 @@ from jVMC_exp.stats import SampledObs
 from jVMC_exp.vqs import NQS
 
 
-class exact_sampler(AbstractSampler):
+class ExactSampler(AbstractSampler):
     """
     Class for full enumeration of basis states.
 

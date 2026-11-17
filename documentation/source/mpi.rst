@@ -16,8 +16,8 @@ Monte Carlo samples. For this purpose, it can interact with the sampler classes 
     
     >>> s, log_psi, _ = sampler.sample()
     >>> sPrime, _ = op.get_s_primes(sampleConfigs)
-    >>> log_psiOffd = psi(sPrime)
-    >>> O_loc = get_O_loc(log_psi, log_psiOffd)
+    >>> log_psi_offd = psi(sPrime)
+    >>> O_loc = get_O_loc(log_psi, log_psi_offd)
 
     Now, on each MPI process ``O_loc`` is a two-dimensional array of size (number of devices) :math:`\times` (number of samples
     per device). To get, for example, the Monte Carlo estimate of the expectation value of :math:`\hat O`,

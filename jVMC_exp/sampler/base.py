@@ -447,7 +447,7 @@ class AbstractMCSampler(AbstractSampler):
             - For MCMC sampling:
                 - The number of chains must be >= total_devices
                 - The number of chains must be divisible by total_devices
-                - each chain generates the same number of samples
+                - Each chain generates the same number of samples
 
         The method performs the following adjustments:
             1. Generator sampling: rounds num_samples up to the next multiple of
@@ -465,10 +465,10 @@ class AbstractMCSampler(AbstractSampler):
             self._num_chains = distribute(self.num_chains, "chains")
 
             # Use ceiling division to ensure at least num_samples total samples
-            self._samplePerchain = (
+            self._samples_per_chain = (
                 self.num_samples + self.num_chains - 1
             ) // self.num_chains
-            total_samples = self._samplePerchain * self.num_chains
+            total_samples = self._samples_per_chain * self.num_chains
 
         if total_samples > self.num_samples:
             print(f"INFO: Total samples adjusted: {self.num_samples} -> {total_samples}")
@@ -535,7 +535,7 @@ class AbstractMCSampler(AbstractSampler):
             jnp.zeros((self.num_chains,), dtype=np.int64), DEVICE_SHARDING
         )
 
-        num_samples_str = str(self._samplePerchain)
+        num_samples_str = str(self._samples_per_chain)
 
         # check whether _get_samples is already compiled for given number of samples.
         # partial over num_samples, therm_sweeps and sweep_steps is needed cause these must be static
@@ -545,7 +545,7 @@ class AbstractMCSampler(AbstractSampler):
                 self._get_samples,
                 sweep_function=partial(self._sweep, get_ratio=self._get_ratio),
                 update_proposer=self.update_proposer,
-                num_samples=self._samplePerchain,
+                num_samples=self._samples_per_chain,
                 therm_sweeps=self.thermalization_sweeps,
                 sweep_steps=self.sweep_steps,
                 sample_shape=self.sample_shape,
@@ -678,7 +678,7 @@ class AbstractMCSampler(AbstractSampler):
             )
 
             # Compute acceptance probability
-            P, newlog_prob = get_ratio(
+            P, new_log_prob = get_ratio(
                 log_prob, log_prob_correction, params, state, new_state
             )
 
@@ -687,14 +687,14 @@ class AbstractMCSampler(AbstractSampler):
 
             # Perform update if accepted
             new_state = jax.lax.cond(accepted, lambda: new_state, lambda: state)
-            newlog_prob = jax.lax.cond(accepted, lambda: newlog_prob, lambda: log_prob)
+            new_log_prob = jax.lax.cond(accepted, lambda: new_log_prob, lambda: log_prob)
 
-            return new_state, newlog_prob, new_key, accepted
+            return new_state, new_log_prob, new_key, accepted
 
         def sweep_step(carry, _):
             states, log_prob, keys, num_proposed, num_accepted = carry
 
-            new_states, newlog_prob, new_keys, accepted = jax.vmap(
+            new_states, new_log_prob, new_keys, accepted = jax.vmap(
                 perform_mc_update_single_chain,
                 in_axes=(0, 0, 0, self.update_proposer.arg_in_axes),
             )(states, log_prob, keys, update_proposer_arg)
@@ -702,7 +702,7 @@ class AbstractMCSampler(AbstractSampler):
             num_proposed = num_proposed + 1
             num_accepted = num_accepted + accepted
 
-            return (new_states, newlog_prob, new_keys, num_proposed, num_accepted), None
+            return (new_states, new_log_prob, new_keys, num_proposed, num_accepted), None
 
         (states, log_prob, key, num_proposed, num_accepted), _ = jax.lax.scan(
             sweep_step,

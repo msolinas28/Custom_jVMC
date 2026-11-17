@@ -44,7 +44,7 @@ class TestTimeEvolution(unittest.TestCase):
         psi.parameters = weights
 
         # Set up exact sampler
-        exact_sampler = sampler.exact_sampler(psi)
+        exact_sampler = sampler.ExactSampler(psi)
 
         # Set up hamiltonian for time evolution and ZZ observable
         hamiltonian = 0
@@ -65,14 +65,14 @@ class TestTimeEvolution(unittest.TestCase):
 
         out = opt.time_evolution(t_max, loss_function, stepper, observables)
 
-        # check energy conservation
+        # Check energy conservation
         energy = np.array(out["energy"]["mean"])
         zz = np.array(out["ZZ"]["mean"])
         times = np.array(out["times"])
 
         self.assertTrue(np.max(np.abs((energy - energy[0]) / energy[0])) < 1e-3)
 
-        # check observable dynamics
+        # Check observable dynamics
         zz = interp1d(times, zz)
         ref_times = np.arange(0, 0.5, 0.05)
         net_ZZ = zz(ref_times)
@@ -166,14 +166,14 @@ class TestTimeEvolutionMCSampler(unittest.TestCase):
 
         out = opt.time_evolution(t_max, loss_function, stepper, observables)
 
-        # check energy conservation
+        # Check energy conservation
         energy = np.array(out["energy"]["mean"])
         zz = np.array(out["ZZ"]["mean"])
         times = np.array(out["times"])
 
         self.assertTrue(np.max(np.abs((energy - energy[0]) / energy[0])) < 1e-1)
 
-        # check observable dynamics
+        # Check observable dynamics
         zz = interp1d(times, zz)
         ref_times = np.arange(0, 0.5, 0.05)
         net_ZZ = zz(ref_times)
@@ -205,7 +205,7 @@ class TestTimeEvolutionMCSampler(unittest.TestCase):
         self.assertTrue(np.max(np.abs(net_ZZ - ref_ZZ[: len(net_ZZ)])) < 2e-2)
 
 
-class TestTimeEvolutionbatchedJacobian(unittest.TestCase):
+class TestTimeEvolutionBatchedJacobian(unittest.TestCase):
     def test_batched_jacobian_matches_dense(self):
         L = 4
         J = -1.0
@@ -236,7 +236,7 @@ class TestTimeEvolutionbatchedJacobian(unittest.TestCase):
             rbm = nets.CpxRBM(num_hidden=2, bias=False)
             psi = NQS(rbm, L, batch_size, seed=123)
             psi.parameters = weights
-            exact_sampler = sampler.exact_sampler(psi)
+            exact_sampler = sampler.ExactSampler(psi)
 
             hamiltonian = 0
             for l in range(L):
@@ -300,7 +300,7 @@ class TestTimeEvolutionPinv(unittest.TestCase):
         psi.parameters = weights
 
         # Set up exact sampler
-        exact_sampler = sampler.exact_sampler(psi)
+        exact_sampler = sampler.ExactSampler(psi)
 
         # Set up hamiltonian for time evolution and ZZ observable
         hamiltonian = 0
@@ -321,14 +321,14 @@ class TestTimeEvolutionPinv(unittest.TestCase):
 
         out = opt.time_evolution(t_max, loss_function, stepper, observables)
 
-        # check energy conservation
+        # Check energy conservation
         energy = np.array(out["energy"]["mean"])
         zz = np.array(out["ZZ"]["mean"])
         times = np.array(out["times"])
 
         self.assertTrue(np.max(np.abs((energy - energy[0]) / energy[0])) < 1e-3)
 
-        # check observable dynamics
+        # Check observable dynamics
         zz = interp1d(times, zz)
         ref_times = np.arange(0, 0.5, 0.05)
         net_ZZ = zz(ref_times)
@@ -395,7 +395,7 @@ class TestTimeEvolutionPinv(unittest.TestCase):
             rbm = nets.CpxRBM(num_hidden=2, bias=False)
             psi = NQS(rbm, L, 2**L, seed=123)
             psi.parameters = weights
-            exact_sampler = sampler.exact_sampler(psi)
+            exact_sampler = sampler.ExactSampler(psi)
 
             hamiltonian = 0
             for l in range(L):
@@ -444,7 +444,7 @@ class TestNonHolomorphicUpdate(unittest.TestCase):
 
         return (
             psi,
-            sampler.exact_sampler(psi),
+            sampler.ExactSampler(psi),
             jVMC_exp.objective_function.Observable(hamiltonian),
         )
 
@@ -544,7 +544,7 @@ class TestCrossValidation(unittest.TestCase):
         psi.parameters = psi.parameters_flat + 0.3 * jnp.cos(
             jnp.arange(psi.parameters_flat.shape[0])
         )
-        exact_sampler = sampler.exact_sampler(psi)
+        exact_sampler = sampler.ExactSampler(psi)
         hamiltonian = _tfim(L)
         loss_function = jVMC_exp.objective_function.Observable(hamiltonian)
         solver = jVMC_exp.solver.Pinv(pinv_cutoff=1e-8)
@@ -620,7 +620,7 @@ class TestSubstepReweighting(unittest.TestCase):
             with self.subTest(log_prob_factor=log_prob_factor):
                 psi = NQS(nets.CpxRBM(num_hidden=2, bias=False), L, 2**L, seed=123)
                 psi.parameters = _WEIGHTS
-                exact_sampler = sampler.exact_sampler(
+                exact_sampler = sampler.ExactSampler(
                     psi, 2, log_prob_factor=log_prob_factor
                 )
                 opt = jVMC_exp.optimizer.TDVP(

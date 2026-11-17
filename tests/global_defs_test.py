@@ -12,7 +12,7 @@ _SETTINGS = (
     "DT_OPERATORS_REAL",
     "DT_OPERATORS_CPX",
     "BATCH_LOOP",
-    "MATMUL_chunk_BYTES",
+    "MATMUL_CHUNK_BYTES",
 )
 
 

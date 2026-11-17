@@ -11,13 +11,13 @@ import jVMC_exp.operator.discrete as op
 from jVMC_exp import global_defs, nets
 from jVMC_exp.objective_function import Infidelity
 from jVMC_exp.objective_function.infidelity import MovingAverage
-from jVMC_exp.sampler import exact_sampler, MCSampler
+from jVMC_exp.sampler import ExactSampler, MCSampler
 from jVMC_exp.util.util import matrix_to_jvmc_operator
 from jVMC_exp.vqs import NQS
 
 L = 4
 # 2 samples per device and batch: the connected configurations of a sample are evaluated in chunks
-SMALL_batch_SIZE = 2 * jax.device_count()
+SMALL_BATCH_SIZE = 2 * jax.device_count()
 # All configurations, with site 0 as the most significant bit, as in np.kron
 BASIS = jnp.array((np.arange(2**L)[:, None] >> np.arange(L - 1, -1, -1)) & 1)
 SX = np.array([[0, 1], [1, 0]])
@@ -107,8 +107,8 @@ class TestInfidelityValue(unittest.TestCase):
 
     def assert_exact(self, U_dense, chi=None, psi=None, **infidelity_kwargs):
         chi, psi = chi or self.chi, psi or self.psi
-        sampler = exact_sampler(psi)
-        value = Infidelity(exact_sampler(chi), **infidelity_kwargs)(
+        sampler = ExactSampler(psi)
+        value = Infidelity(ExactSampler(chi), **infidelity_kwargs)(
             sampler
         ).mean.real.item()
 
@@ -126,8 +126,8 @@ class TestInfidelityValue(unittest.TestCase):
         self.assert_exact(flip_dense, operator=flip)
 
     def test_small_batch_size(self):
-        chi = random_nqs(nets.CpxRBM(2, True), seed=1, batch_size=SMALL_batch_SIZE)
-        psi = random_nqs(nets.CpxRBM(2, True), seed=2, batch_size=SMALL_batch_SIZE)
+        chi = random_nqs(nets.CpxRBM(2, True), seed=1, batch_size=SMALL_BATCH_SIZE)
+        psi = random_nqs(nets.CpxRBM(2, True), seed=2, batch_size=SMALL_BATCH_SIZE)
         self.assert_exact(
             self.U_dense,
             chi=chi,
@@ -149,9 +149,9 @@ class TestInfidelityValue(unittest.TestCase):
 
     def test_adaptive_moving_average(self):
         # The coefficient changes from call to call while the moving average fills up
-        sampler = exact_sampler(self.psi)
+        sampler = ExactSampler(self.psi)
         loss = Infidelity(
-            exact_sampler(self.chi),
+            ExactSampler(self.chi),
             self.U,
             self.U_dag,
             control_variate="adaptive",
@@ -165,21 +165,21 @@ class TestInfidelityValue(unittest.TestCase):
         # The keyword arguments, e.g. the time t passed by the optimizers, reach the prefactors
         g = lambda **kwargs: jnp.cos(kwargs["t"])
         operator = op.IdentityOperator(2, 0) + g * op.SigmaX(0)
-        loss = Infidelity(exact_sampler(self.chi), operator, operator)
+        loss = Infidelity(ExactSampler(self.chi), operator, operator)
         for t in (0.3, 1.1):
             exact = exact_infidelity(
                 self.psi, self.chi, np.eye(2**L) + np.cos(t) * embed(SX, 0)
             )
             with self.subTest(t=t):
                 self.assertAlmostEqual(
-                    loss(exact_sampler(self.psi), t=t).mean.real.item(), exact, places=10
+                    loss(ExactSampler(self.psi), t=t).mean.real.item(), exact, places=10
                 )
-                out = loss.value_and_grad(exact_sampler(self.psi), t=t)
+                out = loss.value_and_grad(ExactSampler(self.psi), t=t)
                 self.assertAlmostEqual(out.o_loc.mean.real.item(), exact, places=10)
 
     def test_conjugated_operator_without_operator(self):
         with self.assertRaises(ValueError):
-            Infidelity(exact_sampler(self.chi), conjugated_operator=self.U_dag)
+            Infidelity(ExactSampler(self.chi), conjugated_operator=self.U_dag)
 
     def test_transformed_state(self):
         # A full configuration state holding U|chi> must have zero infidelity with U|chi>
@@ -190,9 +190,9 @@ class TestInfidelityValue(unittest.TestCase):
         for state, v in ((chi, chi_v), (target, self.U_dense @ chi_v)):
             state.parameters = jnp.concatenate([v.real, v.imag])
 
-        loss = Infidelity(exact_sampler(chi), self.U, self.U_dag)
+        loss = Infidelity(ExactSampler(chi), self.U, self.U_dag)
         self.assertAlmostEqual(
-            loss(exact_sampler(target)).mean.real.item(), 0, places=10
+            loss(ExactSampler(target)).mean.real.item(), 0, places=10
         )
 
     def test_monte_carlo(self):
@@ -230,10 +230,10 @@ class TestInfidelityGradient(unittest.TestCase):
         cls.U, cls.U_dag, cls.U_dense = build_unitary()
 
     def get_grad(self, psi, **infidelity_kwargs):
-        sampler = exact_sampler(psi)
+        sampler = ExactSampler(psi)
         sampler.sample()
         loss = Infidelity(
-            exact_sampler(self.chi), self.U, self.U_dag, **infidelity_kwargs
+            ExactSampler(self.chi), self.U, self.U_dag, **infidelity_kwargs
         )
 
         return loss.value_and_grad(sampler).grad
@@ -265,7 +265,7 @@ class TestInfidelityGradient(unittest.TestCase):
         self.assert_finite_differences(NonHolomorphicRBM())
 
     def test_batched_jacobian(self):
-        psi = random_nqs(nets.CpxRBM(2, True), seed=2, batch_size=SMALL_batch_SIZE)
+        psi = random_nqs(nets.CpxRBM(2, True), seed=2, batch_size=SMALL_BATCH_SIZE)
         dense = self.get_grad(psi, batched_jacobian=False)
         lazy = self.get_grad(psi, batched_jacobian=True)
 
@@ -285,8 +285,8 @@ class TestInfidelityOptimization(unittest.TestCase):
 
     def assert_converges(self, get_optimizer, steps, **search_kwargs):
         psi = NQS(nets.CpxRBM(6, True), L, batch_size=2**L, seed=4)
-        sampler = exact_sampler(psi)
-        loss = Infidelity(exact_sampler(self.chi), self.U, self.U_dag)
+        sampler = ExactSampler(psi)
+        loss = Infidelity(ExactSampler(self.chi), self.U, self.U_dag)
         initial = exact_infidelity(psi, self.chi, self.U_dense)
 
         get_optimizer(sampler, psi).ground_state_search(steps, loss, **search_kwargs)

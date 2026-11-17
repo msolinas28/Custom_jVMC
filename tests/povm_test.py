@@ -42,7 +42,7 @@
 #                                   for p in jax.tree_util.tree_flatten(params)[0]])
 #         self.psi.set_parameters(params)
 
-#         self.sampler = jVMC.sampler.exact_sampler(self.psi, (L,), l_dim=4, log_prob_factor=1)
+#         self.sampler = jVMC.sampler.ExactSampler(self.psi, (L,), l_dim=4, log_prob_factor=1)
 
 #         self.tdvpEquation = jVMC.util.tdvp.TDVP(self.sampler, rhsPrefactor=-1.,
 #                                                 pinvTol=0.0, pinvCutoff=1e-6, diagonal_shift=0, makeReal='real', crossValidation=False)

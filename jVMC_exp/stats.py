@@ -461,7 +461,7 @@ class LazySampledObs:
     The counterpart of ``SampledObs`` for observations that are too large to be held in memory \
     at once, such as the gradients of a large network, which ``NQS.lazy_gradients()`` computes in \
     batches (objective functions with ``batched_jacobian=True``). The estimates are defined as in \
-    ``SampledObs``. each computation iterates over the batches, which computes them again; \
+    ``SampledObs``. Each computation iterates over the batches, which computes them again; \
     ``mean`` and ``var`` are cached until ``observations`` is replaced.
 
     Args:
@@ -470,7 +470,7 @@ class LazySampledObs:
           The layout defines which samples make up each batch, and splits ``weights``, or any \
           other array with one entry per sample, into batches that line up with those of the \
           observations. On more than one device a batch does not consist of consecutive \
-          samples, see ``jVMC_exp.sharding_config.batchLayout``.
+          samples, see ``jVMC_exp.sharding_config.BatchLayout``.
         * ``weights``: Weights :math:`w_n`, an array of shape ``(N,)``, normalized to \
           :math:`\\sum_n w_n=1`. Like the observations, they are padded with zeros to a multiple \
           of the number of devices.
@@ -483,7 +483,7 @@ class LazySampledObs:
         if weights is None:
             raise ValueError("LazySampledObs require weights to be an array")
         if not isinstance(observations, SizedIterable) or observations.layout is None:
-            raise ValueError("Observations must be a SizedIterable with a batchLayout")
+            raise ValueError("Observations must be a SizedIterable with a BatchLayout")
         self._layout = observations.layout
 
         # Like the observations, the weights are padded to a multiple of the number of devices.
@@ -530,7 +530,7 @@ class LazySampledObs:
 
     @property
     def layout(self):
-        """``jVMC_exp.sharding_config.batchLayout`` of the batches."""
+        """``jVMC_exp.sharding_config.BatchLayout`` of the batches."""
         return self._layout
 
     @property

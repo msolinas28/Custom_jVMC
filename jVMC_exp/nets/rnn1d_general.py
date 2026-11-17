@@ -144,13 +144,13 @@ class RNN1DGeneral(nn.Module):
             self.cells = self.cell[0]
             self.zero_carry = self.cell[1]
 
-        self.rnnCell = RNNCellStack(self.cells, act_fun=self.act_fun, dtype=self.dtype)
+        self.cell_stack = RNNCellStack(self.cells, act_fun=self.act_fun, dtype=self.dtype)
         init_args = init_fn_args(
             param_dtype=self.dtype,
             bias_init=jax.nn.initializers.zeros,
             kernel_init=self.init_function,
         )
-        self.outputDense = nn.Dense(
+        self.output_dense = nn.Dense(
             features=(self.input_dim - 1) * (2 - self.real_valued_output),
             use_bias=True,
             **init_args,
@@ -190,8 +190,8 @@ class RNN1DGeneral(nn.Module):
         nn.transforms.scan, variable_broadcast="params", split_rngs={"params": False}
     )
     def rnn_cell(self, carry, x):
-        new_carry, out = self.rnnCell(carry[0], carry[1])
-        log_prob = self.log_coeffs_to_log_probs(self.outputDense(out))
+        new_carry, out = self.cell_stack(carry[0], carry[1])
+        log_prob = self.log_coeffs_to_log_probs(self.output_dense(out))
         log_prob = jnp.sum(log_prob * x, axis=-1)
         return (new_carry, x), jnp.nan_to_num(log_prob, nan=-35)
 
@@ -204,8 +204,8 @@ class RNN1DGeneral(nn.Module):
         nn.transforms.scan, variable_broadcast="params", split_rngs={"params": False}
     )
     def rnn_cell_sample(self, carry, x):
-        new_carry, out = self.rnnCell(carry[0], carry[1])
-        log_coeffs = self.log_coeffs_to_log_probs(self.outputDense(out))
+        new_carry, out = self.cell_stack(carry[0], carry[1])
+        log_coeffs = self.log_coeffs_to_log_probs(self.output_dense(out))
         sample_out = jax.random.categorical(
             x, jnp.real(log_coeffs) / self.log_prob_factor
         ).astype(global_defs.DT_SAMPLES)

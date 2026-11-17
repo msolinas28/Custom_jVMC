@@ -54,7 +54,7 @@ class RNNCellStack(nn.Module):
 class RNN2DGeneral(nn.Module):
     """
     Implementation of a multi-layer RNN for one-dimensional data with arbitrary cell.
-    This implementation follows approximat_ely the original proposal for RNN wave functions in
+    This implementation follows approximately the original proposal for RNN wave functions in
     `Hibat-Allah et al., Phys. Rev. Research 2, 023358 (2020) <https://journals.aps.org/prresearch/abstract/10.1103/PhysRevResearch.2.023358>`_.
 
     The ``cell`` parameter can be a string ("RNN", "LSTM", or "GRU") indicating a pre-implemented
@@ -144,10 +144,10 @@ class RNN2DGeneral(nn.Module):
             self.cells = self.cell[0]
             self.zero_carry = self.cell[1]
 
-        self.rnnCell = RNNCellStack(
+        self.cell_stack = RNNCellStack(
             self.cells, dtype=self.dtype, init_fun=self.init_function, act_fun=self.act_fun
         )
-        self.outputDense = nn.Dense(
+        self.output_dense = nn.Dense(
             features=(self.input_dim - 1) * (2 - self.real_valued_output),
             use_bias=True,
             **init_fn_args(
@@ -212,8 +212,8 @@ class RNN2DGeneral(nn.Module):
         nn.transforms.scan, variable_broadcast="params", split_rngs={"params": False}
     )
     def rnn_cell_H(self, carry, x):
-        new_carry, out = self.rnnCell(carry, x[0], x[1], x[2])
-        out = self.outputDense(out)
+        new_carry, out = self.cell_stack(carry, x[0], x[1], x[2])
+        out = self.output_dense(out)
 
         log_coeff = self.log_coeffs_to_log_probs(out)
         return new_carry, (new_carry, log_coeff)
@@ -255,8 +255,8 @@ class RNN2DGeneral(nn.Module):
         nn.transforms.scan, variable_broadcast="params", split_rngs={"params": False}
     )
     def rnn_cell_H_sample(self, carry, x):
-        new_carry, out = self.rnnCell(carry[0], x[0], carry[1], x[1])
-        out = self.outputDense(out)
+        new_carry, out = self.cell_stack(carry[0], x[0], carry[1], x[1])
+        out = self.output_dense(out)
         log_coeffs = self.log_coeffs_to_log_probs(out)
         sample_out = jax.random.categorical(
             x[2], jnp.real(log_coeffs) / self.log_prob_factor

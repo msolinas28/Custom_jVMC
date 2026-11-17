@@ -34,14 +34,14 @@ and the number of samples up to a multiple of the number of chains, with a messa
 
         XLA_FLAGS=--xla_force_host_platform_device_count=4 JAX_PLATFORMS=cpu python script.py
 
-batching
+Batching
 ^^^^^^^^
 Wave function coefficients, gradients and local estimators are computed in batches of
 ``batch_size`` samples, an argument of ``NQS``, which bounds the memory used at once and fixes the
 shapes of the compiled functions whatever the number of samples. A batch is split evenly between
 the devices, so ``batch_size`` has to be a multiple of the number of devices. To avoid moving data
 between devices, a batch is made of a block of the samples of every device: on more than one
-device, it does not consist of consecutive samples (see ``batchLayout``).
+device, it does not consist of consecutive samples (see ``BatchLayout``).
 
 Several processes
 ^^^^^^^^^^^^^^^^^

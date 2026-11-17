@@ -9,7 +9,7 @@ from jVMC_exp.objective_function.base import (
     ObjectiveFunctionOutput,
 )
 from jVMC_exp.optimizer.base import AbstractOptimizer
-from jVMC_exp.sampler import exact_sampler
+from jVMC_exp.sampler import ExactSampler
 from jVMC_exp.sampler.base import AbstractSampler
 from jVMC_exp.sharding_config import MESH, REPLICATED_SHARDING, sharded
 from jVMC_exp.solver import Pinv
@@ -110,7 +110,7 @@ def _blockwise_tangent_kernel(grad_l, grad_r=None):
             jax.lax.dynamic_index_in_dim(grad_blocks, j, axis=0, keepdims=False)
         )
 
-    # The products are summed over chunks of at most global_defs.MATMUL_chunk_BYTES of parameters: XLA
+    # The products are summed over chunks of at most global_defs.MATMUL_CHUNK_BYTES of parameters: XLA
     # autotunes a matrix product on its own copies of the operands, which would otherwise be as
     # large as grad_r
     n_cols = grad_r.shape[1]
@@ -118,7 +118,7 @@ def _blockwise_tangent_kernel(grad_l, grad_r=None):
     chunk = max(
         1,
         min(
-            n_cols, (global_defs.MATMUL_chunk_BYTES or n_cols * col_bytes) // col_bytes
+            n_cols, (global_defs.MATMUL_CHUNK_BYTES or n_cols * col_bytes) // col_bytes
         ),
     )
 
@@ -230,7 +230,7 @@ class MinSR(AbstractOptimizer):
         )
 
         self._solver_state = dict(
-            exact_sampler=isinstance(self.sampler, exact_sampler), pad_size=0
+            exact_sampler=isinstance(self.sampler, ExactSampler), pad_size=0
         )
 
     @property
@@ -294,7 +294,7 @@ class MinSR(AbstractOptimizer):
         else:
             # T is assembled with rows and columns in the original sample order (with the real
             # and imaginary rows of each sample next to each other if self._concat), like o_loc.
-            # each row block is written in place on the devices that hold its samples.
+            # Each row block is written in place on the devices that hold its samples.
             grad = objective_function_output.grad_log_psi
             layout = grad.layout.scaled(2 if self._concat else 1)
             positions = jax.device_put(layout.batch_positions(), REPLICATED_SHARDING)

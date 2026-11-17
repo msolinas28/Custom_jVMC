@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import jVMC_exp
 import jVMC_exp.nets.activation_functions as act_funs
 from jVMC_exp import global_defs, nets
-from jVMC_exp.symmetry.lattice_symetries import square_translation_symmetry
+from jVMC_exp.symmetry.lattice_symmetries import square_translation_symmetry
 from jVMC_exp.vqs import NQS
 
 
@@ -108,7 +108,7 @@ class MatrixMultiplicationNonHolomorphic(nn.Module):
 
 
 class TestGradients(unittest.TestCase):
-    def test_automaticholomorphicity_recognition(self):
+    def test_automatic_holomorphicity_recognition(self):
         for k in range(10):
             L = 3
             num_samples = 4

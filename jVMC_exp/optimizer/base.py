@@ -12,7 +12,7 @@ from jVMC_exp.objective_function.base import (
     AbstractObjectiveFunction,
     ObjectiveFunctionOutput,
 )
-from jVMC_exp.sampler import exact_sampler
+from jVMC_exp.sampler import ExactSampler
 from jVMC_exp.sampler.base import AbstractSampler
 from jVMC_exp.sharding_config import DEVICE_SHARDING, MESH, sharded
 from jVMC_exp.solver.base import AbstractSolver
@@ -481,14 +481,14 @@ class Evolution(AbstractOptimizer):
         store_qgt: bool = False,
         compute_tdvp_error: bool = False,
     ):
-        self.rhsPrefactor = -1 if imag_time else -1j
+        self.rhs_prefactor = -1 if imag_time else -1j
         if psi.holomorphic:
             self._lhs_trans_fn = lambda x: x
         elif make_real:
             self._lhs_trans_fn = lambda x: jnp.real(x)
         else:
             self._lhs_trans_fn = lambda x: 1j * jnp.imag(x)
-        self._rhs_trans_fn = lambda x: self._lhs_trans_fn(self.rhsPrefactor * x)
+        self._rhs_trans_fn = lambda x: self._lhs_trans_fn(self.rhs_prefactor * x)
 
         self.diag_scale = diagonal_scale
         self.diag_shift = diagonal_shift
@@ -538,7 +538,7 @@ class Evolution(AbstractOptimizer):
         )
 
         self._solver_state = dict(
-            exact_sampler=isinstance(self.sampler, exact_sampler),
+            exact_sampler=isinstance(self.sampler, ExactSampler),
             pad_size=self._params_pad_size,
             transformation=self._rhs_trans_fn,
         )
@@ -677,7 +677,7 @@ class Evolution(AbstractOptimizer):
             1.0
             + (
                 jnp.real(jnp.vdot(update, Sv))
-                - 2 * jnp.real(jnp.vdot(update, self.rhsPrefactor * F))
+                - 2 * jnp.real(jnp.vdot(update, self.rhs_prefactor * F))
             )
             / (var + 1e-14)
         )
@@ -737,7 +737,7 @@ class Evolution(AbstractOptimizer):
         Returns ``S + conj(grad_log_psi).T @ grad_log_psi``, with ``S`` sharded across devices
         on the first axis. ``S`` is donated, so it is updated in place.
 
-        each device sums over its own samples, and the partial sums are reduced across devices
+        Each device sums over its own samples, and the partial sums are reduced across devices
         one block of rows at a time: the partial sum of a block has as many rows as the share
         of ``S`` of one device, so no device ever holds a matrix of the size of the full ``S``.
         The number of parameters has to be divisible by the number of devices squared.
@@ -746,7 +746,7 @@ class Evolution(AbstractOptimizer):
         n_samples, n_params = grad_log_psi.shape
         block = n_params // n_devices**2
         grad_blocks = grad_log_psi.reshape(n_samples, n_devices, n_devices, block)
-        # The products are summed over chunks of at most global_defs.MATMUL_chunk_BYTES of samples: XLA
+        # The products are summed over chunks of at most global_defs.MATMUL_CHUNK_BYTES of samples: XLA
         # autotunes a matrix product on its own copies of the operands, which would otherwise be as
         # large as grad_log_psi
         row_bytes = n_params * grad_log_psi.dtype.itemsize
@@ -754,7 +754,7 @@ class Evolution(AbstractOptimizer):
             1,
             min(
                 n_samples,
-                (global_defs.MATMUL_chunk_BYTES or n_samples * row_bytes) // row_bytes,
+                (global_defs.MATMUL_CHUNK_BYTES or n_samples * row_bytes) // row_bytes,
             ),
         )
 

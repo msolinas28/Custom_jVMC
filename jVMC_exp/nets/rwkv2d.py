@@ -230,7 +230,7 @@ class LogRWKV2DAutoregressiveJVMC(nn.Module):
     """Two-dimensional causal autoregressive RWKV log-amplitude network."""
 
     L: int
-    LHil_dim: int = 2
+    l_hil_dim: int = 2
     patch_size: int = 1
     grid_Lx: int = 1
     grid_Ly: int = 1
@@ -269,7 +269,7 @@ class LogRWKV2DAutoregressiveJVMC(nn.Module):
         param_dtype = _param_dtype(self.param_dtype)
         if int(self.L) <= 0:
             raise ValueError("2D RWKV system size must be positive.")
-        if int(self.LHil_dim) <= 1:
+        if int(self.l_hil_dim) <= 1:
             raise ValueError("2D RWKV local Hilbert dimension must be at least 2.")
         if int(self.patch_size) <= 0 or int(self.L) % int(self.patch_size) != 0:
             raise ValueError("2D RWKV patch_size must be positive and divide L.")
@@ -293,7 +293,7 @@ class LogRWKV2DAutoregressiveJVMC(nn.Module):
         if float(self.logit_clip) < 0.0:
             raise ValueError("2D RWKV logit_clip must be nonnegative.")
         if int(self.fixed_n_up) >= 0:
-            if int(self.LHil_dim) != 2:
+            if int(self.l_hil_dim) != 2:
                 raise ValueError(
                     "2D RWKV fixed_n_up currently requires binary local Hilbert space."
                 )
@@ -343,15 +343,15 @@ class LogRWKV2DAutoregressiveJVMC(nn.Module):
         self.site_permutation_array = jnp.asarray(site_permutation, dtype=jnp.int32)
 
         patch_states = list(
-            product(range(int(self.LHil_dim)), repeat=int(self.patch_size))
+            product(range(int(self.l_hil_dim)), repeat=int(self.patch_size))
         )
         self.patch_states = jnp.asarray(patch_states, dtype=jnp.int32)
         self.patch_bit_counts = jnp.sum(self.patch_states, axis=-1).astype(jnp.int32)
-        self.local_hilbert_dim = int(self.LHil_dim) ** int(self.patch_size)
-        self.LocalHil_dim = self.local_hilbert_dim
+        self.local_hilbert_dim = int(self.l_hil_dim) ** int(self.patch_size)
+        self.local_hil_dim = self.local_hilbert_dim
         self.null_token = self.local_hilbert_dim
         self.index_weights = jnp.asarray(
-            int(self.LHil_dim) ** jnp.arange(int(self.patch_size) - 1, -1, -1),
+            int(self.l_hil_dim) ** jnp.arange(int(self.patch_size) - 1, -1, -1),
             dtype=jnp.int32,
         )
         if bool(self.position_embedding):

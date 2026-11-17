@@ -22,7 +22,7 @@ from jVMC_exp.stats import LazySampledObs, SampledObs
 L = 4
 N_SAMPLES = 16
 # 3 samples per device and batch: the last batch over N_SAMPLES is never full
-LAZY_batch_SIZE = 3 * jax.device_count()
+LAZY_BATCH_SIZE = 3 * jax.device_count()
 # All configurations
 BASIS = jnp.array((np.arange(2**L)[:, None] >> np.arange(L - 1, -1, -1)) & 1)
 
@@ -62,7 +62,7 @@ NETS = {
 def build_sampler(batch_size=N_SAMPLES):
     model = jVMC_exp.nets.CpxRBM(1, True)
     psi = jVMC_exp.vqs.NQS(model, L, batch_size=batch_size)
-    sampler = jVMC_exp.sampler.exact_sampler(psi, 2)
+    sampler = jVMC_exp.sampler.ExactSampler(psi, 2)
     return sampler, psi
 
 
@@ -224,7 +224,7 @@ class TestParametricObservable(unittest.TestCase):
         )
 
 
-class TestObservablebatchedJacobian(unittest.TestCase):
+class TestObservableBatchedJacobian(unittest.TestCase):
     """
     batched_jacobian=True routes grad_log_psi through LazySampledObs
     (batches of 3 samples per device over N_SAMPLES=16 -> uneven) instead of a
@@ -233,7 +233,7 @@ class TestObservablebatchedJacobian(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.sampler, cls.psi = build_sampler(batch_size=LAZY_batch_SIZE)
+        cls.sampler, cls.psi = build_sampler(batch_size=LAZY_BATCH_SIZE)
         cls.hamiltonian = build_hamiltonian()
 
     def test_grad_log_psi_is_lazy(self):
@@ -256,10 +256,10 @@ class TestObservablebatchedJacobian(unittest.TestCase):
         self.assertTrue(np.allclose(lazy_out.o_loc.mean, dense_out.o_loc.mean))
 
 
-class TestEstimatorbatchedJacobian(unittest.TestCase):
+class TestEstimatorBatchedJacobian(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.sampler, cls.psi = build_sampler(batch_size=LAZY_batch_SIZE)
+        cls.sampler, cls.psi = build_sampler(batch_size=LAZY_BATCH_SIZE)
 
     def test_matches_dense_estimator(self):
         dense_out = Estimator(
@@ -274,10 +274,10 @@ class TestEstimatorbatchedJacobian(unittest.TestCase):
         )
 
 
-class TestParametricObservablebatchedJacobian(unittest.TestCase):
+class TestParametricObservableBatchedJacobian(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.sampler, cls.psi = build_sampler(batch_size=LAZY_batch_SIZE)
+        cls.sampler, cls.psi = build_sampler(batch_size=LAZY_BATCH_SIZE)
         cls.sigma_z_0 = op.SigmaZ(0)
 
     def test_grad_log_psi_is_lazy(self):
@@ -312,7 +312,7 @@ class TestGradientFiniteDifferences(unittest.TestCase):
         for name, net in NETS.items():
             with self.subTest(net=name):
                 psi = random_nqs(net(), seed=2)
-                sampler = jVMC_exp.sampler.exact_sampler(psi, 2)
+                sampler = jVMC_exp.sampler.ExactSampler(psi, 2)
                 sampler.sample()
                 objective, ell = build(psi)
                 out = objective.value_and_grad(sampler)

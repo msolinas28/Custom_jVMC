@@ -15,11 +15,11 @@ where the sign :math:`\sigma_g(s)` is one for spins and bosons, and contains the
 of the transformation for fermions, in the mode order of the fermionic operators of
 :ref:`Operator`.
 
-The functions of ``jVMC_exp.symmetry.lattice_symetries`` build the projectors of translations
+The functions of ``jVMC_exp.symmetry.lattice_symmetries`` build the projectors of translations
 with a given momentum, of the point groups, of the spin flip and of the particle-hole
 transformation. Projectors are composed with ``*``, and passed to ``NQS`` as ``orbit``::
 
-    from jVMC_exp.symmetry import lattice_symetries as ls
+    from jVMC_exp.symmetry import lattice_symmetries as ls
 
     symm = (
         ls.square_translation_symmetry(L, L, "spin")
@@ -51,7 +51,7 @@ Projectors
 Lattice symmetries
 ^^^^^^^^^^^^^^^^^^
 
-.. automodule:: jVMC_exp.symmetry.lattice_symetries
+.. automodule:: jVMC_exp.symmetry.lattice_symmetries
     :members:
 
 Projected networks

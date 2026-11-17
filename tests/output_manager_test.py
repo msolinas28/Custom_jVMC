@@ -60,7 +60,7 @@ class TestOutputManager(unittest.TestCase):
             self.assertTrue(np.allclose(f["observables/bla/mean"][0], [99.1]))
 
     def test_network_checkpoint_roundtrip(self):
-        """checkpoint stored in memory and retrieved by index and time."""
+        """Checkpoint stored in memory and retrieved by index and time."""
         weights = np.random.uniform(size=(5,))
         self.outp.write_network_checkpoint(1.0, weights)
 

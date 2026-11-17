@@ -7,12 +7,12 @@ The sampler module provides the possibilities to sample variational quantum stat
 
 * :class:`~jVMC_exp.sampler.mc_sampler.MCSampler` samples discrete computational basis
   configurations. If the variational wave function provides a ``sample()`` member function,
-  direct sampling is used. Otherwise, Markov chain Monte Carlo (MCMC) is employed.
+  direct sampling is used. Otherwise, Markov Chain Monte Carlo (MCMC) is employed.
 * :class:`~jVMC_exp.sampler.mc_sampler.MCSamplerCont` does the same for continuous particle
   configurations.
 * :class:`~jVMC_exp.sampler.mc_sampler.CutoffSampler` is an MCMC sampler that clips small
   probabilities from below, and corrects for this in the weights of the samples.
-* :class:`~jVMC_exp.sampler.exact_sampler.exact_sampler` works with all basis states instead of
+* :class:`~jVMC_exp.sampler.exact_sampler.ExactSampler` works with all basis states instead of
   samples, which can be helpful for quick troubleshooting.
 
 The MCMC updates come from the proposers of the ``jVMC_exp.sampler.propose`` module, which is also
@@ -64,7 +64,7 @@ Samplers
     :members:
     :show-inheritance:
 
-.. autoclass:: jVMC_exp.sampler.exact_sampler.exact_sampler
+.. autoclass:: jVMC_exp.sampler.exact_sampler.ExactSampler
     :members:
     :special-members: __call__
     :show-inheritance:

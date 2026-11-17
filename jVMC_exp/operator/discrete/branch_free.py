@@ -128,7 +128,7 @@ class Operator(BaseOperator):
     def _get_list_of_strings(self):
         """
         Flatten the operator tree into a list of operator strings.
-        each operator string is an OperatorString (list subclass) of leaf operators
+        Each operator string is an OperatorString (list subclass) of leaf operators
         to be applied sequentially, with a scale attribute.
 
         Returns: List of OperatorString objects

@@ -109,7 +109,7 @@ def dict_gradient_nonholo(fun, params, arg):
 
 def pick_gradient(fn, params, single_input):
     """
-    choose the gradient functions of a network.
+    Choose the gradient functions of a network.
 
     All the parameters must have the same data type, otherwise ``Exception`` is raised. A \
     network with complex parameters counts as holomorphic if the gradients ``jax.grad`` of \

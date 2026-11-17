@@ -20,7 +20,7 @@ def deduplicate_symmetry_arrays(
 
     Args:
         * ``perm``: Site permutations, of shape ``(n, n_sites)``.
-        * ``character``: characters, of shape ``(n,)``.
+        * ``character``: Characters, of shape ``(n,)``.
         * ``local_map``, ``local_phase``, ``local_sign``, ``perm_sign`` [optional]: The other \
           arrays of the elements, as in ``SymmetryProjector``.
 

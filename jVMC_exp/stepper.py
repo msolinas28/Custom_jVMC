@@ -60,7 +60,7 @@ def _clip(x, c_min, c_max):
 
 def _get_rk_step(butcher_tableau, t, f, y0, dt, k0=None, start_step=0, **rhs_kwargs):
     """
-    One step of the explicit Runge-Kutta scheme with the butcher tableau ``(A, b, c)``.
+    One step of the explicit Runge-Kutta scheme with the Butcher tableau ``(A, b, c)``.
 
     The tableau defines the integration scheme through:
 
@@ -145,7 +145,7 @@ class AbstractAdaptiveStepper(AbstractStepper):
     Base class of the adaptive steppers.
 
     Holds the step size control shared by :class:`AdaptiveHeun`, :class:`RK23` and
-    :class:`RK45`. Derived classes only supply the butcher tableau and the pair of
+    :class:`RK45`. Derived classes only supply the Butcher tableau and the pair of
     approximations that is compared.
 
     A step with the time step :math:`\\Delta t` computes two approximations

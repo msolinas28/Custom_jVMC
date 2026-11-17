@@ -216,7 +216,7 @@ class RWKVCPM(nn.Module):
     """One-dimensional autoregressive RWKV log-amplitude network with CPM phase."""
 
     L: int
-    LHil_dim: int = 2
+    l_hil_dim: int = 2
     patch_size: int = 1
     hidden_size: int = 16
     num_heads: int = 1
@@ -234,7 +234,7 @@ class RWKVCPM(nn.Module):
         param_dtype = _param_dtype(self.param_dtype)
         if int(self.L) <= 0:
             raise ValueError("RWKV system size must be positive.")
-        if int(self.LHil_dim) <= 1:
+        if int(self.l_hil_dim) <= 1:
             raise ValueError("RWKV local Hilbert dimension must be at least 2.")
         if int(self.patch_size) <= 0 or int(self.L) % int(self.patch_size) != 0:
             raise ValueError("RWKV patch_size must be positive and divide L.")
@@ -248,20 +248,20 @@ class RWKVCPM(nn.Module):
             raise ValueError("RWKV sampling temperature must be positive.")
 
         patch_states = list(
-            product(range(int(self.LHil_dim)), repeat=int(self.patch_size))
+            product(range(int(self.l_hil_dim)), repeat=int(self.patch_size))
         )
         self.patch_states = jnp.asarray(patch_states, dtype=jnp.int32)
-        self.LocalHil_dim = int(self.LHil_dim) ** int(self.patch_size)
-        self.local_hilbert_dim = self.LocalHil_dim
+        self.local_hil_dim = int(self.l_hil_dim) ** int(self.patch_size)
+        self.local_hilbert_dim = self.local_hil_dim
         self.PL = int(self.L) // int(self.patch_size)
         self.n_patches = self.PL
         self.index_weights = jnp.asarray(
-            int(self.LHil_dim) ** jnp.arange(int(self.patch_size) - 1, -1, -1),
+            int(self.l_hil_dim) ** jnp.arange(int(self.patch_size) - 1, -1, -1),
             dtype=jnp.int32,
         )
 
         self.embed = nn.Embed(
-            self.LocalHil_dim,
+            self.local_hil_dim,
             int(self.embedding_size),
             param_dtype=param_dtype,
             name="embedding",
@@ -291,7 +291,7 @@ class RWKVCPM(nn.Module):
             name="neck",
         )
         self.head = nn.Dense(
-            self.LocalHil_dim,
+            self.local_hil_dim,
             use_bias=False,
             param_dtype=param_dtype,
             kernel_init=dense_init,
@@ -300,13 +300,13 @@ class RWKVCPM(nn.Module):
         self.CPMBias = self.param(
             "CPMBias",
             nn.initializers.normal(stddev=float(self.cpm_bias_init_std)),
-            (self.PL, self.LocalHil_dim),
+            (self.PL, self.local_hil_dim),
             param_dtype,
         )
         self.CPMKernel = self.param(
             "CPMKernel",
             nn.initializers.normal(stddev=float(self.cpm_weight_init_std)),
-            (self.PL, self.LocalHil_dim, int(self.hidden_size)),
+            (self.PL, self.local_hil_dim, int(self.hidden_size)),
             param_dtype,
         )
 
@@ -412,17 +412,17 @@ class ParticleConservingAutoregressive(nn.Module):
     def setup(self):
         self.is_particle = True
         self.L = int(self.net.L)
-        self.LHil_dim = int(self.net.LHil_dim)
+        self.l_hil_dim = int(self.net.l_hil_dim)
         self.patch_size = int(self.net.patch_size)
-        self.LocalHil_dim = int(self.LHil_dim) ** int(self.patch_size)
-        self.local_hilbert_dim = self.LocalHil_dim
+        self.local_hil_dim = int(self.l_hil_dim) ** int(self.patch_size)
+        self.local_hilbert_dim = self.local_hil_dim
         self.patch_states = jnp.asarray(
-            list(product(range(int(self.LHil_dim)), repeat=int(self.patch_size))),
+            list(product(range(int(self.l_hil_dim)), repeat=int(self.patch_size))),
             dtype=jnp.int32,
         )
         self.patch_particles = jnp.sum(self.patch_states, axis=1).astype(jnp.int32)
         self.PL = int(self.L) // int(self.patch_size)
-        self.max_particle_patch = (self.LHil_dim - 1) * self.patch_size
+        self.max_particle_patch = (self.l_hil_dim - 1) * self.patch_size
         particles = self.patch_particles
         max_particle_p1 = self.max_particle_patch + 1
         self.must_mask = 2 * jnp.asarray(
@@ -559,17 +559,17 @@ class GumbelWithoutReplacement(nn.Module):
         base_net = self.net.net if hasattr(self.net, "net") else self.net
         self.is_particle_net = hasattr(self.net, "Q") and hasattr(self.net, "net")
         self.L = int(base_net.L)
-        self.LHil_dim = int(base_net.LHil_dim)
+        self.l_hil_dim = int(base_net.l_hil_dim)
         self.patch_size = int(base_net.patch_size)
         self.sequence_length = int(self.L) // int(self.patch_size)
-        self.LocalHil_dim = int(self.LHil_dim) ** int(self.patch_size)
-        self.local_hilbert_dim = self.LocalHil_dim
+        self.local_hil_dim = int(self.l_hil_dim) ** int(self.patch_size)
+        self.local_hilbert_dim = self.local_hil_dim
         self.patch_states = jnp.asarray(
-            list(product(range(int(self.LHil_dim)), repeat=int(self.patch_size))),
+            list(product(range(int(self.l_hil_dim)), repeat=int(self.patch_size))),
             dtype=jnp.int32,
         )
         self.patch_particles = jnp.sum(self.patch_states, axis=1).astype(jnp.int32)
-        self.max_particle_patch = (self.LHil_dim - 1) * self.patch_size
+        self.max_particle_patch = (self.l_hil_dim - 1) * self.patch_size
         self.max_particles_after = jnp.pad(
             self.max_particle_patch * jnp.arange(1, self.sequence_length + 1)[::-1],
             (0, 1),
@@ -608,7 +608,7 @@ class GumbelWithoutReplacement(nn.Module):
         return log_softmax(jnp.real(logits), axis=-1)
 
     def sample_weighted(self, num_samples: int, key):
-        domain_size = self.LocalHil_dim**self.sequence_length
+        domain_size = self.local_hil_dim**self.sequence_length
         if int(num_samples) >= domain_size:
             raise RuntimeError(
                 "number of samples must be smaller than the finite Gumbel domain"
@@ -621,7 +621,7 @@ class GumbelWithoutReplacement(nn.Module):
         temperature = jnp.asarray(
             getattr(self.net, "temperature", 1.0), dtype=global_defs.DT_OUT_REAL
         )
-        token_choices = jnp.arange(self.LocalHil_dim, dtype=jnp.int32)
+        token_choices = jnp.arange(self.local_hil_dim, dtype=jnp.int32)
         token_particles = self.patch_particles
 
         for position in range(self.sequence_length):
@@ -632,14 +632,14 @@ class GumbelWithoutReplacement(nn.Module):
                 )
             )(samples, cumsum)
             beam = samples.shape[0]
-            expanded = jnp.repeat(samples, self.LocalHil_dim, axis=0)
-            expanded = expanded.at[jnp.arange(beam * self.LocalHil_dim), position].set(
+            expanded = jnp.repeat(samples, self.local_hil_dim, axis=0)
+            expanded = expanded.at[jnp.arange(beam * self.local_hil_dim), position].set(
                 jnp.tile(token_choices, beam)
             )
-            expanded_log_probs = jnp.repeat(log_probs, self.LocalHil_dim) + cond.reshape(
+            expanded_log_probs = jnp.repeat(log_probs, self.local_hil_dim) + cond.reshape(
                 -1
             )
-            expanded_cumsum = jnp.repeat(cumsum, self.LocalHil_dim) + jnp.tile(
+            expanded_cumsum = jnp.repeat(cumsum, self.local_hil_dim) + jnp.tile(
                 token_particles, beam
             )
             gumbel = random.gumbel(
@@ -659,9 +659,9 @@ class GumbelWithoutReplacement(nn.Module):
 
     def _gumbel_step(self, sample, logits, gumbel, key, states, cumsum, position):
         base = sample[0]
-        candidates = jnp.tile(base[None, :], (self.LocalHil_dim, 1))
-        candidate_tokens = jnp.arange(self.LocalHil_dim, dtype=base.dtype)
-        sample = candidates.at[jnp.arange(self.LocalHil_dim), position].set(
+        candidates = jnp.tile(base[None, :], (self.local_hil_dim, 1))
+        candidate_tokens = jnp.arange(self.local_hil_dim, dtype=base.dtype)
+        sample = candidates.at[jnp.arange(self.local_hil_dim), position].set(
             candidate_tokens
         )
         call_kwargs = {"block_states": states, "output_state": True}
@@ -673,7 +673,7 @@ class GumbelWithoutReplacement(nn.Module):
         logit_new = log_softmax(jnp.real(logit_new) / temperature, axis=-1)
         logit_new = logits[0] + logit_new
         gumbel_new = logit_new + random.gumbel(
-            key[0], shape=(self.LocalHil_dim,), dtype=logit_new.dtype
+            key[0], shape=(self.local_hil_dim,), dtype=logit_new.dtype
         )
         z = jnp.nanmax(gumbel_new)
         gumbel_new = jnp.nan_to_num(

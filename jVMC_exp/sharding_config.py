@@ -146,13 +146,13 @@ def _put_batch(out, piece, i, *, b, rows):
 
 
 @dataclass(frozen=True)
-class batchLayout:
+class BatchLayout:
     """
     Splits ``num_samples`` samples, sharded across devices along the first axis, into \
     batches of ``batch_size`` samples. ``num_samples`` has to be divisible by the number \
     of devices, see ``pad_to_devices()``.
 
-    batch ``i`` is made of the ``i``-th block of ``batch_size // n_devices`` rows of every \
+    Batch ``i`` is made of the ``i``-th block of ``batch_size // n_devices`` rows of every \
     device's shard, so taking a batch out of an array, or writing the result of a batch \
     back into one, never moves data between devices. The last batch holds the remaining \
     rows of every device, padded to ``batch_size`` rows when it is taken. Hence, on more \
@@ -205,7 +205,7 @@ class batchLayout:
 
     def take(self, x, i):
         """
-        batch ``i`` of the row-sharded array ``x``, with ``batch_size`` rows. \
+        Batch ``i`` of the row-sharded array ``x``, with ``batch_size`` rows. \
         The last batch is zero padded if it is not full.
 
         Args:
@@ -292,16 +292,16 @@ class batchLayout:
         """
         Layout of arrays holding ``k`` consecutive rows per sample.
 
-        batch ``i`` of the new layout holds the rows of the samples of batch ``i`` of this layout, \
+        Batch ``i`` of the new layout holds the rows of the samples of batch ``i`` of this layout, \
         so both the number of samples and the batch size are multiplied by ``k``.
 
         Args:
             * ``k``: Number of rows per sample.
 
         Returns:
-            A ``batchLayout`` with ``k * num_samples`` samples and batches of ``k * batch_size``.
+            A ``BatchLayout`` with ``k * num_samples`` samples and batches of ``k * batch_size``.
         """
-        return batchLayout(k * self.num_samples, k * self.batch_size)
+        return BatchLayout(k * self.num_samples, k * self.batch_size)
 
     def batch_positions(self):
         """
@@ -337,13 +337,13 @@ class SizedIterable:
         * ``reusable_iterable``: Function without arguments that returns a new iterator.
         * ``n_iterations``: Number of items of an iteration, returned by ``len()``.
         * ``batch_size``: Number of samples in a batch.
-        * ``layout``: ``batchLayout`` of the batches, or ``None``.
+        * ``layout``: ``BatchLayout`` of the batches, or ``None``.
     """
 
     reusable_iterable: Callable
     n_iterations: int
     batch_size: int
-    layout: batchLayout | None = None
+    layout: BatchLayout | None = None
 
     def __len__(self):
         return self.n_iterations
@@ -444,7 +444,7 @@ class sharded_python:
     The decorated method is written for a single sample: it is vmapped (if ``use_vmap``) \
     and sharded across devices. It is called with a ``batch_size`` keyword argument. \
     With a batch size, the samples are evaluated in batches of ``batch_size`` (see \
-    ``batchLayout``), which bounds how much is computed at once and fixes the input shape \
+    ``BatchLayout``), which bounds how much is computed at once and fixes the input shape \
     of the compiled function, whatever the number of samples. With ``batch_size=None`` \
     all samples are evaluated in a single call. This class loops over the batches in Python, \
     see ``sharded`` for the decorator used by the library.
@@ -494,7 +494,7 @@ class sharded_python:
           the arguments are placed, and ``out_specs`` is not used.
         * ``donate_argnums``: Passed to ``jax.jit``, with the positions of ``static_argnums``.
         * ``yield_iter``: If ``True``, the decorated method returns a ``SizedIterable`` that \
-          computes the result of one batch at a time, in the order of the ``batchLayout`` stored \
+          computes the result of one batch at a time, in the order of the ``BatchLayout`` stored \
           in the iterable. The results include the rows of the padding of the samples to a \
           multiple of the number of devices.
     """
@@ -557,17 +557,17 @@ class sharded_python:
             lengths = [a.shape[0] for a in args]
             if any(n != num_samples for n in lengths):
                 raise ValueError(
-                    "batched calls split every positional argument along the first axis, "
+                    "Batched calls split every positional argument along the first axis, "
                     f"so all of them must have the same length. Got lengths {lengths}."
                 )
 
             # Padding to a multiple of the number of devices makes the samples shardable,
-            # the last batch of every device is then padded to the batch size by batchLayout.take
+            # the last batch of every device is then padded to the batch size by BatchLayout.take
             args = tuple(
                 jax.device_put(pad_to_devices(a), DEVICE_SHARDING) for a in args
             )
             num_padded = args[0].shape[0]
-            layout = batchLayout(
+            layout = BatchLayout(
                 num_padded, num_padded if batch_size is None else batch_size
             )
 
@@ -663,7 +663,7 @@ class sharded_python:
 
         return jsh_fn
 
-    def _iter_local_batches(self, layout: batchLayout, kwargs, args, jsh_fn):
+    def _iter_local_batches(self, layout: BatchLayout, kwargs, args, jsh_fn):
         """
         Generator yielding the result of one batch of ``layout`` at a time, without padding.
         """
@@ -673,7 +673,7 @@ class sharded_python:
                 jsh_fn(kwargs, *(layout.take(a, i) for a in args)),
             )
 
-    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):
+    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
         """
         Evaluates all batches of ``layout`` and writes their results in place into
         preallocated outputs, which keep the order of the input samples.
@@ -696,10 +696,10 @@ class sharded_python:
 class sharded_compiled(sharded_python):
     """
     Like ``sharded_python``, but the loop over the batches of a call runs in a single compiled \
-    function, which is compiled once for every decorated method and ``batchLayout``.
+    function, which is compiled once for every decorated method and ``BatchLayout``.
     """
 
-    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):
+    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
         if layout.n_batches == 1:
             return next(self._iter_local_batches(layout, kwargs, args, jsh_fn))
 
@@ -709,7 +709,7 @@ class sharded_compiled(sharded_python):
 
 
 @jax.jit(static_argnames=("layout", "jsh_fn"))
-def _jitted_call_local(kwargs, args, *, layout: batchLayout, jsh_fn):
+def _jitted_call_local(kwargs, args, *, layout: BatchLayout, jsh_fn):
     """
     The loop of `sharded._call_local` as a compiled function. It has at least two batches.
     The last batch is written separately, since it can have fewer rows than the others.
@@ -768,5 +768,5 @@ class sharded(sharded_python):
             log_psi = Model(net).evaluate(s, parameters=parameters, batch_size=64)
     """
 
-    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):
+    def _call_local(self, layout: BatchLayout, kwargs, args, jsh_fn):
         return _BATCH_LOOPS[global_defs.BATCH_LOOP](self, layout, kwargs, args, jsh_fn)

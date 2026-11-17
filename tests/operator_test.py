@@ -10,11 +10,11 @@ from jax import random
 import jVMC_exp.operator.discrete as op
 from jVMC_exp import global_defs, nets
 from jVMC_exp.sharding_config import distribute
-from jVMC_exp.symmetry.lattice_symetries import square_translation_symmetry
+from jVMC_exp.symmetry.lattice_symmetries import square_translation_symmetry
 from jVMC_exp.vqs import NQS
 
 L = 4
-l_dim = 2
+LDIM = 2
 KEY = random.PRNGKey(3)
 NUM_SAMPLES = 2**6
 

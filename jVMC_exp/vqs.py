@@ -17,7 +17,7 @@ from jVMC_exp.sharding_config import (
     DEVICE_SHARDING,
     MESH,
     REPLICATED_SHARDING,
-    batchLayout,
+    BatchLayout,
     SizedIterable,
     broadcast_split_key,
     pad_to_devices,
@@ -115,11 +115,11 @@ class NQS:
           In this case, its constructor arguments are given by ``nnx_init``.
         * ``sample_shape``: Shape of a configuration. An ``int`` ``n`` stands for ``(n,)``.
         * ``batch_size``: Total batch size for batched network evaluation, divisible by the number \
-          of devices. choice of this parameter impacts performance: with too small values \
+          of devices. Choice of this parameter impacts performance: with too small values \
           performance is limited by memory access overheads, too large values can lead \
           to "out of memory" issues. Exactly one of ``batch_size`` and ``batch_size_per_device`` \
           must be given.
-        * ``batch_size_per_device``: batch size on each device, as an alternative to ``batch_size``.
+        * ``batch_size_per_device``: Batch size on each device, as an alternative to ``batch_size``.
         * ``logarithmic``: Boolean variable indicating, whether the ANN returns logarithmic \
           (:math:`\\log\\psi_\\theta(s)`) or plain (:math:`\\psi_\\theta(s)`) wave function coefficients.
         * ``seed``: Seed for the PRNG to initialize the network parameters. If ``None``, a random \
@@ -284,10 +284,10 @@ class NQS:
 
         if "params" not in value:
             value = {"params": value}
-        if jax.tree_util.tree_structure(value["params"]) != self._netTreeDef:
+        if jax.tree_util.tree_structure(value["params"]) != self._net_tree_def:
             raise ValueError(
                 "Parameter tree structure mismatch.\n"
-                f"  Expected: {self._netTreeDef}\n"
+                f"  Expected: {self._net_tree_def}\n"
                 f"  Received: {jax.tree_util.tree_structure(value['params'])}"
             )
 
@@ -392,7 +392,7 @@ class NQS:
         return self._batch_size
 
     @property
-    def gradientbatch_size(self):
+    def gradient_batch_size(self):
         """
         Number of gradient rows per block of ``lazy_gradients()``: ``batch_size`` times the number of \
         symmetry elements of the projector, if there is one.
@@ -538,7 +538,7 @@ class NQS:
         self._parameters = jax.device_put(
             self.net.init(jax.random.PRNGKey(seed), dummy_sample), REPLICATED_SHARDING
         )
-        self._netTreeDef = jax.tree_util.tree_structure(self.params)
+        self._net_tree_def = jax.tree_util.tree_structure(self.params)
         out = self.apply_fun(self.parameters, dummy_sample)
         is_complex = jnp.issubdtype(out.dtype, jnp.complexfloating)
         self._out_dtype = (
@@ -638,7 +638,7 @@ class NQS:
         """
         Lazy version of ``gradients``: an iterable that recomputes one gradient block
         at a time. Network evaluations use ``batch_size`` configurations; projected
-        networks collect up to ``gradientbatch_size = batch_size * nsymm`` gradient
+        networks collect up to ``gradient_batch_size = batch_size * nsymm`` gradient
         rows per block, capped at the padded number of samples. Symmetry is reduced
         before the rows are stored, so it does not multiply the block's row count.
 
@@ -655,13 +655,13 @@ class NQS:
             A ``jVMC_exp.sharding_config.SizedIterable`` yielding the gradient blocks, which can be \
             iterated more than once.
         """
-        if self.gradientbatch_size == self.batch_size:
+        if self.gradient_batch_size == self.batch_size:
             return self._lazy_gradients_sh(
                 s, parameters=self.grad_parameters, batch_size=self.batch_size
             )
 
         s = jax.device_put(pad_to_devices(s), DEVICE_SHARDING)
-        layout = batchLayout(s.shape[0], min(self.gradientbatch_size, s.shape[0]))
+        layout = BatchLayout(s.shape[0], min(self.gradient_batch_size, s.shape[0]))
         parameters = self.grad_parameters
 
         def blocks():
@@ -759,4 +759,4 @@ class NQS:
                 P_tree_shape.append(P[start : start + s[0]].reshape(s[1]))
                 start += s[0]
 
-        return tree_unflatten(self._netTreeDef, P_tree_shape)
+        return tree_unflatten(self._net_tree_def, P_tree_shape)

@@ -3,7 +3,7 @@ import unittest
 import jax
 import jax.numpy as jnp
 
-from jVMC_exp.sharding_config import batchLayout, SizedIterable, pad_to_devices
+from jVMC_exp.sharding_config import BatchLayout, SizedIterable, pad_to_devices
 from jVMC_exp.stats import LazySampledObs, SampledObs
 
 # 3 samples per device and batch: over 20 samples the last batch is never full
@@ -116,7 +116,7 @@ class TestStats(unittest.TestCase):
         return SampledObs(samples[:, None])
 
     def _make_diverged_obs(self, n_chains, chain_length, seed=0):
-        """chains with clearly different means — R-hat should be >> 1."""
+        """Chains with clearly different means — R-hat should be >> 1."""
         key = jax.random.PRNGKey(seed)
         noise = jax.random.normal(key, shape=(n_chains, chain_length)) * 0.01
         means = jnp.arange(n_chains, dtype=float)[:, None]
@@ -248,11 +248,11 @@ def _make_lazy(observations, weights, batch_size):
     """
     Build a `LazySampledObs` the same way `sharded(..., yield_iter=True)`
     would: samples padded to a multiple of the number of devices, batches of
-    `batch_size` laid out by a `batchLayout` (last one trimmed), re-iterable
+    `batch_size` laid out by a `BatchLayout` (last one trimmed), re-iterable
     from scratch on every pass.
     """
     observations = pad_to_devices(observations)
-    layout = batchLayout(observations.shape[0], batch_size)
+    layout = BatchLayout(observations.shape[0], batch_size)
     batches = layout.split(observations)
     iterable = SizedIterable(
         reusable_iterable=lambda: iter(batches),

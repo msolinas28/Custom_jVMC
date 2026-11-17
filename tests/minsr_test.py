@@ -13,18 +13,18 @@ from jVMC_exp.stats import LazySampledObs, SampledObs
 from jVMC_exp.vqs import NQS
 
 
-class TestGssearch(unittest.TestCase):
+class TestGsSearch(unittest.TestCase):
     def test_gs_search_cpx(self):
         L = 4
         J = -1.0
         hxs = [-1.3, -0.3]
-        exEs = [-6.10160339, -4.09296160]
+        exact_energies = [-6.10160339, -4.09296160]
 
         batch_size = int(2**L)
         learning_rate = 1e-2
         num_steps = 300
 
-        for hx, exE in zip(hxs, exEs):
+        for hx, exact_energy in zip(hxs, exact_energies):
             # Set up variational wave function
             rbm = nets.CpxRBM(num_hidden=3, bias=False)
             psi = NQS(rbm, L, batch_size, seed=1234)
@@ -35,7 +35,7 @@ class TestGssearch(unittest.TestCase):
                 H += J * op.SigmaZ(l) * op.SigmaZ((l + 1) % L) + hx * op.SigmaX(l)
 
             # Set up exact sampler
-            exact_sampler = sampler.exact_sampler(psi)
+            exact_sampler = sampler.ExactSampler(psi)
 
             loss_function = jVMC_exp.objective_function.Observable(H)
             stepper = jVMC_exp.stepper.Euler(time_step=learning_rate)
@@ -47,11 +47,11 @@ class TestGssearch(unittest.TestCase):
             opt.ground_state_search(num_steps, loss_function, stepper)
 
             E = exact_sampler(H)
-            print(jnp.abs((E.mean.item() - exE) / exE))
-            self.assertTrue(jnp.max(jnp.abs((E.mean.item() - exE) / exE)) < 1e-3)
+            print(jnp.abs((E.mean.item() - exact_energy) / exact_energy))
+            self.assertTrue(jnp.max(jnp.abs((E.mean.item() - exact_energy) / exact_energy)) < 1e-3)
 
 
-class TestGssearchbatchedJacobian(unittest.TestCase):
+class TestGsSearchBatchedJacobian(unittest.TestCase):
     def test_gs_search_batched_jacobian(self):
         """
         MinSR builds its (small, N_samples x N_samples) kernel matrix from
@@ -62,7 +62,7 @@ class TestGssearchbatchedJacobian(unittest.TestCase):
         L = 4
         J = -1.0
         hx = -0.3
-        exE = -4.09296160
+        exact_energy = -4.09296160
 
         batch_size = 3 * jax.device_count()
         learning_rate = 1e-2
@@ -75,7 +75,7 @@ class TestGssearchbatchedJacobian(unittest.TestCase):
         for l in range(L):
             H += J * op.SigmaZ(l) * op.SigmaZ((l + 1) % L) + hx * op.SigmaX(l)
 
-        exact_sampler = sampler.exact_sampler(psi)
+        exact_sampler = sampler.ExactSampler(psi)
 
         loss_function = jVMC_exp.objective_function.Observable(H, batched_jacobian=True)
         stepper = jVMC_exp.stepper.Euler(time_step=learning_rate)
@@ -87,11 +87,11 @@ class TestGssearchbatchedJacobian(unittest.TestCase):
         opt.ground_state_search(num_steps, loss_function, stepper)
 
         E = exact_sampler(H)
-        eps_rel = jnp.abs((E.mean.item() - exE) / exE)
+        eps_rel = jnp.abs((E.mean.item() - exact_energy) / exact_energy)
         self.assertTrue(eps_rel < 1e-3)
 
 
-class _real_paramsComplexOut(nn.Module):
+class _RealParamsComplexOut(nn.Module):
     """Real parameters and a complex output, i.e. a non-holomorphic network"""
 
     @nn.compact
@@ -100,7 +100,7 @@ class _real_paramsComplexOut(nn.Module):
         return jnp.sum(jnp.log(jnp.cosh(x))) + 1j * jnp.sum(nn.Dense(1)(x))
 
 
-class TestUpdatebatchedJacobian(unittest.TestCase):
+class TestUpdateBatchedJacobian(unittest.TestCase):
     """
     A single MinSR update from a batched (lazy) Jacobian must equal the update from the
     dense Jacobian. The batches are uneven and, on more than one device, do not consist of
@@ -117,11 +117,11 @@ class TestUpdatebatchedJacobian(unittest.TestCase):
         for name, net in (
             ("real", nets.RBM(num_hidden=3, bias=True)),
             ("holomorphic", nets.CpxRBM(num_hidden=3, bias=True)),
-            ("non-holomorphic", _real_paramsComplexOut()),
+            ("non-holomorphic", _RealParamsComplexOut()),
         ):
             with self.subTest(net=name):
                 psi = NQS(net, L, 3 * jax.device_count(), seed=1234)
-                exact_sampler = sampler.exact_sampler(psi)
+                exact_sampler = sampler.ExactSampler(psi)
                 opt = jVMC_exp.optimizer.MinSR(
                     exact_sampler,
                     psi,
@@ -163,12 +163,12 @@ class TestUpdatebatchedJacobian(unittest.TestCase):
 
         for name, net in (
             ("holomorphic", nets.CpxRBM(num_hidden=3, bias=True)),
-            ("non-holomorphic", _real_paramsComplexOut()),
+            ("non-holomorphic", _RealParamsComplexOut()),
         ):
             with self.subTest(net=name):
                 psi = NQS(net, L, 2 * jax.device_count(), seed=1234)
                 opt = jVMC_exp.optimizer.MinSR(
-                    sampler.exact_sampler(psi),
+                    sampler.ExactSampler(psi),
                     psi,
                     solver=jVMC_exp.solver.Pinv(pinv_cutoff=1e-8),
                     diagonal_shift=1e-3,
@@ -239,7 +239,7 @@ class TestSolverCompatibility(unittest.TestCase):
     def _psi_and_sampler(self):
         L = 4
         psi = NQS(nets.CpxRBM(num_hidden=3, bias=False), L, 2**L, seed=1234)
-        return psi, sampler.exact_sampler(psi)
+        return psi, sampler.ExactSampler(psi)
 
     def test_rejects_matrix_free_solver(self):
         psi, exact_sampler = self._psi_and_sampler()
