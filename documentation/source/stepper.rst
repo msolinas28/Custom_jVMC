@@ -6,7 +6,7 @@ Stepper module
 .. automodule:: jVMC_exp.stepper
 
 With an optimizer, the stepper is passed to ``ground_state_search()`` or ``time_evolution()``
-(see :ref:`Optimizer`), whic_H make the steps and call ``update_dt()`` where needed::
+(see :ref:`Optimizer`), which make the steps and call ``update_dt()`` where needed::
 
     opt = jVMC_exp.optimizer.TDVP(sampler, psi, make_real=False)
     out = opt.time_evolution(

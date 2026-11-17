@@ -57,7 +57,7 @@ class MCSamplerCont(AbstractMCSampler):
         psi: NQS,
         update_proposer: None | AbstractProposeCont,
         key=None,
-        numchains=32,
+        num_chains=32,
         num_samples=128,
         thermalization_sweeps=10,
         sweep_steps=None,
@@ -73,7 +73,7 @@ class MCSamplerCont(AbstractMCSampler):
             psi,
             update_proposer,
             key,
-            numchains,
+            num_chains,
             num_samples,
             thermalization_sweeps,
             sweep_steps,
@@ -101,12 +101,12 @@ class CutoffSampler(MCSampler):
     :math:`\\mu \\, \\text{Re}(\\log\\psi)` is clipped from below at
     ``cutoff = maxlog_psi + log(eps)``, so that the chains sample
     :math:`q(s) \\propto \\max\\{|\\psi(s)|^{\\mu}, e^{\\text{cutoff}}\\}`.
-    The returned weight for eac_H sample is multiplied by the importance ratio
+    The returned weight for each sample is multiplied by the importance ratio
     :math:`r(s) = |\\psi(s)|^{\\mu} / \\max\\{|\\psi(s)|^{\\mu}, e^{\\text{cutoff}}\\}`
     so that estimators stay unbiased.
 
     ``maxlog_psi`` is an estimate of :math:`\\mu\\,\\max_s\\text{Re}(\\log\\psi(s))`. Every
-    ``sample()`` call replaces it with the maximum over the new samples, whic_H
+    ``sample()`` call replaces it with the maximum over the new samples, which
     moves the cutoff for the next call: the weights of a call are computed with the
     cutoff that was in place before it.
 
@@ -129,7 +129,7 @@ class CutoffSampler(MCSampler):
         * ``eps``: Cutoff parameter, in the closed interval :math:`[0, 1]`.
           ``0`` disables the cutoff and ``1`` makes the chains sample uniformly.
         * ``key``: PRNG key (``jax.random.PRNGKey`` or seed ``int``).
-        * ``numchains``: Number of Markov chains run in parallel.
+        * ``num_chains``: Number of Markov chains run in parallel.
         * ``num_samples``: Default number of samples returned by ``sample()``.
         * ``thermalization_sweeps``: Sweeps used for thermalization.
         * ``sweep_steps``: Proposed updates per sweep.
@@ -145,7 +145,7 @@ class CutoffSampler(MCSampler):
           reduce the cost of the bootstrap (e.g., smaller
           ``num_samples``) or to override its key. The bootstrap runs
           25 chains by default, so a ``num_samples`` below 25 also
-          needs a smaller ``numchains`` here.
+          needs a smaller ``num_chains`` here.
     """
 
     def __init__(
@@ -154,7 +154,7 @@ class CutoffSampler(MCSampler):
         update_proposer: AbstractProposer,
         eps,
         key=None,
-        numchains=32,
+        num_chains=32,
         num_samples=128,
         thermalization_sweeps=10,
         sweep_steps=None,
@@ -183,7 +183,7 @@ class CutoffSampler(MCSampler):
             psi,
             update_proposer,
             key=key,
-            numchains=numchains,
+            num_chains=num_chains,
             num_samples=num_samples,
             thermalization_sweeps=thermalization_sweeps,
             sweep_steps=sweep_steps,
@@ -278,7 +278,7 @@ class CutoffSampler(MCSampler):
         """Run a small MCSampler to obtain an initial estimate of max log psi."""
         defaults = dict(
             key=random.PRNGKey(4321),
-            numchains=25,
+            num_chains=25,
             sweep_steps=int(np.prod(self.sample_shape)),
             num_samples=self.num_samples,
             thermalization_sweeps=50,
@@ -300,10 +300,10 @@ class CutoffSampler(MCSampler):
             self.cutoff,
         )
         self.num_proposed = jax.device_put(
-            jnp.zeros((self.numchains,), dtype=np.int64), DEVICE_SHARDING
+            jnp.zeros((self.num_chains,), dtype=np.int64), DEVICE_SHARDING
         )
         self.num_accepted = jax.device_put(
-            jnp.zeros((self.numchains,), dtype=np.int64), DEVICE_SHARDING
+            jnp.zeros((self.num_chains,), dtype=np.int64), DEVICE_SHARDING
         )
 
         num_samples_str = str(self._samplePerchain)

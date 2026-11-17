@@ -14,8 +14,8 @@ XLA_FLAGS=--xla_gpu_autotune_level=0 removes the autotuning buffers.
 """
 import sys, os, json, argparse
 
-BENc_H = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tests", "benchmark", "netket_comparison")
-sys.path.insert(0, BENc_H)
+bench = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tests", "benchmark", "netket_comparison")
+sys.path.insert(0, bench)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("mode", choices=["stages", "dense", "netket"])

@@ -19,7 +19,7 @@ and the number of samples up to a multiple of the number of chains, with a messa
 
 **Example:**
 
-    With 4 devices, ``numchains=50`` and ``num_samples=1000``, the sampler uses 52 chains and
+    With 4 devices, ``num_chains=50`` and ``num_samples=1000``, the sampler uses 52 chains and
     returns 1040 configurations of a system of size :math:`L=7`, sharded along the first axis:
 
     >>> configs, log_psi, weights = sampler.sample()
@@ -37,7 +37,7 @@ and the number of samples up to a multiple of the number of chains, with a messa
 batching
 ^^^^^^^^
 Wave function coefficients, gradients and local estimators are computed in batches of
-``batch_size`` samples, an argument of ``NQS``, whic_H bounds the memory used at once and fixes the
+``batch_size`` samples, an argument of ``NQS``, which bounds the memory used at once and fixes the
 shapes of the compiled functions whatever the number of samples. A batch is split evenly between
 the devices, so ``batch_size`` has to be a multiple of the number of devices. To avoid moving data
 between devices, a batch is made of a block of the samples of every device: on more than one

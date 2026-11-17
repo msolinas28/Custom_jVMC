@@ -115,7 +115,7 @@
 +        """
 +        As `_call_local`, but every dispatch evaluates a group of up to ``MAX_batchES_PER_CALL``
 +        consecutive batches of ``layout``, in a loop inside the compiled function (see
-+        `_loop_over_batches`). Every dispatch costs a fixed host time, whic_H on a GPU can be
++        `_loop_over_batches`). Every dispatch costs a fixed host time, which on a GPU can be
 +        longer than the evaluation of a batch. The compiled function always gets a full group
 +        of rows, the last group being zero padded, so it is compiled once whatever the number
 +        of samples, and the padding batches are not evaluated.

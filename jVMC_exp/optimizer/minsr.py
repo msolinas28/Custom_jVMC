@@ -21,8 +21,8 @@ from jVMC_exp.vqs import NQS
 
 def _interleave_re_im(arr):
     """
-    Real array of shape (2N, ...) with the real and imaginary part of eac_H row of ``arr`` next
-    to eac_H other to reduce device communication.
+    Real array of shape (2N, ...) with the real and imaginary part of each row of ``arr`` next
+    to each other to reduce device communication.
     """
     return jnp.stack([jnp.real(arr), jnp.imag(arr)], axis=1).reshape(
         (2 * arr.shape[0],) + arr.shape[1:]
@@ -72,7 +72,7 @@ def _redistribute(grad):
 
 def _row_blocks(n_local_rows):
     """
-    Number of blocks in whic_H the rows of the tangent kernel owned by a device are computed:
+    Number of blocks in which the rows of the tangent kernel owned by a device are computed:
     the largest number not larger than the number of devices that divides ``n_local_rows``.
     """
     return max(k for k in range(1, MESH.size + 1) if n_local_rows % k == 0)
@@ -84,7 +84,7 @@ def _blockwise_tangent_kernel(grad_l, grad_r=None):
     are the local blocks of matrices sharded along the sample axis. ``grad_r=None`` means
     ``grad_r = grad_l``.
 
-    After `_redistribute`, eac_H device holds a partial sum over its own shard of the
+    After `_redistribute`, each device holds a partial sum over its own shard of the
     parameters, and the partial sums are reduced across devices one block of rows at a time.
     With as many blocks as devices, the partial sum of a block has as many rows as the share
     of the kernel of one device, so no device ever holds a matrix of the size of the full kernel.
@@ -111,7 +111,7 @@ def _blockwise_tangent_kernel(grad_l, grad_r=None):
         )
 
     # The products are summed over chunks of at most global_defs.MATMUL_chunk_BYTES of parameters: XLA
-    # autotunes a matrix product on its own copies of the operands, whic_H would otherwise be as
+    # autotunes a matrix product on its own copies of the operands, which would otherwise be as
     # large as grad_r
     n_cols = grad_r.shape[1]
     col_bytes = grad_r.shape[0] * grad_r.dtype.itemsize
@@ -169,10 +169,10 @@ class MinSR(AbstractOptimizer):
     and the update is the one of ``SR`` with the diagonal shift :math:`\\lambda`, since \
     :math:`\\bar O^\\dagger(\\bar O\\bar O^\\dagger+\\lambda)^{-1}=(\\bar O^\\dagger\\bar O+\\lambda)^{-1}\\bar O^\\dagger`. \
     For networks with real parameters and a complex output, the real and imaginary parts of \
-    eac_H row of :math:`\\bar O` and :math:`\\bar\\epsilon` are separate rows, so that the update \
+    each row of :math:`\\bar O` and :math:`\\bar\\epsilon` are separate rows, so that the update \
     is real. The kernel is sharded across the devices along its rows, and with \
     ``batched_jacobian=True`` it is assembled from pairs of batches of the logarithmic \
-    derivatives, whic_H are never held in memory at once.
+    derivatives, which are never held in memory at once.
 
     Args:
         * ``sampler``: Sampler of ``psi``.
@@ -182,7 +182,7 @@ class MinSR(AbstractOptimizer):
         * ``solver``: Dense solver of ``jVMC_exp.solver``, e.g. ``Pinv``: its ``pinv_cutoff`` \
           plays the role of :math:`\\epsilon_\\mathrm{SVD}`. A matrix-free solver, like ``CG``, \
           raises ``ValueError``, and so does the signal-to-noise regularization of ``PinvSNR`` \
-          (``snr_tol != 0``), whic_H estimates the noise of a Monte Carlo average, whereas the \
+          (``snr_tol != 0``), which estimates the noise of a Monte Carlo average, whereas the \
           right hand side of MinSR holds one local loss per sample.
         * ``resample_stepper``: See ``AbstractOptimizer``.
         * ``output_manager`` [optional]: See ``AbstractOptimizer``.
@@ -202,12 +202,12 @@ class MinSR(AbstractOptimizer):
         if not solver._needs_dense_matrix:
             raise ValueError(
                 f"Solver {solver.__class__.__name__} is not compatible with MinSR, "
-                "whic_H requires a dense tangent kernel."
+                "which requires a dense tangent kernel."
             )
         if getattr(solver, "snr_tol", 0):
             raise ValueError(
                 f"Solver {solver.__class__.__name__} has a non-zero SNR tolerance, "
-                "whic_H is not compatible with MinSR."
+                "which is not compatible with MinSR."
             )
         self._solver = solver
 
@@ -293,8 +293,8 @@ class MinSR(AbstractOptimizer):
 
         else:
             # T is assembled with rows and columns in the original sample order (with the real
-            # and imaginary rows of eac_H sample next to eac_H other if self._concat), like o_loc.
-            # Eac_H row block is written in place on the devices that hold its samples.
+            # and imaginary rows of each sample next to each other if self._concat), like o_loc.
+            # each row block is written in place on the devices that hold its samples.
             grad = objective_function_output.grad_log_psi
             layout = grad.layout.scaled(2 if self._concat else 1)
             positions = jax.device_put(layout.batch_positions(), REPLICATED_SHARDING)
@@ -377,9 +377,9 @@ class MinSR(AbstractOptimizer):
         ever materializing the full (samples x parameters) ``grad`` on any single device.
 
         ``grad`` arrives sharded along the sample axis with the (padded) parameter axis local to
-        eac_H device. Computing the kernel directly in that layout would need cross-device pairs
+        each device. Computing the kernel directly in that layout would need cross-device pairs
         of samples, forcing an implicit all-gather of the whole matrix under automatic sharding.
-        Instead, ``all_to_all`` trades whic_H axis is sharded (eac_H device ends up with all
+        Instead, ``all_to_all`` trades which axis is sharded (each device ends up with all
         samples but only its own shard of parameters), so the local matmul is a valid partial
         sum over that parameter shard; ``psum_scatter`` then reduces and re-shards these partial
         sums into the exact, correctly-sharded kernel, one block of rows at a time so that the

@@ -162,7 +162,7 @@ class TestInfidelityValue(unittest.TestCase):
             self.assertAlmostEqual(loss(sampler).mean.real.item(), exact, places=10)
 
     def test_time_dependent_operator(self):
-        # The keyword arguments, e.g. the time t passed by the optimizers, reac_H the prefactors
+        # The keyword arguments, e.g. the time t passed by the optimizers, reach the prefactors
         g = lambda **kwargs: jnp.cos(kwargs["t"])
         operator = op.IdentityOperator(2, 0) + g * op.SigmaX(0)
         loss = Infidelity(exact_sampler(self.chi), operator, operator)

@@ -8,14 +8,14 @@ processes, so calling ``jax.distributed.initialize()`` before importing the libr
 effect.
 
 All the devices of all the processes form the one-dimensional mesh ``MESH``, with the axis
-``"devices"``. Arrays with one entry per sample, suc_H as configurations, coefficients and
+``"devices"``. Arrays with one entry per sample, such as configurations, coefficients and
 gradients, are sharded along their first axis across this mesh (``DEVICE_SHARDING``), while
 network parameters are replicated on every device (``REPLICATED_SHARDING``). Their number of
 samples has to be a multiple of the number of devices: ``distribute()`` rounds a number of samples
 up, and ``pad_to_devices()`` pads an array.
 
 The methods of the library that evaluate a function on many samples are decorated with
-``sharded``, whic_H distributes the samples across the devices and evaluates them in batches.
+``sharded``, which distributes the samples across the devices and evaluates them in batches.
 """
 
 import math
@@ -308,7 +308,7 @@ class batchLayout:
         For every sample, its position in the concatenation of all batches.
 
         Returns:
-            NumPy array ``positions`` suc_H that ``jnp.concatenate(layout.split(x))[positions]`` \
+            NumPy array ``positions`` such that ``jnp.concatenate(layout.split(x))[positions]`` \
             is ``x``.
         """
         b = self._local_batch_size
@@ -328,7 +328,7 @@ class batchLayout:
 @dataclass
 class SizedIterable:
     """
-    Iterable with a length, whic_H can be iterated more than once.
+    Iterable with a length, which can be iterated more than once.
 
     ``sharded(..., yield_iter=True)`` returns it to compute the results one batch at a time: \
     every iteration evaluates the batches again.
@@ -363,7 +363,7 @@ def distribute(global_size: int, label: str | None = None):
     This helper ensures that a quantity intended to be sharded across the \
     JAX device mesh is compatible with the number of available devices. \
     In particular, it enforces that the global size is at least the number \
-    of devices and divisible by it, so that eac_H device receives an equal \
+    of devices and divisible by it, so that each device receives an equal \
     shard.
 
     If ``global_size`` is smaller than the number of devices, it is increased \
@@ -444,7 +444,7 @@ class sharded_python:
     The decorated method is written for a single sample: it is vmapped (if ``use_vmap``) \
     and sharded across devices. It is called with a ``batch_size`` keyword argument. \
     With a batch size, the samples are evaluated in batches of ``batch_size`` (see \
-    ``batchLayout``), whic_H bounds how muc_H is computed at once and fixes the input shape \
+    ``batchLayout``), which bounds how much is computed at once and fixes the input shape \
     of the compiled function, whatever the number of samples. With ``batch_size=None`` \
     all samples are evaluated in a single call. This class loops over the batches in Python, \
     see ``sharded`` for the decorator used by the library.
@@ -481,7 +481,7 @@ class sharded_python:
         * ``static_kwarg_names``: Tuple with the names of the static keyword arguments.
         * ``use_vmap``: If ``True``, the method is written for a single sample and vmapped over \
           the samples. If ``False``, it receives the arrays of samples: the block of every device, \
-          on whic_H it can use collective operations over the mesh axis ``"devices"``, or the \
+          on which it can use collective operations over the mesh axis ``"devices"``, or the \
           whole arrays with ``automatic_sharding``.
         * ``vmap_in_axes``: ``in_axes`` of ``jax.vmap`` for the positional arguments. If ``None``, \
           all of them are mapped along their first axis.
@@ -676,7 +676,7 @@ class sharded_python:
     def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):
         """
         Evaluates all batches of ``layout`` and writes their results in place into
-        preallocated outputs, whic_H keep the order of the input samples.
+        preallocated outputs, which keep the order of the input samples.
         """
         if layout.n_batches == 1:
             return next(self._iter_local_batches(layout, kwargs, args, jsh_fn))
@@ -696,7 +696,7 @@ class sharded_python:
 class sharded_compiled(sharded_python):
     """
     Like ``sharded_python``, but the loop over the batches of a call runs in a single compiled \
-    function, whic_H is compiled once for every decorated method and ``batchLayout``.
+    function, which is compiled once for every decorated method and ``batchLayout``.
     """
 
     def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):

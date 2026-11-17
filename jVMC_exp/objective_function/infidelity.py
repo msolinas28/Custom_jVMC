@@ -98,7 +98,7 @@ class Infidelity(AbstractObjectiveFunction):
           :math:`\hat O` is taken as Hermitian, with a warning, and control variates are
           disabled. Raises ``ValueError`` if given without ``operator``.
         * ``control_variate``: ``None``, ``"simple"`` or ``"adaptive"``, in upper or lower case.
-        * ``moving_average_width``: Number of calls over whic_H the coefficient of the adaptive
+        * ``moving_average_width``: Number of calls over which the coefficient of the adaptive
           control variate is averaged. The average starts from zeros.
         * ``l_dim``: Local dimension of the default identity operator.
         * ``batched_jacobian``: See ``AbstractObjectiveFunction``.

@@ -678,7 +678,7 @@ class Test(unittest.TestCase):
         base_net = _FirstSiteNet()
 
         for average in ("log", "sep"):
-            with warnings.catc_H_warnings(record=True) as caught:
+            with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 ProjectedOrbitNet(
                     base_net=base_net, symmetry=symm, symmetry_average=average

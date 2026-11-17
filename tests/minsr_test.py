@@ -192,7 +192,7 @@ class TestUpdatebatchedJacobian(unittest.TestCase):
 class TestPinvSolve(unittest.TestCase):
     """
     MinSR used to pseudo-invert the tangent kernel and only then apply it to the local
-    energies. ``Pinv`` instead solves in the eigenbasis, ``V (ev^-1 * (V^H b))``, whic_H
+    energies. ``Pinv`` instead solves in the eigenbasis, ``V (ev^-1 * (V^H b))``, which
     avoids reassembling ``A^+`` but must give the same answer.
     """
 
@@ -275,7 +275,7 @@ class TestSolverCompatibility(unittest.TestCase):
 
         self.assertEqual(new_parameters.shape, psi.parameters_flat.shape)
         self.assertTrue(bool(jnp.all(jnp.isfinite(jnp.abs(new_parameters)))))
-        # info from the solve must reac_H the metadata MinSR reports
+        # info from the solve must reach the metadata MinSR reports
         self.assertIn("residual", opt.meta_data)
 
 

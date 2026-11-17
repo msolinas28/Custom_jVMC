@@ -13,9 +13,9 @@ The sampler module provides the possibilities to sample variational quantum stat
 * :class:`~jVMC_exp.sampler.mc_sampler.CutoffSampler` is an MCMC sampler that clips small
   probabilities from below, and corrects for this in the weights of the samples.
 * :class:`~jVMC_exp.sampler.exact_sampler.exact_sampler` works with all basis states instead of
-  samples, whic_H can be helpful for quick troubleshooting.
+  samples, which can be helpful for quick troubleshooting.
 
-The MCMC updates come from the proposers of the ``jVMC_exp.sampler.propose`` module, whic_H is also
+The MCMC updates come from the proposers of the ``jVMC_exp.sampler.propose`` module, which is also
 available as ``jVMC_exp.propose``.
 
 Usage
@@ -28,7 +28,7 @@ these samples::
 
     psi = jVMC_exp.vqs.NQS(net, L, batch_size=2**10, seed=1234)
     sampler = jVMC_exp.sampler.MCSampler(
-        psi, jVMC_exp.propose.SpinFlip(), key=123, numchains=2**6, num_samples=2**12
+        psi, jVMC_exp.propose.SpinFlip(), key=123, num_chains=2**6, num_samples=2**12
     )
 
     s, log_psi, p = sampler.sample()

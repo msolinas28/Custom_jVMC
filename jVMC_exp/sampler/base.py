@@ -137,7 +137,7 @@ class AbstractMCSampler(AbstractSampler):
           propose updates for the MCMC algorithm. Can be ``None`` only if ``psi`` samples directly.
         * ``key``: An instance of ``jax.random.PRNGKey``, or an ``int`` that will be used as seed \
           to initialize a ``PRNGKey``. If ``None``, a random seed is generated.
-        * ``numchains``: Number of Markov chains, whic_H are run in parallel. It cannot exceed \
+        * ``num_chains``: Number of Markov chains, which are run in parallel. It cannot exceed \
           ``num_samples``. It is unused when sampling directly.
         * ``num_samples``: Default number of samples to be returned by the ``sample()`` member \
           function. All chains contribute the same number of samples.
@@ -161,7 +161,7 @@ class AbstractMCSampler(AbstractSampler):
         psi: NQS,
         update_proposer: None | AbstractProposer,
         key=None,
-        numchains=32,
+        num_chains=32,
         num_samples=128,
         thermalization_sweeps=10,
         sweep_steps=None,
@@ -191,7 +191,7 @@ class AbstractMCSampler(AbstractSampler):
         self.sweep_steps = sweep_steps
         self.thermalization_sweeps = thermalization_sweeps
         self.num_samples = num_samples
-        self.numchains = numchains
+        self.num_chains = num_chains
 
         self.states = init_state
         self.num_proposed = None
@@ -271,24 +271,24 @@ class AbstractMCSampler(AbstractSampler):
         return self._update_proposer
 
     @property
-    def numchains(self):
+    def num_chains(self):
         """
         Number of Markov chains.
 
         Setting it adapts the current chains at the next ``sample()`` call, as described for \
         ``init_state``, and initializes the proposer again.
         """
-        return self._numchains
+        return self._num_chains
 
-    @numchains.setter
-    def numchains(self, value):
+    @num_chains.setter
+    def num_chains(self, value):
         if not self.psi.is_generator and self.num_samples < value:
             raise ValueError(
                 f"The provided number of chains {value} is bigger "
                 f"than the number of samples {self.num_samples}."
             )
 
-        self._numchains = value
+        self._num_chains = value
         self._is_state_initialized = False
         self._get_samples_jsh = {}
         self._randomize_samples_jsh = {}
@@ -306,7 +306,7 @@ class AbstractMCSampler(AbstractSampler):
     @property
     def states(self):
         """
-        Current configurations of the Markov chains, of shape ``(numchains, *sample_shape)``.
+        Current configurations of the Markov chains, of shape ``(num_chains, *sample_shape)``.
 
         This is ``init_state`` until the first ``sample()`` call. A new value is used by the next \
         ``sample()`` call, as described for ``init_state``.
@@ -414,26 +414,26 @@ class AbstractMCSampler(AbstractSampler):
             * ``dtype``: Data type of the configurations.
         """
         master_key = self.key[0] if self.key.ndim > 1 else self.key
-        all_keys = broadcast_split_key(master_key, self.numchains + 1)
+        all_keys = broadcast_split_key(master_key, self.num_chains + 1)
         keys = all_keys[:-1]
         init_state_key = all_keys[-1]
         self._key = jax.device_put(keys, DEVICE_SHARDING)
 
         if self.states is not None:
             states = self.states.astype(dtype)
-            res = self.numchains - states.shape[0]
+            res = self.num_chains - states.shape[0]
             if res > 0:
                 pad = initializer(init_state_key, (res,) + self.sample_shape, dtype)
                 states = jnp.concat([states, pad])
             elif res < 0:
-                states = states[: self.numchains]
+                states = states[: self.num_chains]
         else:
             states = initializer(
-                init_state_key, (self.numchains,) + self.sample_shape, dtype
+                init_state_key, (self.num_chains,) + self.sample_shape, dtype
             )
         self._states = jax.device_put(states, DEVICE_SHARDING)
 
-        self.update_proposer.init_arg(self.psi, self.numchains)
+        self.update_proposer.init_arg(self.psi, self.num_chains)
 
         self._is_state_initialized = True
 
@@ -447,14 +447,14 @@ class AbstractMCSampler(AbstractSampler):
             - For MCMC sampling:
                 - The number of chains must be >= total_devices
                 - The number of chains must be divisible by total_devices
-                - Eac_H chain generates the same number of samples
+                - each chain generates the same number of samples
 
         The method performs the following adjustments:
             1. Generator sampling: rounds num_samples up to the next multiple of
-               total_devices (numchains is unused in this case).
+               total_devices (num_chains is unused in this case).
             2. MCMC sampling:
-                a. If numchains < total_devices: increases numchains to total_devices
-                b. If numchains is not divisible by total_devices: rounds up to the
+                a. If num_chains < total_devices: increases num_chains to total_devices
+                b. If num_chains is not divisible by total_devices: rounds up to the
                    next multiple of total_devices
                 c. Rounds up samples per chain using ceiling division to ensure
                    at least num_samples total samples are generated
@@ -462,13 +462,13 @@ class AbstractMCSampler(AbstractSampler):
         if self.psi.is_generator:
             total_samples = distribute(self.num_samples, "samples")
         else:
-            self._numchains = distribute(self.numchains, "chains")
+            self._num_chains = distribute(self.num_chains, "chains")
 
             # Use ceiling division to ensure at least num_samples total samples
             self._samplePerchain = (
-                self.num_samples + self.numchains - 1
-            ) // self.numchains
-            total_samples = self._samplePerchain * self.numchains
+                self.num_samples + self.num_chains - 1
+            ) // self.num_chains
+            total_samples = self._samplePerchain * self.num_chains
 
         if total_samples > self.num_samples:
             print(f"INFO: Total samples adjusted: {self.num_samples} -> {total_samples}")
@@ -529,10 +529,10 @@ class AbstractMCSampler(AbstractSampler):
         self.update_proposer.update_arg(self.psi)
         self.log_prob = self._log_prob_fun_jsh(self.psi.sampler_parameters, self.states)
         self.num_proposed = jax.device_put(
-            jnp.zeros((self.numchains,), dtype=np.int64), DEVICE_SHARDING
+            jnp.zeros((self.num_chains,), dtype=np.int64), DEVICE_SHARDING
         )
         self.num_accepted = jax.device_put(
-            jnp.zeros((self.numchains,), dtype=np.int64), DEVICE_SHARDING
+            jnp.zeros((self.num_chains,), dtype=np.int64), DEVICE_SHARDING
         )
 
         num_samples_str = str(self._samplePerchain)

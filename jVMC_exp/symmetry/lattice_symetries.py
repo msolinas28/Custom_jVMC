@@ -1,7 +1,7 @@
 """
 Projectors of the usual lattice symmetries.
 
-Eac_H function returns a ``SymmetryProjector`` for a lattice of ``Lx`` x ``Ly`` sites with periodic
+each function returns a ``SymmetryProjector`` for a lattice of ``Lx`` x ``Ly`` sites with periodic
 boundary conditions, ``Ly=1`` for a chain. Projectors are composed with ``*``, e.g.
 ``square_translation_symmetry(L, L, "spin") * square_d4_symmetry(L, L, "spin")``.
 
@@ -14,7 +14,7 @@ the index in this array of the site at the coordinates ``(x, y)``:
   even ``x``.
 * ``site_order="custom"``: the array ``site_enum`` of the indices, of shape ``(Ly, Lx)`` and indexed
   as ``site_enum[y, x]`` with ``site_enum_axes="yx"``, or of shape ``(Lx, Ly)`` and indexed as
-  ``site_enum[x, y]`` with ``site_enum_axes="xy"``. It must contain eac_H index from 0 to
+  ``site_enum[x, y]`` with ``site_enum_axes="xy"``. It must contain each index from 0 to
   ``Lx * Ly - 1`` once.
 
 For spinful fermions the local states 0, 1, 2 and 3 stand for an empty site, a spin up, a spin
@@ -98,7 +98,7 @@ def _site_enum_array(
     expected = jnp.arange(Lx * Ly, dtype=jnp.int32)
     if bool(jnp.any(jnp.sort(flat) != expected)):
         raise ValueError(
-            "site enumeration must contain eac_H site index from 0 to Lx*Ly-1 exactly once."
+            "site enumeration must contain each site index from 0 to Lx*Ly-1 exactly once."
         )
 
     return enum
@@ -194,7 +194,7 @@ def square_d4_symmetry(
     All the characters are one.
 
     Args:
-        * ``Lx``, ``Ly``: Size of the lattice, whic_H must be square.
+        * ``Lx``, ``Ly``: Size of the lattice, which must be square.
         * ``particle_type``: Particle type, see ``SymmetryProjector``.
         * ``site_order``, ``site_enum``, ``site_enum_axes``: Site enumeration, see the module.
 
@@ -479,7 +479,7 @@ def spin_flip_symmetry(
 
     The two elements are the identity and the spin flip :math:`F`, with character one. For \
     spins, the local states ``0`` and ``1`` are exchanged. For spinful fermions, the spins up \
-    and down are exchanged on every site, with a sign -1 for eac_H doubly occupied site, so that \
+    and down are exchanged on every site, with a sign -1 for each doubly occupied site, so that \
     :math:`F\\hat c_{i\\uparrow}F^{-1}=\\hat c_{i\\downarrow}` and \
     :math:`F\\hat c_{i\\downarrow}F^{-1}=\\hat c_{i\\uparrow}`.
 

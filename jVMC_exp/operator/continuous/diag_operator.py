@@ -68,13 +68,13 @@ class CoulombInteraction(Operator):
 
 class ParticleDensity(Operator):
     """
-    Number of particles in eac_H cell of a regular grid over the geometry.
+    Number of particles in each cell of a regular grid over the geometry.
 
     The local estimator of a configuration is an array of shape ``linear_partition``.
 
     Args:
-        * ``geometry``: Geometry of the system, whic_H has to provide ``count_particles_in_cell()``.
-        * ``linear_partition``: Number of cells along eac_H spatial dimension.
+        * ``geometry``: Geometry of the system, which has to provide ``count_particles_in_cell()``.
+        * ``linear_partition``: Number of cells along each spatial dimension.
     """
 
     def __init__(self, geometry, linear_partition=(10, 10)):

@@ -33,7 +33,7 @@ Usage
     # Real-time evolution with an adaptive time step, measuring an observable
     opt = jVMC_exp.optimizer.TDVP(sampler, psi, make_real=False, diagonal_shift=0.)
     out = opt.time_evolution(
-        t_max, jVMC_exp.objective_function.Observable(H_quenc_H),
+        t_max, jVMC_exp.objective_function.Observable(H_quench),
         jVMC_exp.stepper.AdaptiveHeun(time_step=1e-3, rtol=1e-5, atol=1e-5),
         observables={"ZZ": ZZ}
     )

@@ -1,5 +1,5 @@
 """
-CPU correctness check of the dense SR path: SR updates (Pinv, and PinvSNR with the SNR cutoff, whic_H
+CPU correctness check of the dense SR path: SR updates (Pinv, and PinvSNR with the SNR cutoff, which
 moves the Jacobian between its states) for a small real RBM, with whatever jVMC_exp is importable.
 Run it before and after a change and compare:
 
@@ -7,7 +7,7 @@ Run it before and after a change and compare:
     python check_dense.py before.npz                  # current code
     python check_dense.py after.npz --ref before.npz  # changed code: prints the relative differences
 
-With 4 devices the samples (2002) and the parameters (420) are padded, whic_H exercises the padding.
+With 4 devices the samples (2002) and the parameters (420) are padded, which exercises the padding.
 """
 import sys, os, warnings, argparse
 parser = argparse.ArgumentParser()
@@ -33,12 +33,12 @@ rng = np.random.default_rng(0)
 psi = NQS(RBM(num_hidden=H, bias=False), L, batch_size=512, seed=0)
 psi.parameters = {"Dense_0": {"kernel": jnp.asarray(rng.normal(0, 1 / np.sqrt(L), (L, H)))}}
 ham = jvmchamiltonian(L, 1.0)
-sampler = MCSampler(psi, SpinFlip(), key=0, numchains=jax.device_count(), num_samples=n)
+sampler = MCSampler(psi, SpinFlip(), key=0, num_chains=jax.device_count(), num_samples=n)
 s = jnp.asarray(rng.integers(0, 2, (n, L)), dtype=jVMC_exp.global_defs.DT_SAMPLES)
 sampler._samples, sampler._log_psi, sampler._weights = s, psi(s), jnp.asarray(rng.uniform(0.5, 1.5, n))
 
 out = {}
-with warnings.catc_H_warnings(record=True) as caught:
+with warnings.catch_warnings(record=True) as caught:
     warnings.simplefilter("always")
     for name, solver in [("pinv", Pinv()), ("snr", PinvSNR(snr_tol=2.0, pinv_tol=1e-6, pinv_cutoff=1e-10))]:
         sr = SR(sampler, psi, diagonal_shift=1e-3, solver=solver)

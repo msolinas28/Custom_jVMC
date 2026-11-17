@@ -99,10 +99,10 @@
 +    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn, loop_fn):
          """
          Evaluates all batches of ``layout`` and writes their results in place into
-         preallocated outputs, whic_H keep the order of the input samples.
+         preallocated outputs, which keep the order of the input samples.
 @@ -648,16 +684,13 @@
      Like ``sharded_python``, but the loop over the batches of a call runs in a single compiled \
-     function, whic_H is compiled once for every decorated method and ``batchLayout``.
+     function, which is compiled once for every decorated method and ``batchLayout``.
      """
 -    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn):
 +    def _call_local(self, layout: batchLayout, kwargs, args, jsh_fn, loop_fn):

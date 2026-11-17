@@ -75,7 +75,7 @@ Design choices
 Variational wave functions
 --------------------------
 A core part of this codebase is the ``NQS`` class, an abstract wrapper class 
-for variational wave functions, whic_H proves an interface that other parts 
+for variational wave functions, which proves an interface that other parts 
 of the code rely on. At initialization the specific variational wave function 
 is passed to ``NQS`` in the form of a `Flax <https://github.com/google/flax>`_
 module. `Flax <https://github.com/google/flax>`_ is a
@@ -85,7 +85,7 @@ known also from `Pytorc_H`.
 
 Parallelism
 -----------
-The performance of the code relies on a few design choices, whic_H enable
+The performance of the code relies on a few design choices, which enable
 efficient computation for typical use cases on a desktop device as well as
 on distributed multi GPU clusters. An important manifestation of these
 choices are required array dimensions when interfacing `jVMC`: All data

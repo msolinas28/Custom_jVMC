@@ -21,7 +21,7 @@ class ObjectiveFunctionOutput:
         * ``grad_log_psi``: Logarithmic derivatives \
           :math:`\\Gamma_k(s_n)=\\partial_{\\theta_k}\\ln\\psi_\\theta(s_n)`, as a ``SampledObs``, or as \
           a ``LazySampledObs`` with ``batched_jacobian=True``.
-        * ``grad``: Force :math:`F_k`, a complex array with one entry per real parameter, suc_H \
+        * ``grad``: Force :math:`F_k`, a complex array with one entry per real parameter, such \
           that :math:`\\partial_{\\theta_k}L=2\\,\\mathrm{Re}\\,F_k`. ``None`` if the gradient was \
           not computed.
     """
@@ -308,7 +308,7 @@ class ParametricObservable(AbstractObjectiveFunction):
         +\\frac12\\langle(\\partial_{\\theta_k}\\hat O)_\\mathrm{loc}\\rangle_p.
 
     Args:
-        * ``operator``: The operator :math:`\\hat O(\\theta)` at the current parameters, whic_H \
+        * ``operator``: The operator :math:`\\hat O(\\theta)` at the current parameters, which \
           gives the local losses.
         * ``estimator_fn``: Function ``f(parameters, s)`` whose derivatives are the local \
           estimators of the derivatives of the operator, \

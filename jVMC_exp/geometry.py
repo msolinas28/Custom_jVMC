@@ -23,7 +23,7 @@ class AbstractGeometry(ABC):
         * ``n_dim``: Number of spatial dimensions.
         * ``PBC``: Whether the boundary conditions are periodic, either a ``bool`` for all the \
           directions or a sequence (tuple, list or array) with one ``bool`` per direction.
-        * ``extent``: Tuple with the length of the system along eac_H direction. If ``None``, the \
+        * ``extent``: Tuple with the length of the system along each direction. If ``None``, the \
           length is 1 along every direction.
     """
 
@@ -72,7 +72,7 @@ class AbstractGeometry(ABC):
 
     @property
     def extent(self):
-        """Tuple with the length of the system along eac_H direction."""
+        """Tuple with the length of the system along each direction."""
         return self._extent
 
     def get_absolute_distance(self, x):
@@ -98,7 +98,7 @@ class AbstractGeometry(ABC):
     def domain(self):
         """
         Region of space of the system, as an array of shape ``(n_dim, 2)`` with the lower and the \
-        upper bound along eac_H direction.
+        upper bound along each direction.
         """
 
     @abstractmethod
@@ -151,7 +151,7 @@ class HyperRectangle(AbstractGeometry):
     """
     Hyperrectangle centered at the origin, with side lengths ``extent``.
 
-    The domain is :math:`[-L_d/2, L_d/2]` along eac_H direction :math:`d`, with :math:`L_d` the \
+    The domain is :math:`[-L_d/2, L_d/2]` along each direction :math:`d`, with :math:`L_d` the \
     entry ``d`` of ``extent``. Along the periodic directions, distances follow the minimum image \
     convention and ``apply_PBC()`` maps the coordinates into :math:`[-L_d/2, L_d/2)`. Along the \
     other directions, the particles can leave the domain, and the extent only sets the region where \
@@ -170,7 +170,7 @@ class HyperRectangle(AbstractGeometry):
     @property
     def domain(self):
         """
-        Array of shape ``(n_dim, 2)`` with the bounds ``-extent / 2`` and ``extent / 2`` along eac_H \
+        Array of shape ``(n_dim, 2)`` with the bounds ``-extent / 2`` and ``extent / 2`` along each \
         direction.
         """
         ext = jnp.array(self.extent)
@@ -196,7 +196,7 @@ class HyperRectangle(AbstractGeometry):
 
     def uniform_populate(self, key, shape, dtype=jnp.float64):
         """
-        Draw configurations with eac_H coordinate distributed uniformly between the bounds of the \
+        Draw configurations with each coordinate distributed uniformly between the bounds of the \
         domain along its direction.
 
         Args:
@@ -225,19 +225,19 @@ class HyperRectangle(AbstractGeometry):
 
     def count_particles_in_cell(self, sample, linear_partition):
         """
-        Count the particles in eac_H cell of a regular grid over the domain.
+        Count the particles in each cell of a regular grid over the domain.
 
-        Along eac_H direction ``d``, the domain is divided into ``linear_partition[d]`` cells of \
+        Along each direction ``d``, the domain is divided into ``linear_partition[d]`` cells of \
         equal length. A particle on the upper bound, or outside the domain, is counted in the \
-        closest cell along eac_H direction.
+        closest cell along each direction.
 
         Args:
             * ``sample``: Configuration, of shape ``(n_particles * n_dim,)``.
-            * ``linear_partition``: Tuple with the number of cells along eac_H direction.
+            * ``linear_partition``: Tuple with the number of cells along each direction.
 
         Returns:
-            Integer array of shape ``linear_partition`` with the number of particles in eac_H cell, \
-            indexed by the cell indices along eac_H direction.
+            Integer array of shape ``linear_partition`` with the number of particles in each cell, \
+            indexed by the cell indices along each direction.
         """
         sample = sample.reshape((self.n_particles, self.n_dim))
         delta = jnp.array(self.extent) / jnp.array(linear_partition)

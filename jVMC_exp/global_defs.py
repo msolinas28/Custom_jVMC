@@ -16,7 +16,7 @@ are not case sensitive:
 * ``JVMC_BATCH_LOOP``: ``BATCH_LOOP``, ``python`` (default) or ``compiled``.
 * ``JVMC_MATMUL_chunk_BYTES``: ``MATMUL_chunk_BYTES``, an integer. The default is ``2**30``.
 
-The function ``update()`` changes these settings afterwards, except for ``USE_DISTRIBUTED``, whic_H
+The function ``update()`` changes these settings afterwards, except for ``USE_DISTRIBUTED``, which
 can only be set through its environment variable. It takes data types as objects, e.g.,
 ``jnp.float32``, while the environment variables take the names above, whose number is the size in
 bits. Read the settings through the module, e.g., as ``global_defs.DT_OUT_REAL``, to see the current
@@ -43,7 +43,7 @@ allowed_dtypes_cpx = {"c128": jnp.complex128, "c64": jnp.complex64}
 
 
 def _read_dtype(dtype_str: str, real: bool):
-    """Return the data type called ``dtype_str``, whic_H has to be real if ``real``, and complex otherwise."""
+    """Return the data type called ``dtype_str``, which has to be real if ``real``, and complex otherwise."""
     dtype_str = dtype_str.lower()
     dtype_real = allowed_dtypes_real.get(dtype_str)
     dtype_cpx = allowed_dtypes_cpx.get(dtype_str)
@@ -124,7 +124,7 @@ def _read_batch_loop(batch_loop: str):
 
 #: Where the loop over the batches of a sharded call runs (see ``jVMC_exp.sharding_config.sharded``):
 #: ``"python"`` makes one dispatch per batch, and the network is compiled once per batch size,
-#: whatever the number of samples. ``"compiled"`` makes one dispatch per call, whic_H is faster when
+#: whatever the number of samples. ``"compiled"`` makes one dispatch per call, which is faster when
 #: batches are cheap, and everything, the network included, is compiled again for every new number
 #: of samples. It is read every time a sharded method is called, so it can be changed at any time
 #: with ``update()``.

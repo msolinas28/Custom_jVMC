@@ -57,9 +57,9 @@ class Operator(BaseOperator):
     Operators assembled from branch-free elementary operators.
 
     An elementary operator acts on the local state of a single site and is branch-free: it maps \
-    eac_H local state ``j`` to a single local state ``map[j]``, with matrix element ``mat_els[j]``. \
+    each local state ``j`` to a single local state ``map[j]``, with matrix element ``mat_els[j]``. \
     When the operator is compiled, products and sums of elementary operators are expanded into a \
-    sum of operator strings, eac_H of whic_H maps a configuration to a single connected configuration.
+    sum of operator strings, each of which maps a configuration to a single connected configuration.
 
     Sites are indexed in the flattened configuration, ``s.ravel()``. Fermionic operators get the \
     sign of a Jordan-Wigner string over all the sites with a larger index. For spinful fermions, \
@@ -128,7 +128,7 @@ class Operator(BaseOperator):
     def _get_list_of_strings(self):
         """
         Flatten the operator tree into a list of operator strings.
-        Eac_H operator string is an OperatorString (list subclass) of leaf operators
+        each operator string is an OperatorString (list subclass) of leaf operators
         to be applied sequentially, with a scale attribute.
 
         Returns: List of OperatorString objects
@@ -174,7 +174,7 @@ class Operator(BaseOperator):
 
                 elif isinstance(node, ScaledOperator):
                     lst = strings_stack.pop()
-                    # Multiply the scale of eac_H operator string
+                    # Multiply the scale of each operator string
                     for s in lst:
                         s._scale.append(node.scalar)
                     strings_stack.append(lst)
@@ -517,14 +517,14 @@ class SigmaZ(Operator):
 
 
 class SigmaPlus(_Annihilation):
-    """Spin raising operator :math:`\\sigma^+=(\\sigma^x+i\\sigma^y)/2` on site ``idx``, whic_H maps the local state 1 to 0."""
+    """Spin raising operator :math:`\\sigma^+=(\\sigma^x+i\\sigma^y)/2` on site ``idx``, which maps the local state 1 to 0."""
 
     def __init__(self, idx):
         super().__init__(idx, False)
 
 
 class SigmaMinus(_Creation):
-    """Spin lowering operator :math:`\\sigma^-=(\\sigma^x-i\\sigma^y)/2` on site ``idx``, whic_H maps the local state 0 to 1."""
+    """Spin lowering operator :math:`\\sigma^-=(\\sigma^x-i\\sigma^y)/2` on site ``idx``, which maps the local state 0 to 1."""
 
     def __init__(self, idx):
         super().__init__(idx, False)

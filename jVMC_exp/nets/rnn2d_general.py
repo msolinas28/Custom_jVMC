@@ -13,16 +13,16 @@ from jVMC_exp.nets.initializers import init_fn_args
 
 class RNNCellStack(nn.Module):
     """
-    Implementation of a stack of RNN-cells whic_H is scanned over an input sequence.
+    Implementation of a stack of RNN-cells which is scanned over an input sequence.
     This is achieved by stacking multiple 'vanilla' RNN-cells to obtain a deep RNN.
 
     Initialization arguments:
         * ``hidden_size``: size of the hidden state vector
         * ``act_fun``: non-linear activation function
-        * ``init_scale``: factor by whic_H the initial parameters are scaled
+        * ``init_scale``: factor by which the initial parameters are scaled
 
     Returns:
-        New set of hidden states (one for eac_H layer), as well as the last hidden state, that serves as input to the output layer
+        New set of hidden states (one for each layer), as well as the last hidden state, that serves as input to the output layer
     """
 
     cells: list
@@ -65,7 +65,7 @@ class RNN2DGeneral(nn.Module):
     ``(carry, state) -> (new_carry, output)``.
 
     This model can produce real positive or complex valued output. In either case the output is
-    normalized suc_H that
+    normalized such that
 
         :math:`\\sum_s |RNN(s)|^{1/\\kappa}=1`.
 
@@ -81,11 +81,11 @@ class RNN2DGeneral(nn.Module):
         * ``depth``: number of RNN-cells in the RNNCellStack
         * ``input_dim``: dimension of the input
         * ``act_fun``: non-linear activation function
-        * ``init_scale``: factor by whic_H the initial parameters are scaled
+        * ``init_scale``: factor by which the initial parameters are scaled
         * ``log_prob_factor``: factor defining how output and associated sample probability are related. 0.5 for pure states and 1 for POVMs.
         * ``real_valued_output``: Boolean indicating whether the network output is a real or complex number.
         * ``real_valued_params``: Boolean indicating whether the network parameters are real or complex parameters.
-        * ``cell``: String ("RNN", "LSTM", or "GRU") or custom definition indicating whic_H type of cell to use for hidden state  transformations.
+        * ``cell``: String ("RNN", "LSTM", or "GRU") or custom definition indicating which type of cell to use for hidden state  transformations.
 
     """
 
@@ -317,15 +317,15 @@ class LSTMCell(nn.Module):
 
 class RNNCell(nn.Module):
     """
-    Implementation of a 'vanilla' RNN-cell, that is part of an RNNCellStack whic_H is scanned over an input sequence.
+    Implementation of a 'vanilla' RNN-cell, that is part of an RNNCellStack which is scanned over an input sequence.
     The RNNCell therefore receives two inputs, the hidden state (if it is in a deep part of the CellStack) or the
     input (if it is the first cell of the CellStack) aswell as the hidden state of the previous RNN-cell.
-    Both inputs are mapped to obtain a new hidden state, whic_H is what the RNNCell implements.
+    Both inputs are mapped to obtain a new hidden state, which is what the RNNCell implements.
 
     Initialization arguments:
         * ``hidden_size``: size of the hidden state vector
         * ``act_fun``: non-linear activation function
-        * ``init_scale``: factor by whic_H the initial parameters are scaled
+        * ``init_scale``: factor by which the initial parameters are scaled
 
     Returns:
         New hidden state

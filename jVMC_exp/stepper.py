@@ -76,7 +76,7 @@ def _get_rk_step(butcher_tableau, t, f, y0, dt, k0=None, start_step=0, **rhs_kwa
     where:
         * A : strictly lower-triangular matrix of stage coefficients
         * b : vector of coefficients for the final weighted sum
-        * c : vector of time shifts for eac_H stage
+        * c : vector of time shifts for each stage
 
     The tableau must follow the standard explicit RK convention:
         * len(A) == len(b) == len(c)
@@ -429,7 +429,7 @@ class AdaptiveHeun(AbstractAdaptiveStepper):
 
         where :math:`t` denotes the time and :math:`p` denotes further external parameters
         this function computes a second-order consistent integration step for :math:`y`.
-        The time step :math:`\\Delta t` is chosen suc_H that the integration error (quantified
+        The time step :math:`\\Delta t` is chosen such that the integration error (quantified
         by a given norm) is smaller than the given tolerance.
 
         Args:
@@ -485,7 +485,7 @@ class RK23(AbstractAdaptiveStepper):
     The third order solution is propagated and the embedded second order solution supplies
     the error estimate, so the order of the error estimate is 2. The extra stage evaluated for
     the error estimate, at the new :math:`y`, equals the first stage of the next step (FSAL), but
-    every step evaluates its first stage anew, so that eac_H step starts with ``int_step=0`` at its
+    every step evaluates its first stage anew, so that each step starts with ``int_step=0`` at its
     own :math:`(y, t)`. The step size control is described in :class:`AbstractAdaptiveStepper`.
 
     Args:
@@ -517,7 +517,7 @@ class RK23(AbstractAdaptiveStepper):
 
         where :math:`t` denotes the time and :math:`p` denotes further external parameters
         this function computes a third-order consistent integration step for :math:`y`.
-        The time step :math:`\\Delta t` is chosen suc_H that the integration error (quantified
+        The time step :math:`\\Delta t` is chosen such that the integration error (quantified
         by a given norm) is smaller than the given tolerance.
 
         Args:
@@ -568,7 +568,7 @@ class RK45(AbstractAdaptiveStepper):
     The fifth order solution is propagated and the embedded fourth order solution supplies
     the error estimate, so the order of the error estimate is 4. The extra stage evaluated for
     the error estimate, at the new :math:`y`, equals the first stage of the next step (FSAL), but
-    every step evaluates its first stage anew, so that eac_H step starts with ``int_step=0`` at its
+    every step evaluates its first stage anew, so that each step starts with ``int_step=0`` at its
     own :math:`(y, t)`. The step size control is described in :class:`AbstractAdaptiveStepper`.
 
     Args:
@@ -611,7 +611,7 @@ class RK45(AbstractAdaptiveStepper):
 
         where :math:`t` denotes the time and :math:`p` denotes further external parameters
         this function computes a fifth-order consistent integration step for :math:`y`.
-        The time step :math:`\\Delta t` is chosen suc_H that the integration error (quantified
+        The time step :math:`\\Delta t` is chosen such that the integration error (quantified
         by a given norm) is smaller than the given tolerance.
 
         Args:

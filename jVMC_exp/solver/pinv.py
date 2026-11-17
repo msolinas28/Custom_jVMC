@@ -237,7 +237,7 @@ class PinvSNR(Pinv):
       derivatives :math:`\\Gamma` (``grad_log_psi``), the local losses :math:`\\ell` (``o_loc``) \
       and the function :math:`T` that gives the right hand side of the optimizer \
       (``transformation``). It needs the logarithmic derivatives as a ``SampledObs``.
-    * ``"gaussian"``: :math:`\\sigma_i^2=\\mathrm{Var}(\\ell)\\,|\\lambda_i|`, whic_H only needs \
+    * ``"gaussian"``: :math:`\\sigma_i^2=\\mathrm{Var}(\\ell)\\,|\\lambda_i|`, which only needs \
       ``o_loc``.
 
     The dictionary ``info`` of the solution holds ``"residual"``, the final cutoff \
@@ -246,7 +246,7 @@ class PinvSNR(Pinv):
     ``"effective_rank"``, the mean of the regularization factors :math:`r_i`.
 
     Args:
-        * ``snr_tol``: Signal-to-noise ratio at whic_H a mode gets half its weight. Zero turns the \
+        * ``snr_tol``: Signal-to-noise ratio at which a mode gets half its weight. Zero turns the \
           signal-to-noise regularization off.
         * ``pinv_tol``: Target residual of the adaptive cutoff.
         * ``pinv_cutoff``: Smallest value of the adaptive cutoff :math:`\\epsilon`.
@@ -271,7 +271,7 @@ class PinvSNR(Pinv):
 
     @property
     def snr_tol(self):
-        """Signal-to-noise ratio at whic_H a mode gets half its weight, zero if off."""
+        """Signal-to-noise ratio at which a mode gets half its weight, zero if off."""
         return self._snr_tol
 
     @property
@@ -324,7 +324,7 @@ class PinvSNR(Pinv):
             * ``transformation``: The function :math:`T` with :math:`b=T(F)` for the force \
               :math:`F`, for ``snr_mode="empiric"``.
             * ``pad_size``: Number of rows and columns of padding of :math:`A`.
-            * ``exact_sampler``: Whether the samples are exact, whic_H skips the \
+            * ``exact_sampler``: Whether the samples are exact, which skips the \
               signal-to-noise regularization.
             * ``**kwargs``: Ignored.
 

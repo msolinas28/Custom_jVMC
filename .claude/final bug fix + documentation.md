@@ -4,7 +4,7 @@ Handover for continuing the work in a new chat. Last updated 2026-11-05.
 
 ## Goal
 
-Before the release, go through the library one folder (or module) at a time and, for eac_H one:
+Before the release, go through the library one folder (or module) at a time and, for each one:
 
 1. Update the documentation: docstrings in the code and the matching Sphinx page in
    `documentation/source/`.
@@ -12,7 +12,7 @@ Before the release, go through the library one folder (or module) at a time and,
 
 The user then answers point by point: "fix it", "leave it", "I fixed it" (verify it), or a
 question. Only change code when asked; answer questions with snippets that were tested on a
-scratc_H copy. The user commits after eac_H folder.
+scratch copy. The user commits after each folder.
 
 ## Procedure for one folder
 
@@ -66,20 +66,20 @@ user fixes needed a correction (e.g. `jnp.prod` on a tuple, a MALA wrap at the w
 - Python with JAX: `~/venv/jVMC_new/bin/python` (jax 0.10.1) on the old machine;
   `~/env/jVMC_env_exp/bin/python` (jax 0.10.2) on the Mac used since 2026-11-05, where pytest is not
   installed: use `python -m unittest tests.<name>_test`. `-m` puts the working directory first on
-  `sys.path`, so `cd` into a scratc_H copy to test it. The system `python3` has no JAX and is only
+  `sys.path`, so `cd` into a scratch copy to test it. The system `python3` has no JAX and is only
   good for AST checks and text edits.
 - Always set `JAX_PLATFORMS=cpu`; simulate devices with
   `XLA_FLAGS=--xla_force_host_platform_device_count=3`, and run scripts with
   `PYTHONPATH=<repo>`.
 - Run test suites **one at a time**: two suites in parallel were killed for lack of memory
   (15 GB machine).
-- Scratc_H copies for prototypes: `cp -r jVMC_exp tests pytest.ini <scratc_H>/trial/`, patch,
-  then run with `PYTHONPATH=<scratc_H>/trial`. The scratchpad has been wiped between sessions:
+- scratch copies for prototypes: `cp -r jVMC_exp tests pytest.ini <scratch>/trial/`, patch,
+  then run with `PYTHONPATH=<scratch>/trial`. The scratchpad has been wiped between sessions:
   anything worth keeping goes in `.claude/`.
 - Sphinx is not installed in the venvs. Install it into the scratchpad only:
-  `~/venv/jVMC_new/bin/pip install -q --target <scratc_H>/sphinxdeps sphinx sphinx_rtd_theme mock`,
+  `~/venv/jVMC_new/bin/pip install -q --target <scratch>/sphinxdeps sphinx sphinx_rtd_theme mock`,
   then build one page from `documentation/source`:
-  `PYTHONPATH=<scratc_H>/sphinxdeps JAX_PLATFORMS=cpu ~/venv/jVMC_new/bin/python -m sphinx -b html -E -d <scratc_H>/doctrees . <scratc_H>/html <page>.rst`.
+  `PYTHONPATH=<scratch>/sphinxdeps JAX_PLATFORMS=cpu ~/venv/jVMC_new/bin/python -m sphinx -b html -E -d <scratch>/doctrees . <scratch>/html <page>.rst`.
   check the log for lines mentioning the page and count `system-message` in the HTML.
 - Code unchanged apart from docstrings (`#:` comments don't appear in the AST anyway):
 
@@ -139,11 +139,11 @@ Still to do: `nets/`,
   always store `snr=None` with `save_meta_data=True`; the default `append=False` truncates the file
   first, so the incremental file loses everything after the failing key (parameters gone);
   static `write_metadata(x=None)` fails too; 2 `NQS(seed=None)` on several processes: AssertionError
-  in `jax.device_put` (eac_H process draws its own `generate_seed()`; seed=123 works);
+  in `jax.device_put` (each process draws its own `generate_seed()`; seed=123 works);
   3 `init_net`: `"net2"` calls `TwoNets(net1=, net2=)` (field is `nets`), mutates `descr` (2nd call
   KeyError), tuple `act_fun` KeyError, int `dims` TypeError, only used by POVM examples;
   4 `OutputManager(path)` default `append=True`: rerunning a script appends to the old datasets
-  (`times` = [0 1 2 0 1 2]); 5 `matrix_to_jvmc_operator` builds Mᵀ (`to_dense` = Mᵀ), whic_H the
+  (`times` = [0 1 2 0 1 2]); 5 `matrix_to_jvmc_operator` builds Mᵀ (`to_dense` = Mᵀ), which the
   deferred get_O_loc transpose bug turns back into M: fix both together; 6 `check_network_parameter_shape`
   is always True (dict accepted in memory, fails in the file); 7 `format_key(jnp.int32(5))` returns
   the scalar (invalid key), NumPy copy of a key TypeError, float seed truncated; 8 `measure` drops
@@ -166,7 +166,7 @@ Still to do: `nets/`,
   `parent.create_dataset(data=...)` at `_write_dict_to_h5` (`output_manager.py:384`) raises
   `TypeError: Object dtype dtype('O') has no native HDF5 equivalent`; static case line 224
   (`One of data, shape or dtype must be specified`). Streaming already skips `None`
-  (`_append_h5`, line 125), whic_H is why only `save_to_h5()` fails. Proposed: skip `None` in
+  (`_append_h5`, line 125), which is why only `save_to_h5()` fails. Proposed: skip `None` in
   `_write_dict_to_h5` and static `write_metadata` like streaming does, and convert the whole tree
   before opening the file (and before `del parent[key]`), so a failure leaves the file untouched;
   optionally don't report `snr` when the SNR cutoff is off (solver pass).
@@ -227,7 +227,7 @@ Still to do: `nets/`,
 ### Optimizer, changes of 2026-11-05
 
 - User answers: A made `stepper` a required argument of `time_evolution` (verified; also changed
-  the TDVP.ground_state_search message, whic_H had it reversed: corrected); B leave (docstring now
+  the TDVP.ground_state_search message, which had it reversed: corrected); B leave (docstring now
   says the final `"energy"` entry repeats the last step); C, F asked for explanations (given in the
   chat, waiting for a decision); D, E fixed:
   - D: `TDVP.cross_validation` computes S2 first and then `_get_tdvp_error(update_1, F2, var2)`.
@@ -274,11 +274,11 @@ Still to do: `nets/`,
   Infidelity estimator algebra and c_V algebra (simple/adaptive), default identity works for
   spinful states regardless of `l_dim`, Estimator gradient-kind detection on a vanishing first
   sample still matches finite differences. Infidelity uses the transposed operator like
-  `get_O_loc` (deferred operator bug); `matrix_to_jvmc_operator` builds sigma_y transposed, whic_H
+  `get_O_loc` (deferred operator bug); `matrix_to_jvmc_operator` builds sigma_y transposed, which
   compensates for it, so the tests with complex unitaries pass.
 - 3 devices: the test suites only fail with the known batch size 16 not divisible by 3.
 - User: fixed 1 (keyword arguments `**op_kwargs` passed through `__call__`, `_get_f_loc`,
-  `_get_f_loc_sh`), leave 2, 3, 4. The fix called `_get_conn_elements(s, **op_kwargs)`, whic_H
+  `_get_f_loc_sh`), leave 2, 3, 4. The fix called `_get_conn_elements(s, **op_kwargs)`, which
   takes a dict: every Infidelity call raised TypeError (15 of 16 tests); corrected to
   `_get_conn_elements(s, op_kwargs)`. New `test_time_dependent_operator` (fails on the committed
   code with `KeyError: 't'`).
@@ -333,7 +333,7 @@ Still to do: `nets/`,
 ### Operator folder, changes of 2026-11-03
 
 - Docstrings for every public class/method/property in `operator/`; `operator.rst` rewritten
-  (the old page described `branchFreeOperator`, `Sx`, `scal_opstr`, POVM, none of whic_H exist).
+  (the old page described `branchFreeOperator`, `Sx`, `scal_opstr`, POVM, none of which exist).
 - `SigmaPlus` and `SigmaMinus` swapped: they were σ⁻ and σ⁺ with respect to `SigmaZ` (state 0 =
   up). `test_repeated_sites_dense_matrix` updated, `test_pauli_and_ladder_operators_dense_matrix`
   added.
@@ -414,7 +414,7 @@ User chose to leave these, or will patch them in a later release:
   (`CutoffSampler` already subtracts the max); `__call__` with `num_samples` resamples every
   call; `reset(key)` doesn't restart the chains.
 - `sampler/propose.py`: `MALA(appy_fun=...)` typo in the keyword; one RWM/MALA proposer can't be
-  shared by samplers with different `numchains`.
+  shared by samplers with different `num_chains`.
 - `vqs.py`: variables outside the `params` collection unsupported (documented as a requirement);
   `frozen_parameters` path semantics and frozen parameters still in the gradients (user will
   patch later); parameters committed to a single device fail on several devices (left).
@@ -450,5 +450,5 @@ User chose to leave these, or will patch them in a later release:
   distributed path (`jaxmg` is Linux/GPU only). check in the `solver/` pass. Found 2026-11-06.
 - `solver/util.py` imports `USE_DISTRIBUTED` by name; fine now that it can only change at import
   (`sharding_config` sets it from `jax.distributed.is_initialized()`).
-- Docs: `parallelism.rst` describes `global_defs.set_pmap_devices()` and MPI, whic_H no longer
+- Docs: `parallelism.rst` describes `global_defs.set_pmap_devices()` and MPI, which no longer
   exist; `mpi.rst` points at `jVMC.mpi_wrapper`; `nets.rst`, `stats.rst`, `util.rst` use `jVMC.*`.

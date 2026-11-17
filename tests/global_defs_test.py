@@ -11,7 +11,7 @@ _SETTINGS = (
     "DT_OUT_CPX",
     "DT_OPERATORS_REAL",
     "DT_OPERATORS_CPX",
-    "batch_LOOP",
+    "BATCH_LOOP",
     "MATMUL_chunk_BYTES",
 )
 

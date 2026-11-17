@@ -11,10 +11,10 @@ from jVMC_exp.sharding_config import DEVICE_SHARDING, DEVICE_SPEC, REPLICATED_SP
 from jVMC_exp.util.key_gen import format_key
 
 
-def shard_array_across_chains(arr, numchains, dtype):
-    """Copy ``arr`` for eac_H of the ``numchains`` chains and shard the result across devices."""
+def shard_array_across_chains(arr, num_chains, dtype):
+    """Copy ``arr`` for each of the ``num_chains`` chains and shard the result across devices."""
     arr = jnp.atleast_1d(jnp.asarray(arr, dtype=dtype))
-    sharded_arr = jnp.broadcast_to(arr, (numchains,) + arr.shape)
+    sharded_arr = jnp.broadcast_to(arr, (num_chains,) + arr.shape)
     return jax.device_put(sharded_arr, DEVICE_SHARDING)
 
 
@@ -22,11 +22,11 @@ class AbstractProposer(ABC):
     """
     Interface of the proposers of MCMC updates.
 
-    A subclass implements ``__call__``, whic_H acts on the configuration of a single chain and must \
+    A subclass implements ``__call__``, which acts on the configuration of a single chain and must \
     be compatible with ``jax.vmap`` and ``jax.jit``.
 
     A proposer that needs additional data stores it in ``self._arg``, a pytree set up in \
-    ``init_arg()`` and described by ``arg_in_axes``, and receives it as ``arg`` at eac_H call. As \
+    ``init_arg()`` and described by ``arg_in_axes``, and receives it as ``arg`` at each call. As \
     this data lives on the proposer, a proposer with arguments cannot be shared between samplers \
     with different numbers of chains.
 
@@ -61,7 +61,7 @@ class AbstractProposer(ABC):
     def arg_in_axes(self):
         """
         Return a dictionary with the same shape as ``self._arg``,
-        whic_H indicates whic_H arguments of the proposer must be vmapped across:
+        which indicates which arguments of the proposer must be vmapped across:
         0 for the ones with one entry per chain, ``None`` for the ones shared by all chains.
         """
         return None
@@ -70,7 +70,7 @@ class AbstractProposer(ABC):
     def arg_in_specs(self):
         """
         Return a dictionary with the same shape as ``self._arg``,
-        whic_H indicates whic_H arguments of the proposer must be sharded across
+        which indicates which arguments of the proposer must be sharded across
         different devices. It is derived from ``arg_in_axes``.
         """
         return jax.tree_util.tree_map(
@@ -79,7 +79,7 @@ class AbstractProposer(ABC):
             is_leaf=lambda x: x is None,
         )
 
-    def init_arg(self, vqs, numchains):
+    def init_arg(self, vqs, num_chains):
         """
         Initialize all the arguments of the proposer with the right shape
         for sharding across devices and chains, and store them in ``self._arg``.
@@ -87,7 +87,7 @@ class AbstractProposer(ABC):
 
         Args:
             * ``vqs``: Variational state of the sampler.
-            * ``numchains``: Total number of chains.
+            * ``num_chains``: Total number of chains.
         """
         return
 
@@ -249,7 +249,7 @@ class RWM(AbstractProposeCont):
     """
     Random walk Metropolis: move all particles by a Gaussian step of width ``sigma``.
 
-    With ``use_thermalization=True``, eac_H chain adapts its own ``sigma`` after every thermalization \
+    With ``use_thermalization=True``, each chain adapts its own ``sigma`` after every thermalization \
     sweep as :math:`\\sigma\\to\\sigma\\exp(\\text{adapt\\_rate}\\,(a-\\text{target\\_rate}))`, with \
     :math:`a` the acceptance rate of the sweep and capped at half of the extent of the geometry. \
     The adapted values carry over to later ``sample()`` calls until the sampler initializes its \
@@ -291,7 +291,7 @@ class RWM(AbstractProposeCont):
     def arg_in_axes(self):
         return {"sigma": 0}
 
-    def init_arg(self, vqs, numchains):
+    def init_arg(self, vqs, num_chains):
         if self._sigma is None:
             sigma = jnp.array(self.geometry.extent) * 0.1
         else:
@@ -308,7 +308,7 @@ class RWM(AbstractProposeCont):
                     f"(expected {self.geometry.n_dim}, got {sigma.size})."
                 )
         sigma = shard_array_across_chains(
-            jnp.asarray(sigma), numchains, dtype=global_defs.DT_SAMPLES_CONT
+            jnp.asarray(sigma), num_chains, dtype=global_defs.DT_SAMPLES_CONT
         )
 
         self._arg = {"sigma": sigma}
@@ -386,15 +386,15 @@ class MALA(AbstractProposeCont):
     The proposal is :math:`s'=s+\\tau\\nabla\\ln p(s)+\\sqrt{2\\tau}\\,\\xi` with \
     :math:`\\ln p(s)=\\mu\\,\\text{Re}\\ln\\psi(s)` and Gaussian noise :math:`\\xi`.
 
-    With ``use_thermalization=True``, eac_H chain adapts its own ``tau`` after every thermalization \
+    With ``use_thermalization=True``, each chain adapts its own ``tau`` after every thermalization \
     sweep as :math:`\\tau\\to\\tau\\exp(\\text{adapt\\_rate}\\,(a-\\text{target\\_rate}))`, with \
     :math:`a` the acceptance rate of the sweep and capped at half of the first extent of the \
     geometry. The adapted values carry over to later ``sample()`` calls until the sampler \
     initializes its chains again.
 
     With periodic boundaries, the chains sample the right distribution also if the network is not \
-    periodic. In that case the wave function has a kink or a jump at the boundary, whic_H estimators \
-    based on derivatives, suc_H as the kinetic energy, do not account for.
+    periodic. In that case the wave function has a kink or a jump at the boundary, which estimators \
+    based on derivatives, such as the kinetic energy, do not account for.
 
     Args:
         * ``geometry``: Geometry of the system.
@@ -451,7 +451,7 @@ class MALA(AbstractProposeCont):
     def arg_in_axes(self):
         return {"params": None, "tau": 0}
 
-    def init_arg(self, vqs, numchains):
+    def init_arg(self, vqs, num_chains):
         # TODO: implement version for tau in more dims
         if self._tau is None:
             tau = jnp.array(self.geometry.extent)[0] * 0.01
@@ -460,7 +460,7 @@ class MALA(AbstractProposeCont):
         else:
             tau = self._tau
         tau = shard_array_across_chains(
-            jnp.asarray(tau), numchains, dtype=global_defs.DT_SAMPLES_CONT
+            jnp.asarray(tau), num_chains, dtype=global_defs.DT_SAMPLES_CONT
         )
 
         self._arg = {"params": vqs.parameters, "tau": tau}

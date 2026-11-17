@@ -19,7 +19,7 @@ class Operator(AbstractOperator):
     the right factor first, as for matrices. Operators can be multiplied by numbers, or by \
     callables that accept arbitrary keyword arguments, e.g., ``lambda **kw: jnp.cos(kw["t"])``. \
     These are evaluated with the keyword arguments given to ``get_O_loc()``, \
-    ``get_conn_elements()`` or ``to_sparse()``, whic_H allows time-dependent prefactors. Adding a \
+    ``get_conn_elements()`` or ``to_sparse()``, which allows time-dependent prefactors. Adding a \
     number is not supported: add a multiple of ``IdentityOperator`` instead. ``sum()`` of a list of \
     operators works.
 
@@ -112,10 +112,10 @@ class Operator(AbstractOperator):
             self._compile()
 
         # Bound the number of simultaneous network evaluations by psi.batch_size,
-        # i.e. by B = psi.batch_size / n_devices on eac_H device:
+        # i.e. by B = psi.batch_size / n_devices on each device:
         #   - B >= n_conn: all connected configurations of a sample fit at once,
-        #     so eac_H device processes B // n_conn samples per call.
-        #   - B < n_conn: eac_H device processes a single sample per call and
+        #     so each device processes B // n_conn samples per call.
+        #   - B < n_conn: each device processes a single sample per call and
         #     evaluates its connected configurations in chunks of B (lax.map).
         evals_per_device = psi.batch_size // MESH.size
         chunk_size = max(1, min(self.n_conn, evals_per_device))
@@ -133,7 +133,7 @@ class Operator(AbstractOperator):
 
     def get_conn_elements(self, s, batch_size, **kwargs):
         """
-        Return the connected configurations and matrix elements of eac_H sample in ``s``.
+        Return the connected configurations and matrix elements of each sample in ``s``.
 
         The first entry along the connected axis is ``s`` itself, carrying the sum of
         all diagonal matrix elements; the remaining ones are the non-diagonal connections.
@@ -361,7 +361,7 @@ class Operator(AbstractOperator):
         s_p_non_diag : Array of configurations connected to `s`.
 
         mat_els_non_diag : One-dimensional array of complex matrix elements corresponding
-            to eac_H configuration in `s_p_non_diag`.
+            to each configuration in `s_p_non_diag`.
 
         mat_els_diag : Scalar equal to the sum of all diagonal matrix elements.
         """

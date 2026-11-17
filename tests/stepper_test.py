@@ -77,7 +77,7 @@ class TestEuler(unittest.TestCase):
         self.assertLess(err, 1e-2)
 
     def test_callable_scheduler(self):
-        """dt should track the scheduler output at eac_H step."""
+        """dt should track the scheduler output at each step."""
         schedule = lambda step: 1e-3 * (0.9**step)
         stepper = st.Euler(time_step=schedule)
 

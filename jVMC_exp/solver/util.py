@@ -20,7 +20,7 @@ def _distributed_warning(A, mode):
         if jaxmg is None:
             if jax.process_index() == 0:
                 warnings.warn(
-                    "mode='distributed' requires the 'jaxmg' package, whic_H is not installed "
+                    "mode='distributed' requires the 'jaxmg' package, which is not installed "
                     "(install it via a CUDA extra, e.g. `pip install jVMC_exp[cuda13]`). "
                     "Falling back to mode='device'."
                 )
@@ -59,7 +59,7 @@ def _distributed_warning(A, mode):
                     "mode='distributed' requires JVMC_USE_DISTRIBUTED=true and "
                     "one process per GPU, since jaxmg's cuSOLVERMp backend "
                     "needs rank-per-GPU execution "
-                    "(e.g. launc_H with `srun --ntasks=<n_gpus> --gpus-per-task=1`). "
+                    "(e.g. launch with `srun --ntasks=<n_gpus> --gpus-per-task=1`). "
                     "Falling back to mode='device'."
                 )
             mode = "device"
@@ -110,7 +110,7 @@ def diagonalize(
 
     * ``"device"``: ``jax.numpy.linalg.eigh`` on the devices of :math:`A`. If it raises \
       ``ValueError``, ``numpy.linalg.eigh`` is used instead, with a ``RuntimeWarning``.
-    * ``"host"``: ``numpy.linalg.eigh`` on the host, whic_H gathers :math:`A`.
+    * ``"host"``: ``numpy.linalg.eigh`` on the host, which gathers :math:`A`.
     * ``"distributed"``: ``jaxmg.syevd`` on :math:`A` sharded in blocks over ``MESH_2D`` (see \
       ``jVMC_exp.sharding_config``), with :math:`V` sharded along its rows afterwards. It needs \
       the ``jaxmg`` package, a GPU backend, more than one device, a matrix size divisible by the \

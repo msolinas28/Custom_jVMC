@@ -109,7 +109,7 @@ class TestNNXWrapper(unittest.TestCase):
         psi = _make_nqs_nnx()
         proposer = jVMC_exp.propose.SpinFlip()
         sampler = jVMC_exp.sampler.MCSampler(
-            psi, proposer, numchains=2**5, num_samples=2**7
+            psi, proposer, num_chains=2**5, num_samples=2**7
         )
         sampler.sample()
         self.assertIsNotNone(sampler.samples)
@@ -119,7 +119,7 @@ class TestNNXWrapper(unittest.TestCase):
         psi = _make_nqs_nn()
         proposer = jVMC_exp.propose.SpinFlip()
         sampler = jVMC_exp.sampler.MCSampler(
-            psi, proposer, numchains=2**5, num_samples=2**7
+            psi, proposer, num_chains=2**5, num_samples=2**7
         )
         sampler.sample()
         self.assertIsNotNone(sampler.samples)
@@ -129,7 +129,7 @@ class TestNNXWrapper(unittest.TestCase):
         psi = _make_nqs_nnx()
         proposer = jVMC_exp.propose.SpinFlip()
         sampler = jVMC_exp.sampler.MCSampler(
-            psi, proposer, numchains=2**5, num_samples=2**7
+            psi, proposer, num_chains=2**5, num_samples=2**7
         )
         sampler.sample()
         log_amps = psi(sampler.samples)

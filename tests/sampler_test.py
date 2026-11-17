@@ -93,7 +93,7 @@ def _test_sampling(net, test_class: unittest.TestCase, mu=2, log_prob_factor=0.5
         psi,
         update_proposer=proposer,
         key=random.PRNGKey(0),
-        numchains=num_chains,
+        num_chains=num_chains,
         num_samples=num_samples,
         mu=mu,
         log_prob_factor=log_prob_factor,
@@ -142,7 +142,7 @@ def _test_autoreg_sampling(
         psi,
         update_proposer=proposer,
         key=random.PRNGKey(0),
-        numchains=num_chains,
+        num_chains=num_chains,
         num_samples=num_samples,
         mu=mu,
         log_prob_factor=log_prob_factor,
@@ -183,7 +183,7 @@ class TestMC(unittest.TestCase):
             psi,
             update_proposer=None,
             key=random.PRNGKey(17),
-            numchains=4,
+            num_chains=4,
             num_samples=256,
         )
 
@@ -315,7 +315,7 @@ class TestAcceptanceRatio(unittest.TestCase):
             psi,
             update_proposer=jVMC_exp.propose.SpinFlip(),
             key=random.PRNGKey(0),
-            numchains=2**4,
+            num_chains=2**4,
             num_samples=2**6,
         )
 
@@ -332,7 +332,7 @@ class TestAcceptanceRatio(unittest.TestCase):
             psi,
             update_proposer=None,
             key=random.PRNGKey(0),
-            numchains=4,
+            num_chains=4,
             num_samples=2**6,
         )
 
@@ -363,7 +363,7 @@ class TestMALA(unittest.TestCase):
             psi,
             proposer,
             key=random.PRNGKey(0),
-            numchains=2**6,
+            num_chains=2**6,
             num_samples=2**10,
         )
 
@@ -520,7 +520,7 @@ class TestCutoffSampler(unittest.TestCase):
             update_proposer=jVMC_exp.propose.SpinFlip(),
             eps=eps,
             key=random.PRNGKey(0),
-            numchains=self.NUM_chainS,
+            num_chains=self.NUM_chainS,
             num_samples=self.NUM_SAMPLES,
             mu=mu,
             log_prob_factor=log_prob_factor,
@@ -557,7 +557,7 @@ class TestCutoffSampler(unittest.TestCase):
         self._run_sampling_test(eps=1e-12, tol=2e-3, cutoff_active=False)
 
     def test_cutoff_inactive_for_zero_eps(self):
-        """eps=0 means log(eps) = -inf; the cutoff must switc_H off without NaNs."""
+        """eps=0 means log(eps) = -inf; the cutoff must switch off without NaNs."""
         self._run_sampling_test(eps=0.0, tol=2e-3, cutoff_active=False)
 
     def test_cutoff_active(self):
@@ -639,7 +639,7 @@ class TestCutoffSamplerProperties(unittest.TestCase):
             update_proposer=proposer,
             eps=eps,
             key=random.PRNGKey(0),
-            numchains=2**4,
+            num_chains=2**4,
             num_samples=2**8,
             maxlog_psi=maxlog_psi,
         )

@@ -38,13 +38,13 @@ def _init_qgt(grad_log_psi):
 
 class AbstractOptimizer(ABC):
     """
-    Base class of the optimizers, whic_H change the parameters of a variational state with the \
+    Base class of the optimizers, which change the parameters of a variational state with the \
     force of an objective function.
 
     An optimizer is the right hand side of the equation that a stepper of ``jVMC_exp.stepper`` \
     integrates: ``__call__(parameters, t, ...)`` samples the state at ``parameters``, evaluates \
     the objective function and returns the update :math:`\\dot\\theta` of the parameters. \
-    ``ground_state_search()`` and ``time_evolution()`` repeat suc_H steps and record at every \
+    ``ground_state_search()`` and ``time_evolution()`` repeat such steps and record at every \
     step the mean, the variance and the statistical error of the local losses as ``"energy"``, \
     together with the requested observables, in the ``output_manager``.
 
@@ -237,7 +237,7 @@ class AbstractOptimizer(ABC):
         """
         Minimize ``objective_function`` with ``steps`` steps of ``stepper``.
 
-        Before eac_H step ``n``, ``stepper.update_dt(n)`` and ``update_hyperparams(n)`` are \
+        Before each step ``n``, ``stepper.update_dt(n)`` and ``update_hyperparams(n)`` are \
         called. The observables of a step are measured with the samples of the step, before \
         the parameters are updated. The progress bar shows the mean of the local losses.
 
@@ -258,7 +258,7 @@ class AbstractOptimizer(ABC):
         Returns:
             ``output_manager.data["observables"]``: a dictionary with the step numbers in \
             ``"times"``, the lists ``"mean"``, ``"variance"`` and ``"MC_error"`` of the local \
-            losses in ``"energy"``, and the same for eac_H observable. With ``save_meta_data``, \
+            losses in ``"energy"``, and the same for each observable. With ``save_meta_data``, \
             also ``output_manager.data["metadata"]``. Raises ``ValueError`` if the stepper has no \
             ``update_dt()`` method.
         """
@@ -462,7 +462,7 @@ class Evolution(AbstractOptimizer):
         * ``solver``: Solver of ``jVMC_exp.solver``, called as \
           ``solver(A, b, grad_log_psi=..., o_loc=..., **solver_state)``.
         * ``store_qgt``: Whether to keep :math:`S`, see ``qgt``.
-        * ``compute_tdvp_error``: Whether to compute the TDVP error of every update, whic_H \
+        * ``compute_tdvp_error``: Whether to compute the TDVP error of every update, which \
           requires ``store_qgt``, see ``get_update()``.
     """
 
@@ -528,7 +528,7 @@ class Evolution(AbstractOptimizer):
         double_params = (not psi.real_params) and (not psi.holomorphic)
         num_params = psi.num_parameters * (2 if double_params else 1)
         # S is built one block of rows per device at a time (see _add_qgt),
-        # whic_H needs the number of parameters to be divisible by the number of devices squared
+        # which needs the number of parameters to be divisible by the number of devices squared
         self._params_pad_size = (-num_params) % MESH.shape["devices"] ** 2
         self._pad_obs = jax.jit(
             lambda x: jnp.pad(x, ((0, 0), (0, self._params_pad_size)), mode="constant")
@@ -737,7 +737,7 @@ class Evolution(AbstractOptimizer):
         Returns ``S + conj(grad_log_psi).T @ grad_log_psi``, with ``S`` sharded across devices
         on the first axis. ``S`` is donated, so it is updated in place.
 
-        Eac_H device sums over its own samples, and the partial sums are reduced across devices
+        each device sums over its own samples, and the partial sums are reduced across devices
         one block of rows at a time: the partial sum of a block has as many rows as the share
         of ``S`` of one device, so no device ever holds a matrix of the size of the full ``S``.
         The number of parameters has to be divisible by the number of devices squared.
@@ -747,7 +747,7 @@ class Evolution(AbstractOptimizer):
         block = n_params // n_devices**2
         grad_blocks = grad_log_psi.reshape(n_samples, n_devices, n_devices, block)
         # The products are summed over chunks of at most global_defs.MATMUL_chunk_BYTES of samples: XLA
-        # autotunes a matrix product on its own copies of the operands, whic_H would otherwise be as
+        # autotunes a matrix product on its own copies of the operands, which would otherwise be as
         # large as grad_log_psi
         row_bytes = n_params * grad_log_psi.dtype.itemsize
         chunk = max(
@@ -815,7 +815,7 @@ class Evolution(AbstractOptimizer):
             raise ValueError(
                 f"Solver '{type(self.solver).__name__}' is matrix-free (_needs_dense_matrix=False) "
                 "and builds its matvec directly from the fully materialized Jacobian, but the "
-                "Jacobian was computed in batches (LazySampledObs), whic_H has no suc_H materialized "
+                "Jacobian was computed in batches (LazySampledObs), which has no such materialized "
                 "array. Either use a solver with _needs_dense_matrix=True (e.g. PinvSNR), or "
                 "compute the Jacobian without batching."
             )

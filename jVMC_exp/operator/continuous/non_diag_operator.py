@@ -53,7 +53,7 @@ class TotalKineticOperator(Operator):
         elif isinstance(mass, (list, tuple)) or hasattr(mass, "__len__"):
             if len(mass) != geometry.n_particles:
                 raise ValueError(
-                    f"Got {len(mass)} masses whic_H is not the same as the number of particles ({geometry.n_particles})."
+                    f"Got {len(mass)} masses which is not the same as the number of particles ({geometry.n_particles})."
                 )
             self._mass = jnp.asarray(mass)
         else:

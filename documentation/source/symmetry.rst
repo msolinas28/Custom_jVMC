@@ -4,7 +4,7 @@ Symmetry module
 ===============
 
 A symmetry projector restricts a variational wave function to a symmetry sector. It holds the
-elements :math:`g` of a symmetry group, whic_H map a configuration :math:`s` to :math:`g\cdot s`,
+elements :math:`g` of a symmetry group, which map a configuration :math:`s` to :math:`g\cdot s`,
 together with their characters :math:`\chi_g`, and the projected wave function is
 
 .. math::
@@ -28,7 +28,7 @@ transformation. Projectors are composed with ``*``, and passed to ``NQS`` as ``o
     )
     psi = jVMC_exp.vqs.NQS(net, L * L, batch_size=2**10, seed=1234, orbit=symm)
 
-``symm * net`` returns the projected network, a ``ProjectedOrbitNet``, whic_H evaluates the network
+``symm * net`` returns the projected network, a ``ProjectedOrbitNet``, which evaluates the network
 on all the ``symm.nsymm`` transformed configurations. The cost of an evaluation and its memory
 therefore grow with the number of elements, and ``NQS`` collects the gradients of the projected
 network in blocks of ``batch_size * nsymm`` rows (see :ref:`VQS`).
@@ -36,7 +36,7 @@ network in blocks of ``batch_size * nsymm`` rows (see :ref:`VQS`).
 By default the coefficients are combined as above (``symmetry_average="exp"``). The other averages
 of ``ProjectedOrbitNet`` average the logarithmic coefficients, or the probabilities and phases
 separately. The latter, ``"sep"``, keeps a normalized network normalized, so that networks that
-sample directly, suc_H as autoregressive networks, can be projected on sectors whose weights are
+sample directly, such as autoregressive networks, can be projected on sectors whose weights are
 all one.
 
 Projectors

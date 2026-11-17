@@ -1,8 +1,8 @@
 # Compiling JAX with GPU support on a compute cluster
 
-Currently (July 2020), installing JAX via pip does not work on CentOS 7, see this [Jax issue](https://github.com/google/jax/issues/854). Unfortunately, however, many large scale compute clusters run on CentOS 7 and installing JAX might not be the highest priority for the corresponding support teams. Hence, scientific JAX users face the challenge of installing the library themselves on those computers. The following is a summary of the steps that I found to avoid various pitfalls when installing JAX on the [JUWELS](https://www.fz-juelic_H.de/ias/jsc/EN/Expertise/Supercomputers/JUWELS/JUWELS_news.html) compute cluster.
+Currently (July 2020), installing JAX via pip does not work on CentOS 7, see this [Jax issue](https://github.com/google/jax/issues/854). Unfortunately, however, many large scale compute clusters run on CentOS 7 and installing JAX might not be the highest priority for the corresponding support teams. Hence, scientific JAX users face the challenge of installing the library themselves on those computers. The following is a summary of the steps that I found to avoid various pitfalls when installing JAX on the [JUWELS](https://www.fz-juelich.de/ias/jsc/EN/Expertise/Supercomputers/JUWELS/JUWELS_news.html) compute cluster.
 
-General instructions for building from scratc_H are part of the [JAX documentation](https://jax.readthedocs.io/en/latest/developer.html#building-from-source).
+General instructions for building from scratch are part of the [JAX documentation](https://jax.readthedocs.io/en/latest/developer.html#building-from-source).
 
 Some of the main steps are also explained in this [Jax issue](https://github.com/google/jax/issues/2083).
 
@@ -20,7 +20,7 @@ Paths you need to know:
 
 * Path to the CUDA installation. You can determine it via
 `
-whic_H nvcc
+which nvcc
 `
 and the part you need is probably something like  
 ```
@@ -36,7 +36,7 @@ your/path/to/cuda/cuDNN/version.number-CUDA-cuda.version.number/
 
 * Path to your python binary. Get it via
 ```
-whic_H python
+which python
 ```
 &nbsp;&nbsp;&nbsp;We refer to it as `MY_PATH_TO_PYTHON` in the following and it should include the name of the binary.
 

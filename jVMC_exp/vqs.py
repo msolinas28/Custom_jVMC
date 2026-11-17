@@ -73,7 +73,7 @@ class NQS:
     """
     Variational quantum state.
 
-    The wave function is defined by a network, whic_H is evaluated, differentiated and sampled \
+    The wave function is defined by a network, which is evaluated, differentiated and sampled \
     through this class. It can take two forms:
 
     #. Single-network ansatz: quantum state of the form \
@@ -119,7 +119,7 @@ class NQS:
           performance is limited by memory access overheads, too large values can lead \
           to "out of memory" issues. Exactly one of ``batch_size`` and ``batch_size_per_device`` \
           must be given.
-        * ``batch_size_per_device``: batch size on eac_H device, as an alternative to ``batch_size``.
+        * ``batch_size_per_device``: batch size on each device, as an alternative to ``batch_size``.
         * ``logarithmic``: Boolean variable indicating, whether the ANN returns logarithmic \
           (:math:`\\log\\psi_\\theta(s)`) or plain (:math:`\\psi_\\theta(s)`) wave function coefficients.
         * ``seed``: Seed for the PRNG to initialize the network parameters. If ``None``, a random \
@@ -136,7 +136,7 @@ class NQS:
         * ``grad_dtype``: Data type of the parameters while computing gradients. If ``None``, the \
           data type of the parameters is used.
         * ``nnx_init``: Dictionary of keyword arguments passed to the ``flax.nnx.Module`` constructor, \
-          excluding ``rngs`` (whic_H is handled internally). It is ignored for ``flax.linen`` \
+          excluding ``rngs`` (which is handled internally). It is ignored for ``flax.linen`` \
           networks. If ``net`` is a tuple of two ``flax.nnx.Module`` subclasses, ``nnx_init`` must be \
           a tuple of two dictionaries, one per network.
 
@@ -318,7 +318,7 @@ class NQS:
         """
         Get variational parameters.
 
-        Complex parameters are split into their real and imaginary parts: eac_H leaf of the parameter \
+        Complex parameters are split into their real and imaginary parts: each leaf of the parameter \
         tree contributes its real parts followed by its imaginary parts, so that the array has \
         ``2 * num_parameters`` entries. Real parameters give ``num_parameters`` entries.
 
@@ -533,7 +533,7 @@ class NQS:
 
         # TODO: this is fragile and is only needed for holo check.
         # Holo should be given by the user at init to make it more genera
-        # Otherwise another optional function, whic_H would take an input state as well, could be used to check holo
+        # Otherwise another optional function, which would take an input state as well, could be used to check holo
         dummy_sample = jax.random.normal(jax.random.PRNGKey(seed), self.sample_shape)
         self._parameters = jax.device_put(
             self.net.init(jax.random.PRNGKey(seed), dummy_sample), REPLICATED_SHARDING
@@ -619,7 +619,7 @@ class NQS:
 
         Returns:
             An array of shape ``(N, P)`` containing derivatives :math:`\\partial_{\\theta_k}\\ln\\psi(s)` \
-            with respect to eac_H variational parameter :math:`\\theta_k` for eac_H \
+            with respect to each variational parameter :math:`\\theta_k` for each \
             input configuration :math:`s`. The columns follow ``parameters_flat``: ``P`` is \
             ``num_parameters`` for real parameters, and ``2 * num_parameters`` for complex parameters, \
             whose real and imaginary parts are separate columns.
@@ -652,7 +652,7 @@ class NQS:
             * ``s``: Array of computational basis states, of shape ``(N, *sample_shape)``.
 
         Returns:
-            A ``jVMC_exp.sharding_config.SizedIterable`` yielding the gradient blocks, whic_H can be \
+            A ``jVMC_exp.sharding_config.SizedIterable`` yielding the gradient blocks, which can be \
             iterated more than once.
         """
         if self.gradientbatch_size == self.batch_size:
@@ -687,7 +687,7 @@ class NQS:
             * ``s``: Array of computational basis states, of shape ``(N, *sample_shape)``.
 
         Returns:
-            A tree with the structure of ``params``, where eac_H leaf has shape ``(N, n)`` and holds \
+            A tree with the structure of ``params``, where each leaf has shape ``(N, n)`` and holds \
             the derivatives with respect to the flattened leaf of the parameter tree. For a \
             holomorphic network, ``n`` is twice the size of the leaf, as in ``gradients()``.
         """

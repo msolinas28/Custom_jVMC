@@ -1,6 +1,6 @@
 # jVMC_exp vs NetKet, SR step: findings and next steps
 
-State on 2026-10-14. These notes, together with the folder `netket_sr_comparison/` next to them, are all you need to continue from scratc_H: the scripts and patches are in that folder, not in a scratc_H directory.
+State on 2026-10-14. These notes, together with the folder `netket_sr_comparison/` next to them, are all you need to continue from scratch: the scripts and patches are in that folder, not in a scratch directory.
 
 The benchmark is `tests/benchmark/netket_comparison/compare_netket_sr.py`. It measures one SR step from given samples:
 - **Model:** real RBM with L = 80 spins and 80 hidden units, so P = 6400 parameters, in float64, on the TFIM.
@@ -11,20 +11,20 @@ The benchmark is `tests/benchmark/netket_comparison/compare_netket_sr.py`. It me
 
 ## Environment (JUPITER)
 
-- **Python environment:** `$SCRATc_H/env/nk_jvmc` has jax 0.11.2, flax 0.12.10, netket 3.22.4 and jVMC_exp installed in editable mode. All results below come from it.
-  - `tests/benchmark/netket_comparison/send_job.sh` activates `$SCRATc_H/env/jVMC` instead, whic_H has jax 0.10.1 and no NetKet. change that line before using it.
+- **Python environment:** `$scratch/env/nk_jvmc` has jax 0.11.2, flax 0.12.10, netket 3.22.4 and jVMC_exp installed in editable mode. All results below come from it.
+  - `tests/benchmark/netket_comparison/send_job.sh` activates `$scratch/env/jVMC` instead, which has jax 0.10.1 and no NetKet. change that line before using it.
 - **Modules:** `module load Stages/2026 GCCcore/.14.3.0 CUDA/13 Python/3.13.5 cuDNN/9.19.0.56-CUDA-13 NCCL/default-CUDA-13`.
 - **CPU checks on the login node:**
   - Set `JAX_PLATFORMS=cpu`, `JVMC_USE_DISTRIBUTED=false` and `OPENBLAS_NUM_THREADS=32`. Above 64 threads, numpy linalg crashes and writes a core dump of about 25 GB, so also run `ulimit -c 0`.
   - `XLA_FLAGS=--xla_force_host_platform_device_count=4` simulates 4 devices.
 - **One GPU per point:** every point runs on one GPU, even when the allocation has more. The driver sets `CUDA_VISIBLE_DEVICES` to the first GPU, `check_single_device()` aborts otherwise, and every JSON records `n_devices: 1`. NetKet does run on several GPUs, as `compare_netket.py --all-devices` shows; the SR script was kept on one GPU on purpose.
 
-## Uncommitted changes on branch `nk-benc_H`: commit them before moving
+## Uncommitted changes on branch `nk-bench`: commit them before moving
 
 1. **`jVMC_exp/sharding_config.py`**
    - The loop over the batches of `_call_local` runs either in Python (`sharded_python`, the original) or inside one jitted function (`sharded_compiled` + `_jitted_call_local`; called `sharded_test` in the results below). Results are bit-identical on CPU, on 1 and 4 devices.
    - `sharded` picks one at every call from `global_defs.batch_LOOP`: set `JVMC_batch_LOOP=python|compiled` (default `python`) or call `jVMC_exp.global_defs.update(batch_loop=...)` at any time.
-   - Lazy calls (`yield_iter`, whic_H the batched Jacobian uses) still loop in Python. They have to, because their batches are consumed outside.
+   - Lazy calls (`yield_iter`, which the batched Jacobian uses) still loop in Python. They have to, because their batches are consumed outside.
 2. **`jVMC_exp/optimizer/base.py`, `_add_qgt`:** J^T·J is now summed over chunks of at most 1 GiB of samples, inside the same function (8 lines).
    - The chunk size is `global_defs.MATMUL_chunk_BYTES` (default 1 GiB; `JVMC_MATMUL_chunk_BYTES` or `update(matmul_chunk_bytes=...)`; 0 = no chunking, i.e. the code before the patch). The MinSR kernel uses the same constant. It's read when an optimizer compiles these products, so a change applies to optimizers created afterwards.
    - The updates are bit-identical when one chunk covers the samples, and differ by at most 3e-13 with forced small chunks (CPU, 1 and 4 devices, Pinv and PinvSNR).
@@ -54,21 +54,21 @@ Results folders (untracked):
 - **Drawback of `sharded_test`:** it compiles the network once per number of samples. On CPU the network program compiled again at N = 37 and 128; the original compiles it once, and only recompiles small helpers per N.
   - NetKet also recompiles for every new N.
   - CPU count of compiles at a new N (L = 20, chunk 4096): jVMC makes 13 for E_loc and 7–8 for SR; NetKet makes 1 and 3.
-- **Alternative that keeps compile-once:** `netket_sr_comparison/grouped_kernel.patch`, whic_H is CPU-checked but not measured on GPU.
+- **Alternative that keeps compile-once:** `netket_sr_comparison/grouped_kernel.patch`, which is CPU-checked but not measured on GPU.
   - It's opt-in through `@sharded(group_batches=True)` on `_apply_fun_sh`, `_apply_ratio_sh`, `_get_O_loc` and the continuous `_evaluate_flat`.
-  - Eac_H dispatch evaluates up to 64 batches in a loop inside the compiled function. The compiled function always gets a full group of rows (the last group is zero-padded), so it compiles once per batch size. The number of real batches is passed at run time, so padding batches are not evaluated.
+  - each dispatch evaluates up to 64 batches in a loop inside the compiled function. The compiled function always gets a full group of rows (the last group is zero-padded), so it compiles once per batch size. The number of real batches is passed at run time, so padding batches are not evaluated.
   - On CPU, E_loc and log ψ are identical to `sharded` on 1 and 4 devices, and the network compiles once.
   - Risk: the loop has a run-time trip count, so the GPU may sync the loop condition with the host at every iteration.
 - **Why batched and dense take the same time:** the batched path computes the Jacobian twice. For the RBM one Jacobian pass costs O(N·P) operations (about 5 GFLOP at 2^18), against O(N·P²) for S (about 2·10^13 FLOP) and a fixed cost for `eigh`. The extra pass is under 1% of the step.
-- **The RBM on TFIM is the worst case for jVMC's loop**, because the GPU work per batch is muc_H smaller than the host cost of a dispatch. Heavier networks shrink the gap; they won't make jVMC faster, since both libraries run the same XLA computations.
+- **The RBM on TFIM is the worst case for jVMC's loop**, because the GPU work per batch is much smaller than the host cost of a dispatch. Heavier networks shrink the gap; they won't make jVMC faster, since both libraries run the same XLA computations.
 
 ### Memory of the dense path
 
-**The mechanism.** On the first call for eac_H shape, XLA autotunes every matrix multiply and reduction:
-- **What it allocates:** its own random-filled copy of eac_H operand, with 8 MiB of guard memory on eac_H side.
-- **What it doesn't do:** check how muc_H memory is free.
+**The mechanism.** On the first call for each shape, XLA autotunes every matrix multiply and reduction:
+- **What it allocates:** its own random-filled copy of each operand, with 8 MiB of guard memory on each side.
+- **What it doesn't do:** check how much memory is free.
 - **On failure:** if one of these allocations fails, the compile fails.
-- **Signature in the error:** "Out of memory while trying to allocate 25.02GiB" at 2^19, whic_H is J plus 16 MiB.
+- **Signature in the error:** "Out of memory while trying to allocate 25.02GiB" at 2^19, which is J plus 16 MiB.
 - **Dedup:** the two operands of J^T·J get two separate copies.
 - **Why NetKet escapes it:** it pays the same copies, but its whole SR step is one jitted function compiled before J exists.
 
@@ -131,7 +131,7 @@ Stage probe at 2^17 with the current library (`sharded_test` active, `_add_qgt` 
 | `_add_qgt` in chunks | **3.49 J** (+1.46 J) | **3.49 J** (+1.46 J) |
 
 - **The batch size is not the cause:** both profiles are identical, and the Jacobian program at batch = N adds nothing.
-- **The 2^19 error, in full:** the instructions that failed are `gemm_fusion_dot_general` with `kind: __triton_gemm`. XLA fused eac_H chunk's `slice` into the matrix multiply, so the operands of the fusion are the whole J (`f64[524288,6400]` × 2), and the autotuner allocated two full copies again (25.02 GiB eac_H). chunking inside the jitted function is therefore defeated on GPU. The CPU backend doesn't build these fusions or autotune, whic_H is why the CPU checks didn't show it.
+- **The 2^19 error, in full:** the instructions that failed are `gemm_fusion_dot_general` with `kind: __triton_gemm`. XLA fused each chunk's `slice` into the matrix multiply, so the operands of the fusion are the whole J (`f64[524288,6400]` × 2), and the autotuner allocated two full copies again (25.02 GiB each). chunking inside the jitted function is therefore defeated on GPU. The CPU backend doesn't build these fusions or autotune, which is why the CPU checks didn't show it.
 - **Candidate fix, CPU-checked, not run on GPU:** `netket_sr_comparison/add_qgt_barrier.patch` adds `jax.lax.optimization_barrier((r, g))` after the slices. The chunks are then materialized (2 × 1 GiB of temporary memory), so the multiply's operands are chunk-sized. On CPU the updates are identical with one chunk and differ by at most 3e-13 with forced chunks, on 1 and 4 devices.
 - **The same applies to `mean_force_normalize.patch`:** its chunked `_get_mean` / `_get_weighted_covar` would very likely be fused the same way. Add the same barrier before relying on it.
 
@@ -179,7 +179,7 @@ Run `results_minsr_20261014_171328`: N = 4096, H = 16 to 8192, batch size = N. A
   - On 4 devices the kernels have the same single reduce-scatter.
   - With several chunks the CPU build needs about two more blocks of T as temporary memory. GPU unmeasured; XLA usually folds `local + dot` into the multiply.
 
-**Not done yet:** `_adjoint_dot` (Oᵀx) on the full O, `_get_mean` and `_normalize`, whic_H are the same as SR steps 2–3, and the NetKet chunking bug.
+**Not done yet:** `_adjoint_dot` (Oᵀx) on the full O, `_get_mean` and `_normalize`, which are the same as SR steps 2–3, and the NetKet chunking bug.
 
 **To confirm on GPU:**
 ```bash
@@ -220,7 +220,7 @@ python -u probe_minsr_memory.py stages --hidden 4096 --out OUT --batched
 | `netket` | NetKet, as the benchmark runs it |
 
 - **The `--out` folder:** it must contain `config.json` and `params.npz` from a `compare_netket_sr.py` run. The batch size used is the one in that `config.json`. Optional `ref/update_<series>_<n>.npy` files are compared with the new update.
-- **Eac_H point needs its own process**, because the peak memory of a process can't be reset.
+- **each point needs its own process**, because the peak memory of a process can't be reset.
 
 The probe job creates both inputs from one cheap benchmark point, then runs the probes:
 
@@ -239,7 +239,7 @@ python -u probe_sr_memory.py dense --n 524288 --out out_batch0    # prints the f
 ```
 
 **Reading the output:**
-- **`call k`:** call 0 is the first local-energy-only stage, call 1 is the first SR step (whic_H includes compilation and autotuning), and later calls are the steady state.
+- **`call k`:** call 0 is the first local-energy-only stage, call 1 is the first SR step (which includes compilation and autotuning), and later calls are the steady state.
 - **`in use`:** device memory in use after the stage.
 - **`peak`:** the process peak so far.
 - **`<- peak +x J`:** this stage raised the peak.

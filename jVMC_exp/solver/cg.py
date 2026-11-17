@@ -7,7 +7,7 @@ class CG(AbstractSolver):
     """
     Conjugate gradient solver, ``jax.scipy.sparse.linalg.cg``.
 
-    It is matrix-free: :math:`A` is the function :math:`v\\mapsto Av`, whic_H the optimizer \
+    It is matrix-free: :math:`A` is the function :math:`v\\mapsto Av`, which the optimizer \
     computes from the logarithmic derivatives without assembling the matrix. The method assumes \
     a Hermitian positive definite :math:`A`, and starts from :math:`x=0`.
 

@@ -95,7 +95,7 @@ class OutputManager:
     Collect observables, metadata, timings and checkpoints, in memory and in an HDF5 file.
 
     The data are kept in ``data``, a dictionary of nested dictionaries. Without a path they stay \
-    in memory until ``save_to_h5(path)``, whic_H binds the path for later calls. With a path, \
+    in memory until ``save_to_h5(path)``, which binds the path for later calls. With a path, \
     every write is also appended to the file at once. Only process 0 writes files.
 
     The optimizers record their measurements in an ``OutputManager``, see \
@@ -118,7 +118,7 @@ class OutputManager:
 
     Args:
         * ``path`` [optional]: HDF5 file. Its directory is created if needed.
-        * ``group``: Group of the file under whic_H the data are written, e.g. to keep several \
+        * ``group``: Group of the file under which the data are written, e.g. to keep several \
           runs in one file.
         * ``append``: If ``True``, an existing file is kept, and the writes are appended to the \
           datasets it already has. If ``False``, the file is overwritten.
@@ -362,7 +362,7 @@ class OutputManager:
         Store a parameter tree under ``parameters/<step>`` and mark it as the latest checkpoint.
 
         Args:
-            * ``step``: Step number, whic_H gives the name of the group in eight digits.
+            * ``step``: Step number, which gives the name of the group in eight digits.
             * ``params``: Parameter tree, e.g. ``psi.parameters``.
             * ``attrs`` [optional]: Dictionary of HDF5 attributes of the group, in addition to \
               ``step``.

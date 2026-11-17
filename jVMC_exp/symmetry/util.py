@@ -25,7 +25,7 @@ def deduplicate_symmetry_arrays(
           arrays of the elements, as in ``SymmetryProjector``.
 
     Returns:
-        ``keep, character``: Indices of the first occurrence of eac_H distinct element, in their \
+        ``keep, character``: Indices of the first occurrence of each distinct element, in their \
         original order, and the characters of the distinct elements.
     """
     n_original = int(perm.shape[0])

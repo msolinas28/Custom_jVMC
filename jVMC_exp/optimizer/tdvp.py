@@ -31,7 +31,7 @@ class TDVP(Evolution):
     * ``tdvp_error_cross_validation_ratio``: its TDVP error on the odd samples, over the TDVP \
       error with all the samples.
 
-    Ratios muc_H larger than one indicate that the update follows the noise of the samples.
+    Ratios much larger than one indicate that the update follows the noise of the samples.
 
     Args:
         * ``sampler``: Sampler of ``psi``.

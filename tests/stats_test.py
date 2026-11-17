@@ -55,7 +55,7 @@ class TestStats(unittest.TestCase):
         converts it between "observations" (o), "centered" (c) and
         "normalized" (n) representations on access. Cycling through every
         transition (o->c, c->n, n->o, o->n, n->c, c->o) must reproduce the
-        exact formula at eac_H step and lose no information: the buffer
+        exact formula at each step and lose no information: the buffer
         must be back to the original input once the cycle returns to "o".
         """
         N = 12
@@ -249,7 +249,7 @@ def _make_lazy(observations, weights, batch_size):
     Build a `LazySampledObs` the same way `sharded(..., yield_iter=True)`
     would: samples padded to a multiple of the number of devices, batches of
     `batch_size` laid out by a `batchLayout` (last one trimmed), re-iterable
-    from scratc_H on every pass.
+    from scratch on every pass.
     """
     observations = pad_to_devices(observations)
     layout = batchLayout(observations.shape[0], batch_size)
@@ -269,7 +269,7 @@ class TestLazySampledObs(unittest.TestCase):
     reproduce SampledObs's numbers exactly, just computed batch-by-batch
     instead of on one materialized array. 20 samples and 3 samples per batch
     on every device are chosen deliberately so batches are uneven ([3, 3, 3,
-    3, 3, 3, 2] per device), whic_H is the case that would break a naive
+    3, 3, 3, 2] per device), which is the case that would break a naive
     equal-split implementation.
     """
 
@@ -344,8 +344,8 @@ class TestLazySampledObs(unittest.TestCase):
 
     def test_repeated_iteration_gives_consistent_results(self):
         """
-        `.mean` and `.get_covar()` eac_H do a full pass over `observations`;
-        since the iterable recomputes from scratc_H every time it's iterated
+        `.mean` and `.get_covar()` each do a full pass over `observations`;
+        since the iterable recomputes from scratch every time it's iterated
         (that's the whole point of "lazy"), a second pass must reproduce
         identical numbers instead of silently drifting or erroring out.
         """
@@ -424,7 +424,7 @@ class TestLazySampledObs(unittest.TestCase):
         """
         On more than one device a batch does not consist of consecutive samples,
         so the weights must be split with the same layout as the observations.
-        Tagging every sample with its index checks that eac_H batch of weights
+        Tagging every sample with its index checks that each batch of weights
         belongs to the same samples as the corresponding batch of observations.
         """
         n = 20 * jax.device_count()

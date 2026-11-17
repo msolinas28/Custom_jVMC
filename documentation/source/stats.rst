@@ -30,11 +30,11 @@ The error of the mean treats the samples as independent. For samples of Markov c
 integrated autocorrelation time :math:`\tau` makes the error larger by a factor of about
 :math:`\sqrt{\tau}`, and the Gelman-Rubin diagnostic :math:`\hat R` compares the chains::
 
-    tau = energy.get_autocorrelation_time(sampler.numchains)
-    r_hat = energy.get_R_hat(sampler.numchains)
+    tau = energy.get_autocorrelation_time(sampler.num_chains)
+    r_hat = energy.get_R_hat(sampler.num_chains)
 
 The observations are sharded across the devices along the sample axis. If the number of samples is
-not a multiple of the number of devices, they are padded with rows of zeros of weight zero, whic_H
+not a multiple of the number of devices, they are padded with rows of zeros of weight zero, which
 do not contribute to any estimate.
 
 ``LazySampledObs`` computes the same estimates from observations that are computed one batch at a

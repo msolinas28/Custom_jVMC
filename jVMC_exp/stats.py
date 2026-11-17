@@ -122,11 +122,11 @@ class SampledObs:
     Samplers return the local estimator of an observable in this form, see \
     ``jVMC_exp.sampler.base.AbstractSampler.__call__``. An observation can be a scalar or an \
     array, e.g. the gradient :math:`\\partial_{\\theta_k}\\ln\\psi(s_n)` with respect to all the \
-    parameters, and the statistics are computed for eac_H of its components.
+    parameters, and the statistics are computed for each of its components.
 
     The observations are sharded across the devices along the sample axis. If :math:`N` is not a \
     multiple of the number of devices, rows of zeros with weight zero are appended to the \
-    observations and to the weights, whic_H are then longer than :math:`N`. These padding rows do \
+    observations and to the weights, which are then longer than :math:`N`. These padding rows do \
     not contribute to any estimate.
 
     To save memory, a single array holds the observations. It is converted in place into the \
@@ -134,7 +134,7 @@ class SampledObs:
     observations :math:`O_n-\\langle O\\rangle`, or the normalized observations \
     :math:`\\sqrt{w_n}(O_n-\\langle O\\rangle)`. Every conversion is a pass over the data. \
     Converting the normalized observations back is exact up to rounding errors, except for the \
-    samples with weight zero, whic_H are zero in every representation from then on.
+    samples with weight zero, which are zero in every representation from then on.
 
     Args:
         * ``observations``: Observations :math:`O_n`, an array with a leading sample axis of \
@@ -256,7 +256,7 @@ class SampledObs:
     @property
     def var(self):
         """
-        Variance :math:`\\mathrm{Var}(O)=\\sum_n w_n|O_n-\\langle O\\rangle|^2` of eac_H component, \
+        Variance :math:`\\mathrm{Var}(O)=\\sum_n w_n|O_n-\\langle O\\rangle|^2` of each component, \
         with the shape of one observation. It is real, and the sum is not rescaled by \
         :math:`N/(N-1)`.
         """
@@ -265,7 +265,7 @@ class SampledObs:
     @property
     def error_of_mean(self):
         """
-        Statistical error of the mean, :math:`\\sqrt{\\mathrm{Var}(O)\\sum_n w_n^2}`, for eac_H \
+        Statistical error of the mean, :math:`\\sqrt{\\mathrm{Var}(O)\\sum_n w_n^2}`, for each \
         component.
 
         For uniform weights this is :math:`\\sqrt{\\mathrm{Var}(O)/N}`. The estimate treats the \
@@ -306,7 +306,7 @@ class SampledObs:
         Covariance with ``other`` as a ``SampledObs``, e.g. to estimate its statistical error.
 
         The observations of the result are the products \
-        :math:`(O_{n,k}-\\langle O_k\\rangle)^*(P_{n,l}-\\langle P_l\\rangle)` of eac_H sample, with \
+        :math:`(O_{n,k}-\\langle O_k\\rangle)^*(P_{n,l}-\\langle P_l\\rangle)` of each sample, with \
         the weights of this ``SampledObs``. Its ``mean`` is ``get_covar(other)``, up to axes of \
         length one, and its ``error_of_mean`` is the statistical error of the covariance.
 
@@ -335,8 +335,8 @@ class SampledObs:
         """
         Gelman-Rubin convergence diagnostic :math:`\\hat R` of Markov chains.
 
-        The samples are split into ``n_chains`` chains of :math:`n` consecutive samples eac_H, the \
-        order in whic_H the MCMC samplers store the samples of their chains. The variances within \
+        The samples are split into ``n_chains`` chains of :math:`n` consecutive samples each, the \
+        order in which the MCMC samplers store the samples of their chains. The variances within \
         the chains (normalized by :math:`n-1`) are averaged into :math:`W`, and the variance of the \
         means of the chains (normalized by ``n_chains - 1``) is :math:`B/n`. Then
 
@@ -349,7 +349,7 @@ class SampledObs:
         same weight: the weights are not used.
 
         Args:
-            * ``n_chains``: Number of chains, e.g. ``sampler.numchains``. The number of samples \
+            * ``n_chains``: Number of chains, e.g. ``sampler.num_chains``. The number of samples \
               :math:`N` must be a multiple of it.
 
         Returns:
@@ -371,9 +371,9 @@ class SampledObs:
 
     def get_autocorrelation_time(self, n_chains, c=5) -> SampledObs:
         """
-        Integrated autocorrelation time :math:`\\tau` of eac_H Markov chain.
+        Integrated autocorrelation time :math:`\\tau` of each Markov chain.
 
-        The samples are split into chains as in ``get_R_hat()``. For eac_H chain, the normalized \
+        The samples are split into chains as in ``get_R_hat()``. For each chain, the normalized \
         autocorrelation function :math:`\\rho(t)` is computed with a fast Fourier transform, and \
         :math:`\\tau(M)=1+2\\sum_{t=1}^{M}\\rho(t)` is evaluated at the smallest window :math:`M` \
         with :math:`M\\geq c\\,\\tau(M)` (automatic windowing of Sokal, as in ``emcee``). The \
@@ -382,12 +382,12 @@ class SampledObs:
         weights are not used.
 
         Args:
-            * ``n_chains``: Number of chains, e.g. ``sampler.numchains``. The number of samples \
+            * ``n_chains``: Number of chains, e.g. ``sampler.num_chains``. The number of samples \
               :math:`N` must be a multiple of it.
             * ``c``: Window parameter :math:`c`.
 
         Returns:
-            A ``SampledObs`` with the autocorrelation time of eac_H chain, whose ``mean`` is the \
+            A ``SampledObs`` with the autocorrelation time of each chain, whose ``mean`` is the \
             average over the chains. Raises ``NotImplementedError`` if an observation has more \
             than one component.
         """
@@ -415,7 +415,7 @@ class SampledObs:
         Args:
             * ``element_wise_fn``: The function :math:`f`, the identity by default.
             * ``linear_map`` [optional]: Matrix :math:`L` of shape ``(K', K)``, applied to the \
-              transformed observation :math:`f(O_n)` of every sample, whic_H then has ``K`` \
+              transformed observation :math:`f(O_n)` of every sample, which then has ``K`` \
               components.
         """
         if linear_map is not None:
@@ -441,7 +441,7 @@ class SampledObs:
         Samples ``observations[start:end:step]``, as a new ``SampledObs`` with the weights \
         normalized on the subset.
 
-        The indices refer to ``observations`` and ``weights``, whic_H end with the padding rows.
+        The indices refer to ``observations`` and ``weights``, which end with the padding rows.
 
         Args:
             * ``start``: First sample of the subset.
@@ -459,15 +459,15 @@ class LazySampledObs:
     Sample statistics of observations that are computed one batch at a time.
 
     The counterpart of ``SampledObs`` for observations that are too large to be held in memory \
-    at once, suc_H as the gradients of a large network, whic_H ``NQS.lazy_gradients()`` computes in \
+    at once, such as the gradients of a large network, which ``NQS.lazy_gradients()`` computes in \
     batches (objective functions with ``batched_jacobian=True``). The estimates are defined as in \
-    ``SampledObs``. Eac_H computation iterates over the batches, whic_H computes them again; \
+    ``SampledObs``. each computation iterates over the batches, which computes them again; \
     ``mean`` and ``var`` are cached until ``observations`` is replaced.
 
     Args:
         * ``observations``: ``jVMC_exp.sharding_config.SizedIterable`` of the batches of the \
           observations, with a ``layout``, as returned by ``sharded(..., yield_iter=True)``. \
-          The layout defines whic_H samples make up eac_H batch, and splits ``weights``, or any \
+          The layout defines which samples make up each batch, and splits ``weights``, or any \
           other array with one entry per sample, into batches that line up with those of the \
           observations. On more than one device a batch does not consist of consecutive \
           samples, see ``jVMC_exp.sharding_config.batchLayout``.
@@ -553,7 +553,7 @@ class LazySampledObs:
     @cached_property
     def var(self):
         """
-        Variance :math:`\\mathrm{Var}(O)=\\sum_n w_n|O_n|^2-|\\langle O\\rangle|^2` of eac_H \
+        Variance :math:`\\mathrm{Var}(O)=\\sum_n w_n|O_n|^2-|\\langle O\\rangle|^2` of each \
         component, computed in a single pass over the batches, with the axes of length one removed.
         """
         sq_sum = 0

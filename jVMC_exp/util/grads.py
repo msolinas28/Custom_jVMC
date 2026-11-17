@@ -60,7 +60,7 @@ def flat_gradient_nonholo(fun, params, arg):
 def flat_gradient_holo(fun, params, arg):
     """
     Flat gradient of a holomorphic ``fun`` of complex parameters: for every leaf, the complex \
-    derivatives :math:`f'` followed by :math:`if'`, whic_H are the derivatives with respect to the \
+    derivatives :math:`f'` followed by :math:`if'`, which are the derivatives with respect to the \
     real and the imaginary parts of the parameters.
     """
     g = grad(lambda p, y: jnp.real(fun(p, y)))(params, arg)["params"]

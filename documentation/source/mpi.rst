@@ -3,7 +3,7 @@
 MPI wrapper module
 ==================
 
-The ``jVMC.mpi_wrapper`` module wraps typically required MPI communications, for whic_H the `mpi4py` package is used.
+The ``jVMC.mpi_wrapper`` module wraps typically required MPI communications, for which the `mpi4py` package is used.
 This means especially the statistical evaluation of
 Monte Carlo samples. For this purpose, it can interact with the sampler classes from the ``jVMC.sampler`` module as follows:
 
@@ -19,7 +19,7 @@ Monte Carlo samples. For this purpose, it can interact with the sampler classes 
     >>> log_psiOffd = psi(sPrime)
     >>> O_loc = get_O_loc(log_psi, log_psiOffd)
 
-    Now, on eac_H MPI process ``O_loc`` is a two-dimensional array of size (number of devices) :math:`\times` (number of samples
+    Now, on each MPI process ``O_loc`` is a two-dimensional array of size (number of devices) :math:`\times` (number of samples
     per device). To get, for example, the Monte Carlo estimate of the expectation value of :math:`\hat O`,
 
         :math:`\langle\hat O\rangle\approx\frac{1}{N_S}\sum_{j=1}^{N_S}O_{loc}(\mathbf s_j)`

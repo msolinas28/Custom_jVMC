@@ -47,10 +47,10 @@ The elementary operators define a ket action: `O|s⟩ = mat_els[s] · |map[s]⟩
 column = input).
 
 `get_O_loc` needs rows: `O_loc(s) = Σ_s' ⟨s|O|s'⟩ ψ(s')/ψ(s)`. It instead computes
-`Σ mat_el(s→s') ψ(s')/ψ(s) = Σ_s' M[s', s] ψ(s')/ψ(s)`, whic_H is the local estimator of `Mᵀ`
+`Σ mat_el(s→s') ψ(s')/ψ(s) = Σ_s' M[s', s] ψ(s')/ψ(s)`, which is the local estimator of `Mᵀ`
 (`jVMC_exp/operator/discrete/base.py`, `_get_O_loc`, last line). The order of the factors in a
 product is consistent with `M` (the engine applies the last factor first), so the whole operator
-comes out transposed, not just eac_H factor.
+comes out transposed, not just each factor.
 
 `Infidelity._get_f_loc_sh` (`jVMC_exp/objective_function/infidelity.py`) uses
 `operator._get_conn_elements(s, op_kwargs)` in the same way, so it also uses `Mᵀ`.
@@ -97,7 +97,7 @@ consistent, so fixing the engine once makes everything right.
 
 `util.util.matrix_to_jvmc_operator` expands a dense matrix in a local basis I, σx, σy, σz and maps
 the basis elements to `IdentityOperator`, `SigmaX`, `SigmaY`, `SigmaZ`. Its σy element is
-`[[0, 1j], [-1j, 0]]`, whic_H is σyᵀ, i.e. exactly what the engine measures for `SigmaY`. I, σx, σz
+`[[0, 1j], [-1j, 0]]`, which is σyᵀ, i.e. exactly what the engine measures for `SigmaY`. I, σx, σz
 are symmetric and tensor products transpose factor by factor, so for any `U` built by the helper
 the sampler measures `U` (checked: `to_sparse(U_op) == Uᵀ`, sampler measures `U`). The two
 transposes cancel.
@@ -110,7 +110,7 @@ The σy entry was added in commit `54e2988` (2026-04-16), together with the help
 changed. `Infidelity` with an operator built by hand from `op.*` (e.g. `1 − iδt·H` with a σy field
 or ladder operators) uses `Uᵀ` today.
 
-## Options compared (prototyped on scratc_H copies)
+## Options compared (prototyped on scratch copies)
 
 | | A: conjugate matrix elements in `get_O_loc` | B: transpose the operator strings for `get_O_loc` |
 |---|---|---|
@@ -128,13 +128,13 @@ leave two conventions in the library.
 
 ### How option B works
 
-- `_compile` builds a second set of arrays for the transposed strings: eac_H string's factors in
-  reverse order, eac_H elementary operator replaced by its transpose.
+- `_compile` builds a second set of arrays for the transposed strings: each string's factors in
+  reverse order, each elementary operator replaced by its transpose.
 - The transpose of an elementary operator is computed generically from `map` / `mat_els`
   (inverse map on the non-zero elements). It is branch-free for every predefined operator; a
   clear `ValueError` is raised otherwise.
 - Fermion signs carry over unchanged: they only depend on the occupations of other sites (and,
-  for spin up, of the down mode on the same site), whic_H are the same in `s` and `s'`.
+  for spin up, of the down mode on the same site), which are the same in `s` and `s'`.
 - `get_O_loc` and `Infidelity` use the transposed arrays; `to_sparse` and `get_conn_elements`
   keep the original ones.
 - `matrix_to_jvmc_operator` switches its σy basis element to the standard

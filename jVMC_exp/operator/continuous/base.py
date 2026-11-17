@@ -25,7 +25,7 @@ class Operator(AbstractOperator):
     ``(n_particles * n_dim,)``. Operators are combined with ``+``, ``-``, ``*`` and ``/``, and
     numbers are added as multiples of the identity. Products of two operators are only supported
     when both are diagonal. Operators can be multiplied by numbers, or by callables that accept
-    arbitrary keyword arguments, ``f(**kwargs)``, whic_H are evaluated with the keyword arguments
+    arbitrary keyword arguments, ``f(**kwargs)``, which are evaluated with the keyword arguments
     given to ``get_O_loc()``.
 
     Args:

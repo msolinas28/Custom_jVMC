@@ -39,7 +39,7 @@ The local losses of
     loss = jVMC_exp.objective_function.Infidelity(chi_sampler, U, U_dag, control_variate="adaptive")
     optimizer.ground_state_search(steps, loss, stepper=jVMC_exp.stepper.Euler(5e-2))
 
-All of them use the samples and weights stored in the sampler, whic_H the optimizers refresh at
+All of them use the samples and weights stored in the sampler, which the optimizers refresh at
 every step. With ``batched_jacobian=True`` the logarithmic derivatives are computed one batch at a
 time, for networks whose Jacobian does not fit in memory.
 

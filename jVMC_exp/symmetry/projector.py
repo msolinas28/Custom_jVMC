@@ -110,7 +110,7 @@ def compose_projectors(
     merged, as in ``deduplicate_symmetry_arrays()``. Without boundary signs, the elements are \
     the products :math:`A_lA_r` of the elements of ``left`` and ``right`` (see \
     ``SymmetryProjector``), and the projection is the product :math:`P_lP_r` of the two \
-    projections, whic_H is again a projection if they commute. ``left * right`` is a shorthand, \
+    projections, which is again a projection if they commute. ``left * right`` is a shorthand, \
     with the name ``"<left>_x_<right>"``.
 
     Args:
@@ -180,7 +180,7 @@ def split_spinful_site_state(s, n_sites: int):
         * ``n_sites``: Number of sites.
 
     Returns:
-        ``up, down``: Occupations (0 or 1) of the two spins on eac_H site, of shape ``(n_sites,)``.
+        ``up, down``: Occupations (0 or 1) of the two spins on each site, of shape ``(n_sites,)``.
     """
     site_state = jnp.asarray(s, dtype=jnp.int32).reshape(
         int(n_sites)
@@ -272,7 +272,7 @@ class SymmetryProjector:
     times the boundary signs ``perm_sign``, the local phases ``local_phase`` and, for the \
     elements with ``local_sign``, the particle-hole sign. Without local maps, the matrix \
     :math:`A_g` with :math:`(A_g\\psi)(s)=\\sigma_g(s)\\psi(g\\cdot s)` then maps the fermion \
-    operators as :math:`A_g\\hat c_iA_g^\\dagger=\\hat c_{\\mathrm{perm}[g,i]}`, for eac_H spin.
+    operators as :math:`A_g\\hat c_iA_g^\\dagger=\\hat c_{\\mathrm{perm}[g,i]}`, for each spin.
 
     The functions of ``jVMC_exp.symmetry.lattice_symetries`` build the projectors of the usual \
     lattice symmetries. ``projector_1 * projector_2`` composes two projectors (see \
@@ -518,7 +518,7 @@ class SymmetryProjector:
 
     def random_transformed_states(self, samples, key):
         """
-        ``random_transformed_state()`` for eac_H configuration of a batch, with independent elements.
+        ``random_transformed_state()`` for each configuration of a batch, with independent elements.
 
         Args:
             * ``samples``: Configurations, of shape ``(N, ...)``.
@@ -683,10 +683,10 @@ class ProjectedOrbitNet(nn.Module):
     * ``"log"``: :math:`\\frac{1}{n_\\text{symm}}\\sum_g\\ln\\psi(g\\cdot s)`.
     * ``"sep"``: \
       :math:`\\frac12\\ln\\big(\\frac{1}{n_\\text{symm}}\\sum_g|\\psi(g\\cdot s)|^2\\big)+i\\arg\\sum_g e^{i\\,\\mathrm{Im}\\ln\\psi(g\\cdot s)}`, \
-      whic_H averages the probabilities and the phases separately. For a network normalized \
+      which averages the probabilities and the phases separately. For a network normalized \
       with ``log_prob_factor=0.5``, :math:`\\psi_P` is normalized too, and ``sample()`` draws \
       configurations from :math:`|\\psi_P|^2`.
-    * A callable ``f(log_amplitudes, weights)``, whic_H gets the arrays of the ``nsymm`` \
+    * A callable ``f(log_amplitudes, weights)``, which gets the arrays of the ``nsymm`` \
       logarithmic coefficients and weights and returns :math:`\\ln\\psi_P(s)`.
 
     ``"log"`` and ``"sep"`` do not use the weights, so for a projector whose weights are not all \
@@ -695,10 +695,10 @@ class ProjectedOrbitNet(nn.Module):
     autoregressive network) requires ``"sep"`` or a callable, and a projector whose weights are \
     all one: otherwise a ``ValueError`` is raised when the module is set up.
 
-    The optional coefficient networks add a logarithmic coefficient :math:`c_g(s)` to eac_H \
+    The optional coefficient networks add a logarithmic coefficient :math:`c_g(s)` to each \
     term, :math:`\\ln\\psi(g\\cdot s)\\to\\ln\\psi(g\\cdot s)+c_g(s)`: ``coefficient_net(s)`` \
     returns the ``nsymm`` coefficients for the configuration :math:`s`, and \
-    ``coefficient_state_net(g·s)`` one coefficient for eac_H transformed configuration. Only one \
+    ``coefficient_state_net(g·s)`` one coefficient for each transformed configuration. Only one \
     of the two can be given.
 
     The transformed configurations are passed to the networks with the shape of :math:`s`. The \

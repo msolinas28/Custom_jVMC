@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import collections
 from functools import partial
-from typing import TYPE_checkING, Any, Dict, Union
+from typing import TYPE_CHECKING, Any, Dict, Union
 
 import jax
 import jax.numpy as jnp
@@ -15,7 +15,7 @@ import numpy as np
 
 from jVMC_exp import global_defs
 
-if TYPE_checkING:
+if TYPE_CHECKING:
     from jVMC_exp.optimizer import TDVP
     from jVMC_exp.sampler.base import AbstractMCSampler
 
@@ -41,7 +41,7 @@ def remove_double(arr, params_shape):
 
     For a holomorphic network, ``NQS.gradients()`` holds for every leaf of the parameter tree a \
     block of ``2 * size`` entries: the derivatives with respect to the real parts of the \
-    parameters, followed by those with respect to the imaginary parts, whic_H are ``1j`` times \
+    parameters, followed by those with respect to the imaginary parts, which are ``1j`` times \
     the former. The first half of every block is the complex derivative.
 
     Args:

@@ -538,7 +538,7 @@ class TestCrossValidation(unittest.TestCase):
 
     def test_validation_tdvp_error_is_evaluated_on_the_other_half(self):
         L = 4
-        # With biases, the state has no spin flip symmetry, whic_H would map the even basis
+        # With biases, the state has no spin flip symmetry, which would map the even basis
         # states onto the odd ones and make the two halves equivalent
         psi = NQS(nets.CpxRBM(num_hidden=2, bias=True), L, 2**L, seed=123)
         psi.parameters = psi.parameters_flat + 0.3 * jnp.cos(
