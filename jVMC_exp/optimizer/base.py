@@ -234,7 +234,7 @@ class AbstractOptimizer(ABC):
         observables: Dict[str, ObservableEntry] | None = None,
         callback: List[Callable] | None = None,
         save_meta_data: bool = False,
-        **kwargs,  # KWARGS ARE FOR BOTH THE STEPPER AND THE OBJECTIVE FUNCTION, TODO: ADD DOCUMENTATION ON THIS
+        **kwargs,
     ):
         """
         Minimize ``objective_function`` with ``steps`` steps of ``stepper``.
@@ -287,7 +287,7 @@ class AbstractOptimizer(ABC):
 
             pbar.set_postfix(E=f"{self.o_loc}")
 
-        self.output_manager.print_timings()
+        self.output_manager.print_total_timings()
 
         if save_meta_data:
             return self.output_manager.data["observables"], self.output_manager.data[
@@ -361,7 +361,7 @@ class AbstractOptimizer(ABC):
         self._measure_and_store(t, observables, callback, save_meta_data)
 
         pbar.close()
-        self.output_manager.print_timings()
+        self.output_manager.print_total_timings()
 
         if save_meta_data:
             return self.output_manager.data["observables"], self.output_manager.data[
