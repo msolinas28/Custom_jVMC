@@ -5,4 +5,4 @@ from .base import (
     Observable,
     ParametricObservable,
 )
-from .infidelity import Infidelity
+from .infidelity import Infidelity, InfidelityContinuous

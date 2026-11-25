@@ -4,10 +4,15 @@ import jax
 import jax.numpy as jnp
 
 from jVMC_exp.operator.discrete.branch_free import IdentityOperator, Operator
+from jVMC_exp.operator.continuous import (
+    IdentityOperator as ContIdentity, 
+    Operator as ContOperator
+)
 from jVMC_exp.sampler.base import AbstractSampler
 from jVMC_exp.sharding_config import MESH, sharded
 from jVMC_exp.stats import SampledObs
 from jVMC_exp.vqs import NQS
+from jVMC_exp.geometry import AbstractGeometry
 
 from .base import AbstractObjectiveFunction, ObjectiveFunctionOutput
 
@@ -109,6 +114,7 @@ class Infidelity(AbstractObjectiveFunction):
         reference_sampler: AbstractSampler,
         operator: Operator | None = None,
         conjugated_operator: Operator | None = None,
+        unitary: bool = True,
         control_variate: str | None = None,
         moving_average_width: int = 1,
         l_dim: int = 2,
@@ -129,16 +135,14 @@ class Infidelity(AbstractObjectiveFunction):
                 "No ConjugatedOperator provided; assuming Operator is Hermitian.",
                 stacklevel=2,
             )
-            if self.control_variate is not None:
-                warnings.warn(
-                    "Control variates are disabled when the operator is assumed Hermitian.",
-                    stacklevel=2,
-                )
-                self.control_variate = None
         self._operator = operator or IdentityOperator(l_dim, 0)
         self._conjugated_operator = conjugated_operator or self.operator
 
-        self._reset_cached_observables()
+        if not unitary and self.control_variate is not None:
+            raise ValueError(
+                "Control variate methods do not work when the operator is not unitary."
+            )
+        self._unitary = unitary
 
     @property
     def reference_sampler(self):
@@ -267,7 +271,19 @@ class Infidelity(AbstractObjectiveFunction):
             self._psi_f_loc = o_loc
             correction = 0
 
-        infidelity_loc = 1.0 - self._psi_f_loc * self._ref_f_loc
+        self._unitary_correction = 1.
+        if not self._unitary:
+            self._unitary_correction = self.operator.get_O_loc(
+                self.reference_sampler.samples,
+                self.reference_sampler.psi,
+                log_psi_s=self.reference_sampler.log_psi,
+                **op_kwargs,
+            )
+            self._unitary_correction = _weighted_mean(
+                jnp.abs(self._unitary_correction) ** 2, self.reference_sampler.weights
+            )
+
+        infidelity_loc = 1.0 - self._psi_f_loc * self._ref_f_loc / self._unitary_correction
 
         return SampledObs(infidelity_loc - correction, sampler.weights)
 
@@ -297,7 +313,10 @@ class Infidelity(AbstractObjectiveFunction):
         grad_log_psi = self._grad_log_psi(sampler)
 
         if compute_grad:
-            f_loc = SampledObs(-self._ref_f_loc * self._psi_f_loc, sampler.weights)
+            f_loc = SampledObs(
+                -self._ref_f_loc * self._psi_f_loc / self._unitary_correction, 
+                sampler.weights
+            )
             grad = grad_log_psi.get_covar(f_loc)
 
             return ObjectiveFunctionOutput(
@@ -349,18 +368,6 @@ class Infidelity(AbstractObjectiveFunction):
 
         return jnp.sum(mat_els * jnp.exp(log_psi_s_p - log_phi_s))
 
-    def _reset_cached_observables(self):
-        self._ref_f_loc = None
-        self._ref_f_loc_cv = None
-        self._ref_f2_loc_cv = None
-        self._ref_f_loc_f2_loc_cv = None
-
-        self._psi_f_loc = None
-        self._psi_f_loc_cv = None
-        self._psi_f2_loc_cv = None
-        self._psi_f_loc_f2_loc_cv = None
-        self._var_f2 = None
-
     def _get_control_variate_coeff(self, psi_p):
         r"""
         Update the adaptive control-variate coefficient
@@ -390,3 +397,34 @@ class Infidelity(AbstractObjectiveFunction):
         return self._moving_average.update(
             -jnp.abs(jnp.real(covar_ff2) / jnp.real(self._var_f2))
         )
+
+
+class InfidelityContinuous(Infidelity):
+    def __init__(
+            self, 
+            reference_sampler, 
+            operator: ContOperator | None = None, 
+            conjugated_operator: ContOperator | None = None, 
+            unitary: bool = True,
+            control_variate = None, 
+            moving_average_width = 1, 
+            geometry: AbstractGeometry | None = None, 
+            batched_jacobian = False
+        ):
+        if operator is None and geometry is None:
+            raise ValueError(
+                "If no operator is given the geometry must be specified"
+            )
+
+        super().__init__(
+            reference_sampler, operator, conjugated_operator, unitary,
+            control_variate, moving_average_width, 2, batched_jacobian
+        )
+
+        self._operator = operator or ContIdentity(geometry)
+        self._conjugated_operator = conjugated_operator or self.operator
+
+    def _get_f_loc(self, operator, s, log_phi_s, psi, **op_kwargs):
+        o_loc = operator.get_O_loc(s, psi, **op_kwargs)
+
+        return o_loc * jnp.exp(psi(s) - log_phi_s)
