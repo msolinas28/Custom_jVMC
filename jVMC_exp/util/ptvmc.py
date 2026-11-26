@@ -152,7 +152,16 @@ class PTVMC:
     * ``infidelity``: The ``mean``, the ``variance`` and the ``MC_error`` of the infidelity of
       every stage at the end of its fit, one entry per stage,
     * ``total_infidelity``: The same for :math:`\\sum_k\\mathcal I_k`, the infidelity of the step
-      to leading order when the errors of the stages are uncorrelated.
+      to leading order when the errors of the stages are uncorrelated,
+    * ``effective_tdvp_error``: The ``mean`` and the ``MC_error`` of
+      :math:`r^2_{\\rm eff}=\\sum_k\\mathcal I_k/(\\tau^2\\,\\mathrm{Var}(H))`, with the variance of
+      the local energy at the start of the step (``NaN`` if it vanishes). The fit of
+      :math:`(1-i\\tau H)|\\psi\\rangle` by the step :math:`\\tau\\dot\\theta` of ``TDVP`` has the
+      infidelity :math:`\\tau^2 r^2\\mathrm{Var}(H)` to leading order in :math:`\\tau`, with
+      :math:`r^2` the ``tdvp_error`` of ``TDVP``. So, for a single stage and converged fits,
+      :math:`r^2_{\\rm eff}` is at most about :math:`r^2`, and equal to it when the parameter
+      change is small enough for the linearization. For several stages, it is of the same
+      order.
 
     Args:
         * ``optimizer``: Optimizer of the fits, e.g. ``jVMC_exp.optimizer.SR``, with the sampler
@@ -251,6 +260,9 @@ class PTVMC:
         Returns:
             The time step.
         """
+        # Var(H) of the state at the start of the step, for the effective TDVP error
+        energy_variance = jnp.real(objective_function(self.sampler, t=t).var).squeeze()
+
         means, variances, errors = [], [], []
         losses = self._get_losses(propagator, objective_function)
         for k, loss in enumerate(losses):
@@ -294,13 +306,23 @@ class PTVMC:
 
         means, variances, errors = (jnp.stack(x) for x in (means, variances, errors))
         # The stages are estimated from independent samples: their variances add
+        total = dict(
+            mean=jnp.sum(means),
+            variance=jnp.sum(variances),
+            MC_error=jnp.sqrt(jnp.sum(errors**2)),
+        )
+        # NaN for an eigenstate, whose energy variance vanishes
+        scale = jnp.where(
+            energy_variance > 0,
+            1 / (propagator.time_step**2 * energy_variance),
+            jnp.nan,
+        )
         self.meta_data = dict(
             dt=propagator.time_step,
             infidelity=dict(mean=means, variance=variances, MC_error=errors),
-            total_infidelity=dict(
-                mean=jnp.sum(means),
-                variance=jnp.sum(variances),
-                MC_error=jnp.sqrt(jnp.sum(errors**2)),
+            total_infidelity=total,
+            effective_tdvp_error=dict(
+                mean=scale * total["mean"], MC_error=scale * total["MC_error"]
             ),
         )
 

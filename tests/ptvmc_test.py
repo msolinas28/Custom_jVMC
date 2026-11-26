@@ -1,6 +1,8 @@
 import math
 import unittest
 
+import flax.linen as nn
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -14,6 +16,17 @@ from jVMC_exp.vqs import NQS
 
 L = 4
 TAU = 0.05
+
+
+class ProductState(nn.Module):
+    """One complex amplitude per site and local state: its tangent space is well conditioned"""
+
+    @nn.compact
+    def __call__(self, s):
+        a = self.param(
+            "a", lambda key: 0.3 * jax.random.normal(key, (L, 2), dtype=jnp.complex128)
+        )
+        return jnp.sum(a[jnp.arange(L), s.ravel().astype(int)])
 
 
 def ising_hamiltonian():
@@ -110,6 +123,34 @@ class TestPTVMC(unittest.TestCase):
             v = T @ v
             v /= np.linalg.norm(v)
             self.assertLess(1 - np.abs(np.vdot(v, state)) ** 2, 1e-6)
+
+    def test_effective_tdvp_error(self):
+        # For one stage, converged fits and a small parameter change, the infidelity of the step
+        # is tau^2 r^2 Var(H), with the TDVP error r^2
+        hamiltonian, tau = ising_hamiltonian(), 0.01
+
+        def new_state():
+            psi = NQS(ProductState(), L, batch_size=2**L, seed=1)
+            return psi, ExactSampler(psi)
+
+        psi, sampler = new_state()
+        tdvp = jVMC_exp.optimizer.TDVP(
+            sampler, psi, make_real=True, solver=jVMC_exp.solver.Pinv()
+        )
+        tdvp(psi.parameters_flat, 0, int_step=0, objective_function=Observable(hamiltonian))
+
+        psi, sampler = new_state()
+        optimizer = jVMC_exp.optimizer.SR(
+            sampler, psi, diagonal_shift=0.0, solver=jVMC_exp.solver.Pinv()
+        )
+        driver = PTVMC(
+            optimizer, jVMC_exp.stepper.Euler(0.5), fit_steps=300, show_fit_progress=False
+        )
+        sampler.sample()
+        driver.step(0, ProductExpansion(tau, 1), Observable(hamiltonian))
+
+        effective = driver.meta_data["effective_tdvp_error"]["mean"].item()
+        self.assertAlmostEqual(effective / tdvp.meta_data["tdvp_error"], 1, delta=1e-2)
 
     def test_rejects_other_objective_functions(self):
         psi = NQS(jVMC_exp.nets.CpxRBM(2, True), L, batch_size=2**L)
