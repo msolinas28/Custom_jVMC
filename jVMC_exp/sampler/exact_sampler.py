@@ -4,7 +4,6 @@ import jax
 import jax.numpy as jnp
 
 from jVMC_exp import global_defs
-from jVMC_exp.operator.base import AbstractOperator
 from jVMC_exp.sampler.base import AbstractSampler
 from jVMC_exp.sharding_config import (
     DEVICE_SHARDING,
@@ -12,7 +11,6 @@ from jVMC_exp.sharding_config import (
     MESH,
     distribute,
 )
-from jVMC_exp.stats import SampledObs
 from jVMC_exp.vqs import NQS
 
 
@@ -72,6 +70,10 @@ class ExactSampler(AbstractSampler):
         """Factor for the log-probabilities."""
         return self._log_prob_factor
 
+    @AbstractSampler.states.setter
+    def states(self, value):
+        pass
+
     @cached_property
     def basis(self):
         """
@@ -109,26 +111,6 @@ class ExactSampler(AbstractSampler):
                 out_specs=DEVICE_SPEC,
             )
         )(int_repr)[: self.num_states]
-
-    def __call__(self, observable: AbstractOperator, **obs_kwargs) -> SampledObs:
-        """
-        Evaluate an observable exactly on the full basis.
-
-        This uses the result of the last ``sample()`` call, or calls it if there is none.
-
-        Args:
-            * ``observable``: Operator to evaluate.
-            * ``**obs_kwargs``: Additional keyword arguments for ``observable.get_O_loc()``.
-
-        Returns:
-            The local estimator of ``observable`` as a ``jVMC_exp.stats.SampledObs``, together \
-            with the probabilities of the basis configurations.
-        """
-        raw_data = observable.get_O_loc(
-            self.samples, self.psi, log_psi_s=self.log_psi, **obs_kwargs
-        )
-
-        return SampledObs(raw_data, self.weights)
 
     def sample(self, num_samples=None):
         """

@@ -42,6 +42,7 @@ class AbstractSampler(ABC):
         self._samples = None
         self._log_psi = None
         self._weights = None
+        self._states = None
         self.num_samples = None
 
     @property
@@ -71,6 +72,16 @@ class AbstractSampler(ABC):
         return self._weights
 
     @property
+    def states(self):
+        """
+        Current configurations of the Markov chains, of shape ``(num_chains, *sample_shape)``.
+
+        This is ``init_state`` until the first ``sample()`` call. A new value is used by the next \
+        ``sample()`` call, as described for ``init_state``.
+        """
+        return self._states
+
+    @property
     def samples(self):
         """Configurations returned by the last ``sample()`` call."""
         if self._samples is None:
@@ -78,18 +89,42 @@ class AbstractSampler(ABC):
 
         return self._samples
 
-    @abstractmethod
+    @property
+    def sampler_state(self):
+        """
+        Snapshot of the sampler as a dictionary with ``parameters``, ``states`` and ``weights``.
+
+        Reading it samples if there are no stored samples yet. Setting it restores these three \
+        entries, but not ``samples``, ``log_psi`` or ``key``: call ``sample()`` before using \
+        the stored samples again.
+        """
+        return dict(
+            parameters=self.psi.parameters, weights=self.weights, states=self.states
+        )
+
+    @sampler_state.setter
+    def sampler_state(self, value):
+        self.psi.parameters = value["parameters"]
+        self.states = value["states"]
+        self._weights = value["weights"]
+
     def __call__(self, observable: AbstractOperator, **obs_kwargs) -> SampledObs:
         """
-        Evaluate an observable on the samples of the sampler.
+        Evaluate an observable on the stored samples, or on new ones if there are none.
 
         Args:
             * ``observable``: Operator to evaluate.
             * ``**obs_kwargs``: Additional keyword arguments for ``observable.get_O_loc()``.
 
         Returns:
-            The local estimator of ``observable`` together with the sample weights.
+            The local estimator of ``observable`` as a ``jVMC_exp.stats.SampledObs``, together \
+            with the sample weights.
         """
+        raw_data = observable.get_O_loc(
+            self.samples, self.psi, log_psi_s=self.log_psi, **obs_kwargs
+        )
+
+        return SampledObs(raw_data, self.weights)
 
     @abstractmethod
     def sample(self, num_samples=None) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
@@ -302,17 +337,7 @@ class AbstractMCSampler(AbstractSampler):
         self._key = format_key(value)
         self._is_state_initialized = False
 
-    @property
-    def states(self):
-        """
-        Current configurations of the Markov chains, of shape ``(num_chains, *sample_shape)``.
-
-        This is ``init_state`` until the first ``sample()`` call. A new value is used by the next \
-        ``sample()`` call, as described for ``init_state``.
-        """
-        return self._states
-
-    @states.setter
+    @AbstractSampler.states.setter
     def states(self, value):
         if value is not None:
             value = jnp.array(value)
@@ -324,25 +349,6 @@ class AbstractMCSampler(AbstractSampler):
 
         self._states = value
         self._is_state_initialized = False
-
-    @property
-    def sampler_state(self):
-        """
-        Snapshot of the sampler as a dictionary with ``parameters``, ``states`` and ``weights``.
-
-        Reading it samples if there are no stored samples yet. Setting it restores these three \
-        entries, but not ``samples``, ``log_psi`` or ``key``: call ``sample()`` before using \
-        the stored samples again.
-        """
-        return dict(
-            parameters=self.psi.parameters, weights=self.weights, states=self.states
-        )
-
-    @sampler_state.setter
-    def sampler_state(self, value):
-        self.psi.parameters = value["parameters"]
-        self.states = value["states"]
-        self._weights = value["weights"]
 
     def __call__(
         self,
@@ -380,12 +386,9 @@ class AbstractMCSampler(AbstractSampler):
             or resample
         )
         if needs_resample:
-            self._samples, self._log_psi, self._weights = self.sample(num_samples)
-        raw_data = observable.get_O_loc(
-            self.samples, self.psi, log_psi_s=self.log_psi, **obs_kwargs
-        )
+            self.sample(num_samples)
 
-        return SampledObs(raw_data, self.weights)
+        return super().__call__(observable, **obs_kwargs)
 
     def reset(self, key=None):
         """
