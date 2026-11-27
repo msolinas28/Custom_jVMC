@@ -16,8 +16,9 @@ class AbstractSolver(ABC):
 
     The keyword arguments are those of the ``solver_state`` of the optimizer: ``pad_size``, \
     ``exact_sampler`` and, for ``SR`` and ``TDVP``, ``transformation``, together with the \
-    ``grad_log_psi`` and ``o_loc`` of the objective function. A solver takes the ones it needs \
-    and ignores the others.
+    ``grad_log_psi`` and ``o_loc`` of the objective function and, for ``SR`` and ``TDVP``, the \
+    index ``int_step`` of the substep of the stepper. A solver takes the ones it needs and \
+    ignores the others.
     """
 
     @property

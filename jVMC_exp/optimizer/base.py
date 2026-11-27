@@ -81,6 +81,7 @@ class AbstractOptimizer(ABC):
         self.o_loc = None
         self._elapsed = 0
         self._sampler_out = (None,) * 3
+        self._int_step = 0
 
     @property
     def output_manager(self):
@@ -107,8 +108,8 @@ class AbstractOptimizer(ABC):
         parameters,
         t,
         *,
-        num_samples=None,
-        int_step=None,
+        num_samples: int | None = None,
+        int_step: int = 0,
         objective_function: AbstractObjectiveFunction,
         **objective_function_kwargs,
     ):
@@ -139,6 +140,7 @@ class AbstractOptimizer(ABC):
         """
         tmp_parameters = self.psi.parameters
         self.psi.parameters = parameters
+        self._int_step = int_step
         if int_step is None or int_step == 0:
             self._elapsed = 0
 
@@ -460,7 +462,8 @@ class Evolution(AbstractOptimizer):
         * ``diagonal_shift``: Constant added to the diagonal, or a callable ``step -> value``.
         * ``diagonal_scale``: Relative increase of the diagonal, or a callable ``step -> value``.
         * ``solver``: Solver of ``jVMC_exp.solver``, called as \
-          ``solver(A, b, grad_log_psi=..., o_loc=..., **solver_state)``.
+          ``solver(A, b, grad_log_psi=..., o_loc=..., int_step=..., **solver_state)``, with \
+          the ``int_step`` of the substep of the stepper.
         * ``store_qgt``: Whether to keep :math:`S`, see ``qgt``.
         * ``compute_tdvp_error``: Whether to compute the TDVP error of every update, which \
           requires ``store_qgt``, see ``get_update()``.
@@ -531,7 +534,7 @@ class Evolution(AbstractOptimizer):
         self._solver_state = dict(
             exact_sampler=isinstance(self.sampler, ExactSampler),
             pad_size=self._params_pad_size,
-            transformation=self._rhs_trans_fn,
+            transformation=self._rhs_trans_fn
         )
 
         self._qgt = None
@@ -640,6 +643,7 @@ class Evolution(AbstractOptimizer):
             b,
             grad_log_psi=objective_function_output.grad_log_psi,
             o_loc=objective_function_output.o_loc,
+            int_step=self._int_step,
             **self.solver_state,
         )
         self.update = (

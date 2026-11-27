@@ -218,6 +218,12 @@ class PinvSNR(Pinv):
     :math:`\\|(\\lambda^+\\circ\\lambda\\circ r-1)\\circ V^\\dagger b\\|/\\|b\\|` is at most \
     ``pinv_tol``. With the default ``pinv_tol`` it ends at ``pinv_cutoff``.
 
+    Within a step of a stepper, the cutoff is adapted only at the first substep, \
+    ``int_step=0``, and the later substeps reuse it, so that all the substeps of a step have the \
+    same cutoff of the eigenvalues. Their residual can then be larger than ``pinv_tol``. With \
+    ``adapt_substeps=True``, the cutoff is adapted at every substep. If no cutoff has been \
+    adapted yet, it is adapted whatever the ``int_step``.
+
     The second factor suppresses the modes whose component of :math:`b` is not resolved by the \
     samples. It is skipped if ``snr_tol`` is zero (default) or the samples are exact \
     (``exact_sampler=True``). The signal-to-noise ratio of the component \
@@ -240,7 +246,10 @@ class PinvSNR(Pinv):
     * ``"gaussian"``: :math:`\\sigma_i^2=\\mathrm{Var}(\\ell)\\,|\\lambda_i|`, which only needs \
       ``o_loc``.
 
-    The dictionary ``info`` of the solution holds ``"residual"``, the final cutoff \
+    Unlike the cutoff of the eigenvalues, the signal-to-noise factor is evaluated anew at every \
+    substep.
+
+    The dictionary ``info`` of the solution holds ``"residual"``, the cutoff that was used \
     ``"pinv_cutoff"``, ``"snr"`` (the array of :math:`\\mathrm{SNR}_i`, or ``None`` if skipped), \
     ``"condition_number"`` (as in ``Pinv``), the eigenvalues ``"spectrum"``, and \
     ``"effective_rank"``, the mean of the regularization factors :math:`r_i`.
@@ -250,6 +259,8 @@ class PinvSNR(Pinv):
           signal-to-noise regularization off.
         * ``pinv_tol``: Target residual of the adaptive cutoff.
         * ``pinv_cutoff``: Smallest value of the adaptive cutoff :math:`\\epsilon`.
+        * ``adapt_substeps``: Whether to adapt the cutoff at every substep of the stepper, \
+          instead of only at the first one.
         * ``snr_mode``: ``"empiric"`` or ``"gaussian"``, not case sensitive.
         * ``diagonalization_mode``, ``T_A``: Diagonalization, see ``Pinv``.
     """
@@ -259,6 +270,7 @@ class PinvSNR(Pinv):
         snr_tol=0,
         pinv_tol=1e-14,
         pinv_cutoff=1e-8,
+        adapt_substeps: bool = False,
         snr_mode: Literal["empiric", "gaussian"] = "empiric",
         diagonalization_mode: Literal["device", "distributed", "host"] = "device",
         T_A: int | None = None,
@@ -268,6 +280,8 @@ class PinvSNR(Pinv):
         self._snr_tol = snr_tol
         self._pinv_tol = pinv_tol
         self.snr_mode = snr_mode
+        self.adapt_substeps = adapt_substeps
+        self._cutoff = None
 
     @property
     def snr_tol(self):
@@ -308,6 +322,7 @@ class PinvSNR(Pinv):
         transformation=None,
         pad_size=0,
         exact_sampler=False,
+        int_step=0,
         **kwargs,
     ):
         """
@@ -326,6 +341,8 @@ class PinvSNR(Pinv):
             * ``pad_size``: Number of rows and columns of padding of :math:`A`.
             * ``exact_sampler``: Whether the samples are exact, which skips the \
               signal-to-noise regularization.
+            * ``int_step``: Index of the substep of the stepper. The cutoff is adapted at \
+              ``int_step=0`` and reused at the other substeps, unless ``adapt_substeps``.
             * ``**kwargs``: Ignored.
 
         Returns:
@@ -350,15 +367,20 @@ class PinvSNR(Pinv):
         inv_ev = jnp.where(jnp.abs(ev / ev[-1]) > 1e-14, 1.0 / ev, 0.0)
 
         b_norm = jnp.linalg.norm(b)
-        residual, cutoff, pinv_ev, effective_rank = self._regularize(
-            snr, ev, inv_ev, Vtb, b_norm, exact_sampler
-        )
+        if not int_step or self.adapt_substeps or self._cutoff is None:
+            residual, self._cutoff, pinv_ev, effective_rank = self._adaptive_regularize(
+                snr, ev, inv_ev, Vtb, b_norm, exact_sampler
+            )
+        else:
+            residual, pinv_ev, effective_rank = self._regularize(
+                snr, self._cutoff, ev, inv_ev, Vtb, b_norm, exact_sampler
+            )
 
         x = _unpad(jnp.dot(V, jnp.pad((pinv_ev * Vtb), (0, pad_size))), pad_size)
 
         info = dict(
             residual=residual.item(),
-            pinv_cutoff=cutoff.item(),
+            pinv_cutoff=self._cutoff.item(),
             snr=snr,
             condition_number=(ev[-1] / jnp.min(jnp.abs(ev))).item(),
             spectrum=ev,
@@ -368,7 +390,7 @@ class PinvSNR(Pinv):
         return x, info
 
     @jax.jit(static_argnums=(0, 6))
-    def _regularize(self, snr, eigenvalues, inv_ev, Vtb, b_norm, exact_sampler):
+    def _adaptive_regularize(self, snr, eigenvalues, inv_ev, Vtb, b_norm, exact_sampler):
         def _step(cutoff):
             cutoff = jnp.maximum(0.8 * cutoff, self.pinv_cutoff)
             regularizer = smooth_cutoff_fn(
@@ -388,3 +410,17 @@ class PinvSNR(Pinv):
             return (residual > self.pinv_tol) & (cutoff > self.pinv_cutoff)
 
         return jax.lax.while_loop(_cond, lambda s: _step(s[1]), _step(1e-2))
+
+    @jax.jit(static_argnums=(0, 7))
+    def _regularize(self, snr, cutoff, eigenvalues, inv_ev, Vtb, b_norm, exact_sampler):
+        regularizer = smooth_cutoff_fn(
+            jnp.abs(eigenvalues / eigenvalues[-1]), cutoff
+        )
+
+        if not exact_sampler and snr is not None:
+            regularizer = regularizer * smooth_cutoff_fn(snr, self.snr_tol)
+
+        pinv_ev = inv_ev * regularizer
+        residual = jnp.linalg.norm((pinv_ev * eigenvalues - 1) * Vtb) / b_norm
+        
+        return residual, pinv_ev, jnp.mean(regularizer)
